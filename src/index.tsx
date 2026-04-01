@@ -6,26 +6,50 @@ import {
 } from '@kinvolk/headlamp-plugin/lib';
 import { CompositeResourceDefinition, getXRScope } from './resources';
 
-// ── Claims visibility ─────────────────────────────────────────────────────────
-// Module-level object updated by ClaimsWatcher on every render cycle.
-// The sidebar filter reads from it; because React re-renders the sidebar
-// whenever react-query data changes, the two stay in sync.
+// ── Sidebar state — updated by CrossplaneWatcher on every render cycle ────────
+// registerSidebarEntryFilter is reactive (re-evaluated when sidebar re-renders),
+// so module-level state is the correct bridge between React and the filter.
 const claimsState = { visible: false };
+
+// Tracks which XRD plurals have already had a sidebar entry registered so we
+// don't call registerSidebarEntry more than once per plural (it appends).
+const registeredXRKinds = new Set<string>();
 
 registerSidebarEntryFilter(entry =>
   entry.name === 'crossplane-claims' && !claimsState.visible ? null : entry
 );
 
-function ClaimsWatcher() {
+function CrossplaneWatcher() {
   const [xrds] = CompositeResourceDefinition.useList();
+
   claimsState.visible =
     xrds?.some(
       xrd => getXRScope(xrd) === 'LegacyCluster' && !!xrd.jsonData?.spec?.claimNames?.kind
     ) ?? false;
+
+  if (xrds) {
+    for (const xrd of xrds) {
+      const plural = xrd.jsonData?.spec?.names?.plural as string | undefined;
+      const kind = xrd.jsonData?.spec?.names?.kind as string | undefined;
+      if (!plural || !kind) continue;
+
+      const entryName = `crossplane-xr-kind-${plural}`;
+      if (!registeredXRKinds.has(entryName)) {
+        registeredXRKinds.add(entryName);
+        registerSidebarEntry({
+          parent: 'crossplane-xrs',
+          name: entryName,
+          label: kind,
+          url: `/crossplane/xrs/${plural}`,
+        });
+      }
+    }
+  }
+
   return null;
 }
 
-registerAppBarAction(<ClaimsWatcher />);
+registerAppBarAction(<CrossplaneWatcher />);
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
@@ -37,6 +61,7 @@ import { FunctionDetailPage, FunctionListPage } from './pages/FunctionListPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ProviderDetailPage, ProviderListPage } from './pages/ProviderListPage';
 import { XRDetailClusterPage, XRDetailNamespacedPage } from './pages/XRDetailPage';
+import { XRKindPage } from './pages/XRKindPage';
 import { XRDDetailPage, XRDListPage } from './pages/XRDListPage';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -154,6 +179,15 @@ registerRoute({
   name: 'crossplane-xrs',
   exact: true,
   component: () => <CompositeResourcesPage />,
+});
+
+// Per-kind list page — one entry per XRD plural
+registerRoute({
+  path: '/crossplane/xrs/:plural',
+  sidebar: 'crossplane-xrs',
+  name: 'crossplane-xr-kind',
+  exact: true,
+  component: () => <XRKindPage />,
 });
 
 registerRoute({
