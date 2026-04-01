@@ -1,4 +1,13 @@
 import { registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
+import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
+import {
+  ConfigurationDetailPage,
+  ConfigurationListPage,
+} from './pages/ConfigurationListPage';
+import { FunctionDetailPage, FunctionListPage } from './pages/FunctionListPage';
+import { OverviewPage } from './pages/OverviewPage';
+import { ProviderDetailPage, ProviderListPage } from './pages/ProviderListPage';
+import { XRDDetailPage, XRDListPage } from './pages/XRDListPage';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
@@ -53,14 +62,13 @@ registerSidebarEntry({
 });
 
 // ── Routes ───────────────────────────────────────────────────────────────────
-// Pages are imported lazily here as stubs — replace with real components in Phase 3.
 
 registerRoute({
   path: '/crossplane/overview',
   sidebar: 'crossplane-overview',
   name: 'crossplane-overview',
   exact: true,
-  component: () => <div>Crossplane Overview — coming soon</div>,
+  component: () => <OverviewPage />,
 });
 
 registerRoute({
@@ -68,7 +76,7 @@ registerRoute({
   sidebar: 'crossplane-xrds',
   name: 'crossplane-xrds',
   exact: true,
-  component: () => <div>XRD List — coming soon</div>,
+  component: () => <XRDListPage />,
 });
 
 registerRoute({
@@ -76,7 +84,7 @@ registerRoute({
   sidebar: 'crossplane-xrds',
   name: 'crossplane-xrd-detail',
   exact: true,
-  component: () => <div>XRD Detail — coming soon</div>,
+  component: () => <XRDDetailPage />,
 });
 
 registerRoute({
@@ -84,7 +92,7 @@ registerRoute({
   sidebar: 'crossplane-compositions',
   name: 'crossplane-compositions',
   exact: true,
-  component: () => <div>Composition List — coming soon</div>,
+  component: () => <CompositionListPage />,
 });
 
 registerRoute({
@@ -92,7 +100,7 @@ registerRoute({
   sidebar: 'crossplane-compositions',
   name: 'crossplane-composition-detail',
   exact: true,
-  component: () => <div>Composition Detail — coming soon</div>,
+  component: () => <CompositionDetailPage />,
 });
 
 registerRoute({
@@ -100,7 +108,7 @@ registerRoute({
   sidebar: 'crossplane-providers',
   name: 'crossplane-providers',
   exact: true,
-  component: () => <div>Provider List — coming soon</div>,
+  component: () => <ProviderListPage />,
 });
 
 registerRoute({
@@ -108,7 +116,7 @@ registerRoute({
   sidebar: 'crossplane-providers',
   name: 'crossplane-provider-detail',
   exact: true,
-  component: () => <div>Provider Detail — coming soon</div>,
+  component: () => <ProviderDetailPage />,
 });
 
 registerRoute({
@@ -116,7 +124,7 @@ registerRoute({
   sidebar: 'crossplane-functions',
   name: 'crossplane-functions',
   exact: true,
-  component: () => <div>Function List — coming soon</div>,
+  component: () => <FunctionListPage />,
 });
 
 registerRoute({
@@ -124,7 +132,7 @@ registerRoute({
   sidebar: 'crossplane-functions',
   name: 'crossplane-function-detail',
   exact: true,
-  component: () => <div>Function Detail — coming soon</div>,
+  component: () => <FunctionDetailPage />,
 });
 
 registerRoute({
@@ -132,7 +140,7 @@ registerRoute({
   sidebar: 'crossplane-configurations',
   name: 'crossplane-configurations',
   exact: true,
-  component: () => <div>Configuration List — coming soon</div>,
+  component: () => <ConfigurationListPage />,
 });
 
 registerRoute({
@@ -140,5 +148,5 @@ registerRoute({
   sidebar: 'crossplane-configurations',
   name: 'crossplane-configuration-detail',
   exact: true,
-  component: () => <div>Configuration Detail — coming soon</div>,
+  component: () => <ConfigurationDetailPage />,
 });
