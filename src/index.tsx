@@ -1,4 +1,31 @@
-import { registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
+import {
+  registerAppBarAction,
+  registerRoute,
+  registerSidebarEntry,
+  registerSidebarEntryFilter,
+} from '@kinvolk/headlamp-plugin/lib';
+import { CompositeResourceDefinition, getXRScope } from './resources';
+
+// ── Claims visibility ─────────────────────────────────────────────────────────
+// Module-level object updated by ClaimsWatcher on every render cycle.
+// The sidebar filter reads from it; because React re-renders the sidebar
+// whenever react-query data changes, the two stay in sync.
+const claimsState = { visible: false };
+
+registerSidebarEntryFilter(entry =>
+  entry.name === 'crossplane-claims' && !claimsState.visible ? null : entry
+);
+
+function ClaimsWatcher() {
+  const [xrds] = CompositeResourceDefinition.useList();
+  claimsState.visible =
+    xrds?.some(
+      xrd => getXRScope(xrd) === 'LegacyCluster' && !!xrd.jsonData?.spec?.claimNames?.kind
+    ) ?? false;
+  return null;
+}
+
+registerAppBarAction(<ClaimsWatcher />);
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';

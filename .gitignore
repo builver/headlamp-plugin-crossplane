@@ -2,3 +2,4 @@ node_modules/
 dist/
 .storybook-out/
 *.tar.gz
+.eslintcache
