@@ -1,32 +1,144 @@
-/*
- * Copyright 2025 The Kubernetes Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+import { registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
 
-import { registerAppBarAction } from '@kinvolk/headlamp-plugin/lib';
+// ── Sidebar ──────────────────────────────────────────────────────────────────
 
-// Below are some imports you may want to use.
-//   See README.md for links to plugin development documentation.
-// import { Headlamp, K8s, useTranslation } from '@kinvolk/headlamp-plugin/lib';
-// import { SectionBox } from '@kinvolk/headlamp-plugin/lib/CommonComponents';
-// import { K8s } from '@kinvolk/headlamp-plugin/lib/K8s';
-// import { Typography } from '@mui/material';
+registerSidebarEntry({
+  parent: null,
+  name: 'crossplane',
+  label: 'Crossplane',
+  url: '/crossplane/overview',
+  icon: 'mdi:cloud-outline',
+});
 
-registerAppBarAction(<span>Hello</span>);
+registerSidebarEntry({
+  parent: 'crossplane',
+  name: 'crossplane-overview',
+  label: 'Overview',
+  url: '/crossplane/overview',
+});
 
-// Example of using i18n (internationalization):
-// function MyComponent() {
-//   const { t } = useTranslation();
-//   return <div>{t('translation_key')}</div>;
-// }
+registerSidebarEntry({
+  parent: 'crossplane',
+  name: 'crossplane-xrds',
+  label: 'XRDs',
+  url: '/crossplane/xrds',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane',
+  name: 'crossplane-compositions',
+  label: 'Compositions',
+  url: '/crossplane/compositions',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane',
+  name: 'crossplane-providers',
+  label: 'Providers',
+  url: '/crossplane/providers',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane',
+  name: 'crossplane-functions',
+  label: 'Functions',
+  url: '/crossplane/functions',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane',
+  name: 'crossplane-configurations',
+  label: 'Configurations',
+  url: '/crossplane/configurations',
+});
+
+// ── Routes ───────────────────────────────────────────────────────────────────
+// Pages are imported lazily here as stubs — replace with real components in Phase 3.
+
+registerRoute({
+  path: '/crossplane/overview',
+  sidebar: 'crossplane-overview',
+  name: 'crossplane-overview',
+  exact: true,
+  component: () => <div>Crossplane Overview — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/xrds',
+  sidebar: 'crossplane-xrds',
+  name: 'crossplane-xrds',
+  exact: true,
+  component: () => <div>XRD List — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/xrds/:name',
+  sidebar: 'crossplane-xrds',
+  name: 'crossplane-xrd-detail',
+  exact: true,
+  component: () => <div>XRD Detail — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/compositions',
+  sidebar: 'crossplane-compositions',
+  name: 'crossplane-compositions',
+  exact: true,
+  component: () => <div>Composition List — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/compositions/:name',
+  sidebar: 'crossplane-compositions',
+  name: 'crossplane-composition-detail',
+  exact: true,
+  component: () => <div>Composition Detail — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/providers',
+  sidebar: 'crossplane-providers',
+  name: 'crossplane-providers',
+  exact: true,
+  component: () => <div>Provider List — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/providers/:name',
+  sidebar: 'crossplane-providers',
+  name: 'crossplane-provider-detail',
+  exact: true,
+  component: () => <div>Provider Detail — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/functions',
+  sidebar: 'crossplane-functions',
+  name: 'crossplane-functions',
+  exact: true,
+  component: () => <div>Function List — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/functions/:name',
+  sidebar: 'crossplane-functions',
+  name: 'crossplane-function-detail',
+  exact: true,
+  component: () => <div>Function Detail — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/configurations',
+  sidebar: 'crossplane-configurations',
+  name: 'crossplane-configurations',
+  exact: true,
+  component: () => <div>Configuration List — coming soon</div>,
+});
+
+registerRoute({
+  path: '/crossplane/configurations/:name',
+  sidebar: 'crossplane-configurations',
+  name: 'crossplane-configuration-detail',
+  exact: true,
+  component: () => <div>Configuration Detail — coming soon</div>,
+});
