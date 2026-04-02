@@ -8,8 +8,7 @@ import {
   SectionBox,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
-import { makeCustomResourceClass } from '@kinvolk/headlamp-plugin/lib/lib/k8s/crd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
 import {
   CompositeResourceDefinition,
@@ -61,98 +60,6 @@ function XRMapDetail({ node }: { node: any }) {
   );
 }
 
-/**
- * Inner component for child resource detail — always mounted so hooks are
- * called unconditionally. Fetches the actual managed resource via a dynamic
- * class built from the CRD plural name.
- */
-function FetchedResourceDetail({
-  apiGroup,
-  version,
-  kind,
-  plural,
-  name,
-  namespace,
-}: {
-  apiGroup: string;
-  version: string;
-  kind: string;
-  plural: string;
-  name: string;
-  namespace?: string;
-}) {
-  const DynClass = useMemo(
-    () =>
-      makeCustomResourceClass({
-        apiInfo: [{ group: apiGroup, version }],
-        kind,
-        pluralName: plural,
-        singularName: kind.toLowerCase(),
-        isNamespaced: !!namespace,
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [apiGroup, version, kind, plural]
-  );
-
-  const [item] = DynClass.useGet(name, namespace);
-
-  if (!item) return <SectionBox title={kind}><p>Loading…</p></SectionBox>;
-
-  return (
-    <>
-      <MainInfoSection resource={item} />
-      <ConditionsTable resource={item.jsonData} />
-    </>
-  );
-}
-
-/**
- * Detail panel for child (composed) resource nodes.
- * Looks up the CRD to get the plural name, then renders FetchedResourceDetail.
- * Falls back to a static NameValueTable while the CRD list is loading or when
- * the CRD is not found (e.g. resource deleted or RBAC restricted).
- */
-function ChildResourceMapDetail({ node }: { node: any }) {
-  const { apiVersion, kind, name, namespace } = (node.data ?? {}) as ResourceRef;
-
-  const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList();
-
-  const parts = (apiVersion ?? '').split('/');
-  const apiGroup = parts.length === 2 ? parts[0] : '';
-  const version = parts.length === 2 ? parts[1] : parts[0];
-
-  const plural = crds?.find(
-    crd =>
-      crd.jsonData?.spec?.names?.kind === kind &&
-      crd.jsonData?.spec?.group === apiGroup
-  )?.jsonData?.spec?.names?.plural as string | undefined;
-
-  if (!plural) {
-    return (
-      <SectionBox title={kind ?? 'Composed Resource'}>
-        <NameValueTable
-          rows={[
-            { name: 'Name', value: name ?? '-' },
-            { name: 'Kind', value: kind ?? '-' },
-            { name: 'API Version', value: apiVersion ?? '-' },
-            { name: 'Namespace', value: namespace ?? '(cluster-scoped)' },
-          ]}
-        />
-      </SectionBox>
-    );
-  }
-
-  return (
-    <FetchedResourceDetail
-      apiGroup={apiGroup}
-      version={version}
-      kind={kind}
-      plural={plural}
-      name={name}
-      namespace={namespace}
-    />
-  );
-}
 
 /**
  * Detail panel for claim (parent) nodes on LegacyCluster XRs.
@@ -265,21 +172,93 @@ function buildListPath(apiVersion: string, plural: string, namespace?: string): 
 
 // ── Graph node factory ────────────────────────────────────────────────────────
 
+// Sentinel returned by _class() on all stubs — must not match any real class.
+const NO_CLASS = { apiGroupName: '__stub__', apiName: '__stub__', kind: '__stub__' };
+
+/**
+ * Minimal KubeObject-like stub for non-XR child nodes (native K8s + CRDs).
+ * KubeObjectDetails only needs kind/metadata/cluster to route to the right
+ * detail component, which then re-fetches the resource itself.
+ */
+function makeKubeObjectLike(apiVersion: string, kind: string, name: string, namespace?: string): any {
+  return {
+    kind,
+    apiVersion,
+    metadata: { name, namespace },
+    cluster: undefined,
+    _class: () => NO_CLASS,
+    getName: () => name,
+    getNamespace: () => namespace,
+  };
+}
+
+/**
+ * Rich KubeObject-like wrapper built from already-fetched raw JSON.
+ * Used for sub-XR nodes so XRMapDetail can read conditions, resourceRefs, etc.
+ */
+function makeXRKubeObjectFromJson(rawJson: any): any {
+  const name: string = rawJson?.metadata?.name ?? '';
+  const namespace: string | undefined = rawJson?.metadata?.namespace;
+  return {
+    kind: rawJson?.kind,
+    apiVersion: rawJson?.apiVersion,
+    metadata: rawJson?.metadata ?? { name, namespace },
+    jsonData: rawJson,
+    cluster: undefined,
+    _class: () => NO_CLASS,
+    getName: () => name,
+    getNamespace: () => namespace,
+  };
+}
+
+function findCrdName(apiVersion: string, kind: string, crds: KubeObject[] | null): string | undefined {
+  if (!crds) return undefined;
+  const [group] = getGroupVersion(apiVersion);
+  const crd = crds.find(
+    c => c.jsonData?.spec?.names?.kind === kind && c.jsonData?.spec?.group === group
+  );
+  // KubeObjectDetails passes this value as the `crd` prop to CustomResourceDetails,
+  // which treats it as a CRD name string passed to CustomResourceDefinition.useGet().
+  return crd?.metadata?.name as string | undefined;
+}
+
 function makeChildNode(
   id: string,
   apiVersion: string,
   kind: string,
   name: string,
   namespace: string | undefined,
+  crds: KubeObject[] | null,
   icon = 'mdi:cube-outline',
+): object {
+  const crdName = findCrdName(apiVersion, kind, crds);
+  const node: any = {
+    id,
+    label: name,
+    subtitle: namespace ? `${kind} · ${namespace}` : kind,
+    icon: <Icon icon={icon} width="100%" height="100%" />,
+    kubeObject: makeKubeObjectLike(apiVersion, kind, name, namespace),
+  };
+  if (crdName) node.customResourceDefinition = crdName;
+  return node;
+}
+
+/** Node factory for child XR nodes — uses fetched rawJson so XRMapDetail works. */
+function makeSubXRNode(
+  id: string,
+  apiVersion: string,
+  kind: string,
+  name: string,
+  namespace: string | undefined,
+  rawJson: any,
 ): object {
   return {
     id,
     label: name,
     subtitle: namespace ? `${kind} · ${namespace}` : kind,
-    icon: <Icon icon={icon} width="100%" height="100%" />,
-    data: { apiVersion, kind, name, namespace },
-    detailsComponent: ChildResourceMapDetail,
+    icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
+    kubeObject: makeXRKubeObjectFromJson(rawJson),
+    detailsComponent: XRMapDetail,
   };
 }
 
@@ -339,7 +318,7 @@ async function processGetEntry(
   if (isXR) {
     if (!plural) {
       if (!ctx.nodeMap.has(compositeId)) {
-        ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, 'mdi:layers-outline'));
+        ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds, 'mdi:layers-outline'));
         addEdge(ctx, parentNodeId, compositeId);
       }
       return [];
@@ -351,7 +330,7 @@ async function processGetEntry(
       rawJson = await ApiProxy.request(path);
     } catch {
       if (!ctx.nodeMap.has(compositeId)) {
-        ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, 'mdi:layers-outline'));
+        ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds, 'mdi:layers-outline'));
         addEdge(ctx, parentNodeId, compositeId);
       }
       return [];
@@ -366,7 +345,7 @@ async function processGetEntry(
     }
     ctx.visited.add(uid);
 
-    ctx.nodeMap.set(uid, makeChildNode(uid, apiVersion, kind, name, namespace, 'mdi:layers-outline'));
+    ctx.nodeMap.set(uid, makeSubXRNode(uid, apiVersion, kind, name, namespace, rawJson));
     addEdge(ctx, parentNodeId, uid);
 
     if (depth >= MAX_DEPTH) return [];
@@ -406,7 +385,7 @@ async function processGetEntry(
     return [];
   }
   ctx.visited.add(compositeId);
-  ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace));
+  ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds));
   addEdge(ctx, parentNodeId, compositeId);
 
   if (depth >= MAX_DEPTH) return [];
@@ -471,7 +450,7 @@ async function processListByOwnerEntry(
       continue;
     }
     ctx.visited.add(compositeId);
-    ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace));
+    ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds));
     addEdge(ctx, parentNodeId, compositeId);
 
     if (depth >= MAX_DEPTH) continue;
