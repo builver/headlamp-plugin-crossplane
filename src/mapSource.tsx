@@ -2,12 +2,15 @@ import { Icon } from '@iconify/react';
 import { ApiProxy, K8s, registerMapSource } from '@kinvolk/headlamp-plugin/lib';
 import {
   ConditionsTable,
+  DateLabel,
   Link,
   MainInfoSection,
   NameValueTable,
   SectionBox,
+  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
+import Event from '@kinvolk/headlamp-plugin/lib/K8s/event';
 import { useEffect, useState } from 'react';
 import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
 import {
@@ -52,10 +55,38 @@ function XRMapDetail({ node }: { node: any }) {
     ...(xrd ? [{ name: 'Composition', value: getCompositionRef(xr, scope) }] : []),
   ];
 
+  const [events] = (Event as any).useList({
+    namespace: xr.metadata.namespace || undefined,
+    fieldSelector: `involvedObject.name=${xr.metadata.name},involvedObject.kind=${kind}`,
+  }) as [any[] | null, any];
+
   return (
     <>
       <MainInfoSection resource={xr} extraInfo={extraInfo} />
       <ConditionsTable resource={xr.jsonData} />
+      <SectionBox title="Events">
+        <Table
+          data={events}
+          loading={events === null}
+          columns={[
+            { header: 'Type', accessorFn: (e: any) => e.type ?? '-' },
+            { header: 'Reason', accessorFn: (e: any) => e.reason ?? '-' },
+            { header: 'Message', accessorFn: (e: any) => e.message ?? '-' },
+            { header: 'Source', accessorFn: (e: any) => e.source?.component ?? '-' },
+            {
+              header: 'Age',
+              accessorFn: (e: any) =>
+                -new Date(e.lastOccurrence ?? e.metadata?.creationTimestamp).getTime(),
+              Cell: ({ row: { original: e } }: any) => (
+                <DateLabel
+                  date={e.lastOccurrence ?? e.metadata?.creationTimestamp}
+                  format="mini"
+                />
+              ),
+            },
+          ]}
+        />
+      </SectionBox>
     </>
   );
 }
