@@ -1,10 +1,13 @@
 import { addIcon } from '@iconify/react';
+import { Icon } from '@iconify/react';
 import {
   registerAppBarAction,
+  registerKubeObjectGlance,
   registerRoute,
   registerSidebarEntry,
   registerSidebarEntryFilter,
 } from '@kinvolk/headlamp-plugin/lib';
+import { Box } from '@mui/material';
 import { useEffect } from 'react';
 
 // Monochrome logo — used for the sidebar entry (adapts to theme via currentColor)
@@ -82,6 +85,31 @@ function CrossplaneWatcher() {
 }
 
 registerAppBarAction(<CrossplaneWatcher />);
+
+// ── XR condition glance ───────────────────────────────────────────────────────
+
+function XRConditionGlance({ node }: { node: any }) {
+  const conditions: Array<{ type: string; status: string; reason?: string }> =
+    node?.kubeObject?.jsonData?.status?.conditions ?? [];
+
+  const synced = conditions.find(c => c.type === 'Synced');
+  const ready = conditions.find(c => c.type === 'Ready');
+
+  if (!synced && !ready) return null;
+
+  const notSynced = synced?.status !== 'True';
+  const relevant = notSynced ? synced : ready;
+  if (!relevant?.reason) return null;
+
+  return (
+    <Box display="flex" alignItems="center" gap={1} fontSize={14} mt={1}>
+      <Icon icon={notSynced ? 'mdi:sync-alert' : 'mdi:heart-pulse'} />
+      {relevant.reason}
+    </Box>
+  );
+}
+
+registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRConditionGlance });
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
