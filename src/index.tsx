@@ -24,7 +24,7 @@ addIcon('crossplane:color', {
   height: 900,
 });
 import { registerCrossplaneMapSource } from './mapSource';
-import { CompositeResourceDefinition, getXRScope } from './resources';
+import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, Provider } from './resources';
 
 // ── Sidebar state — updated by CrossplaneWatcher on every render cycle ────────
 // registerSidebarEntryFilter is reactive (re-evaluated when sidebar re-renders),
@@ -34,6 +34,10 @@ const claimsState = { visible: false };
 // Tracks which XRD plurals have already had a sidebar entry registered so we
 // don't call registerSidebarEntry more than once per plural (it appends).
 const registeredXRKinds = new Set<string>();
+const registeredProviders = new Set<string>();
+const registeredConfigurations = new Set<string>();
+const registeredFunctions = new Set<string>();
+const registeredCompositions = new Set<string>();
 
 // Guard: registerCrossplaneMapSource is idempotent (Redux skips duplicate IDs),
 // but we track this ourselves to avoid re-building the sub-sources array needlessly.
@@ -45,6 +49,10 @@ registerSidebarEntryFilter(entry =>
 
 function CrossplaneWatcher() {
   const [xrds] = CompositeResourceDefinition.useList();
+  const [providers] = Provider.useList();
+  const [configurations] = Configuration.useList();
+  const [functions] = CrossplaneFunction.useList();
+  const [compositions] = Composition.useList();
 
   claimsState.visible =
     xrds?.some(
@@ -68,6 +76,74 @@ function CrossplaneWatcher() {
         });
       }
 
+    }
+  }
+
+  if (providers) {
+    for (const provider of providers) {
+      const providerName = provider.metadata.name;
+      if (!providerName) continue;
+      const entryName = `crossplane-provider-${providerName}`;
+      if (!registeredProviders.has(entryName)) {
+        registeredProviders.add(entryName);
+        registerSidebarEntry({
+          parent: 'crossplane-providers',
+          name: entryName,
+          label: providerName,
+          url: `/crossplane/providers/${providerName}`,
+        });
+      }
+    }
+  }
+
+  if (configurations) {
+    for (const config of configurations) {
+      const configName = config.metadata.name;
+      if (!configName) continue;
+      const entryName = `crossplane-configuration-${configName}`;
+      if (!registeredConfigurations.has(entryName)) {
+        registeredConfigurations.add(entryName);
+        registerSidebarEntry({
+          parent: 'crossplane-configurations',
+          name: entryName,
+          label: configName,
+          url: `/crossplane/configurations/${configName}`,
+        });
+      }
+    }
+  }
+
+  if (functions) {
+    for (const fn of functions) {
+      const fnName = fn.metadata.name;
+      if (!fnName) continue;
+      const entryName = `crossplane-function-${fnName}`;
+      if (!registeredFunctions.has(entryName)) {
+        registeredFunctions.add(entryName);
+        registerSidebarEntry({
+          parent: 'crossplane-functions',
+          name: entryName,
+          label: fnName,
+          url: `/crossplane/functions/${fnName}`,
+        });
+      }
+    }
+  }
+
+  if (compositions) {
+    for (const composition of compositions) {
+      const compositionName = composition.metadata.name;
+      if (!compositionName) continue;
+      const entryName = `crossplane-composition-${compositionName}`;
+      if (!registeredCompositions.has(entryName)) {
+        registeredCompositions.add(entryName);
+        registerSidebarEntry({
+          parent: 'crossplane-compositions',
+          name: entryName,
+          label: compositionName,
+          url: `/crossplane/compositions/${compositionName}`,
+        });
+      }
     }
   }
 
