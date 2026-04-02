@@ -32,6 +32,7 @@ const registeredConfigurations = new Set<string>();
 const registeredFunctions = new Set<string>();
 const registeredCompositions = new Set<string>();
 const registeredMRDs = new Set<string>();
+const registeredMRDGroups = new Set<string>();
 
 // Guard: registerCrossplaneMapSource is idempotent (Redux skips duplicate IDs),
 // but we track this ourselves to avoid re-building the sub-sources array needlessly.
@@ -150,6 +151,8 @@ function CrossplaneWatcher() {
   }
 
   if (mrds && providers) {
+    // Group MRDs by provider so we can detect mixed-scope providers before registering.
+    const mrdsByProvider = new Map<string, Array<{ mrd: (typeof mrds)[number]; providerName: string }>>();
     for (const mrd of mrds) {
       const mrdName = mrd.metadata.name;
       const kind = mrd.jsonData?.spec?.names?.kind;
@@ -164,22 +167,79 @@ function CrossplaneWatcher() {
       if (!ownerProvider) continue;
 
       const providerName = ownerProvider.metadata.name;
-      const entryName = `crossplane-mrd-${mrdName}`;
-      if (!registeredMRDs.has(entryName)) {
-        registeredMRDs.add(entryName);
-        registerSidebarEntry({
-          parent: `crossplane-provider-${providerName}`,
-          name: entryName,
-          label: kind,
-          url: `/crossplane/mrds/${mrdName}`,
-        });
-        registerRoute({
-          path: `/crossplane/mrds/${mrdName}`,
-          sidebar: entryName,
-          name: `crossplane-mrd-detail-${mrdName}`,
-          exact: true,
-          component: () => <MRDDetailPage />,
-        });
+      if (!mrdsByProvider.has(providerName)) mrdsByProvider.set(providerName, []);
+      mrdsByProvider.get(providerName)!.push({ mrd, providerName });
+    }
+
+    for (const [providerName, providerMrds] of mrdsByProvider) {
+      const scopes = new Set(providerMrds.map(({ mrd }) => mrd.jsonData?.spec?.scope ?? 'Cluster'));
+      const hasBothScopes = scopes.has('Namespaced') && scopes.size > 1;
+
+      if (hasBothScopes) {
+        const clusterGroupName = `crossplane-provider-${providerName}-cluster`;
+        const namespacedGroupName = `crossplane-provider-${providerName}-namespaced`;
+        const clusterUrl = `/crossplane/providers/${providerName}/cluster`;
+        const nsUrl = `/crossplane/providers/${providerName}/namespaced`;
+        if (!registeredMRDGroups.has(clusterGroupName)) {
+          registeredMRDGroups.add(clusterGroupName);
+          registerSidebarEntry({
+            parent: `crossplane-provider-${providerName}`,
+            name: clusterGroupName,
+            label: 'Cluster-scoped',
+            url: clusterUrl,
+          });
+          registerRoute({
+            path: clusterUrl,
+            sidebar: clusterGroupName,
+            name: `crossplane-mrd-group-${providerName}-cluster`,
+            exact: true,
+            component: () => <MRDScopeGroupPage />,
+          });
+        }
+        if (!registeredMRDGroups.has(namespacedGroupName)) {
+          registeredMRDGroups.add(namespacedGroupName);
+          registerSidebarEntry({
+            parent: `crossplane-provider-${providerName}`,
+            name: namespacedGroupName,
+            label: 'Namespaced',
+            url: nsUrl,
+          });
+          registerRoute({
+            path: nsUrl,
+            sidebar: namespacedGroupName,
+            name: `crossplane-mrd-group-${providerName}-namespaced`,
+            exact: true,
+            component: () => <MRDScopeGroupPage />,
+          });
+        }
+      }
+
+      for (const { mrd } of providerMrds) {
+        const mrdName = mrd.metadata.name;
+        const kind = mrd.jsonData?.spec?.names?.kind;
+        const scope = mrd.jsonData?.spec?.scope ?? 'Cluster';
+        const entryName = `crossplane-mrd-${mrdName}`;
+        if (!registeredMRDs.has(entryName)) {
+          registeredMRDs.add(entryName);
+          const parentEntry = hasBothScopes
+            ? scope === 'Namespaced'
+              ? `crossplane-provider-${providerName}-namespaced`
+              : `crossplane-provider-${providerName}-cluster`
+            : `crossplane-provider-${providerName}`;
+          registerSidebarEntry({
+            parent: parentEntry,
+            name: entryName,
+            label: kind,
+            url: `/crossplane/mrds/${mrdName}`,
+          });
+          registerRoute({
+            path: `/crossplane/mrds/${mrdName}`,
+            sidebar: entryName,
+            name: `crossplane-mrd-detail-${mrdName}`,
+            exact: true,
+            component: () => <MRDDetailPage />,
+          });
+        }
       }
     }
   }
@@ -224,7 +284,7 @@ function XRConditionGlance({ node }: { node: any }) {
 
 registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRConditionGlance });
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
-import { MRDDetailPage } from './pages/MRDDetailPage';
+import { MRDDetailPage, MRDScopeGroupPage } from './pages/MRDDetailPage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
 import {
