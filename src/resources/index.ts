@@ -74,6 +74,13 @@ export class FunctionRevision extends KubeObject {
 
 // ── crossplane.io/v1alpha1 ──────────────────────────────────────────────────
 
+export class ManagedResourceDefinition extends KubeObject {
+  static kind = 'ManagedResourceDefinition';
+  static apiName = 'managedresourcedefinitions';
+  static apiVersion = 'apiextensions.crossplane.io/v1alpha1';
+  static isNamespaced = false;
+}
+
 export class EnvironmentConfig extends KubeObject {
   static kind = 'EnvironmentConfig';
   static apiName = 'environmentconfigs';

@@ -10,7 +10,7 @@ import {
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import Event from '@kinvolk/headlamp-plugin/lib/K8s/event';
-import { Typography } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
@@ -112,7 +112,7 @@ function PauseAction({ item, xrd, scope }: PauseActionProps) {
       description={isPaused ? 'Resume reconciliation' : 'Pause reconciliation'}
       icon={isPaused ? 'mdi:play' : 'mdi:pause'}
       onClick={handleClick}
-      disabled={loading}
+      iconButtonProps={{ disabled: loading }}
     />
   );
 }

@@ -8,7 +8,7 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { useParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
 import { getHealthyCondition,Provider } from '../resources';
 
@@ -35,7 +35,7 @@ export function ProviderListPage() {
             header: 'Name',
             accessorKey: 'metadata.name',
             Cell: ({ row: { original: item } }) => (
-              <Link routeName="crossplane-provider-detail" params={{ name: item.metadata.name }}>
+              <Link routeName={`crossplane-provider-detail-${item.metadata.name}`}>
                 {item.metadata.name}
               </Link>
             ),
@@ -76,7 +76,8 @@ export function ProviderListPage() {
 }
 
 export function ProviderDetailPage() {
-  const { name } = useParams<{ name: string }>();
+  const location = useLocation();
+  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [provider] = Provider.useGet(name);
 
   const healthy = provider ? getHealthyCondition(provider) : null;

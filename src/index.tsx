@@ -17,7 +17,7 @@ addIcon('crossplane:mono', {
   height: 500,
 });
 import { registerCrossplaneMapSource } from './mapSource';
-import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, Provider } from './resources';
+import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceDefinition, Provider } from './resources';
 
 // ── Sidebar state — updated by CrossplaneWatcher on every render cycle ────────
 // registerSidebarEntryFilter is reactive (re-evaluated when sidebar re-renders),
@@ -31,6 +31,7 @@ const registeredProviders = new Set<string>();
 const registeredConfigurations = new Set<string>();
 const registeredFunctions = new Set<string>();
 const registeredCompositions = new Set<string>();
+const registeredMRDs = new Set<string>();
 
 // Guard: registerCrossplaneMapSource is idempotent (Redux skips duplicate IDs),
 // but we track this ourselves to avoid re-building the sub-sources array needlessly.
@@ -46,6 +47,7 @@ function CrossplaneWatcher() {
   const [configurations] = Configuration.useList();
   const [functions] = CrossplaneFunction.useList();
   const [compositions] = Composition.useList();
+  const [mrds] = ManagedResourceDefinition.useList();
 
   claimsState.visible =
     xrds?.some(
@@ -84,6 +86,13 @@ function CrossplaneWatcher() {
           name: entryName,
           label: providerName,
           url: `/crossplane/providers/${providerName}`,
+        });
+        registerRoute({
+          path: `/crossplane/providers/${providerName}`,
+          sidebar: entryName,
+          name: `crossplane-provider-detail-${providerName}`,
+          exact: true,
+          component: () => <ProviderDetailPage />,
         });
       }
     }
@@ -140,6 +149,41 @@ function CrossplaneWatcher() {
     }
   }
 
+  if (mrds && providers) {
+    for (const mrd of mrds) {
+      const mrdName = mrd.metadata.name;
+      const kind = mrd.jsonData?.spec?.names?.kind;
+      if (!mrdName || !kind) continue;
+
+      const ownerRef = mrd.metadata?.ownerReferences?.find(
+        (ref: any) => ref.kind === 'Provider'
+      );
+      if (!ownerRef) continue;
+
+      const ownerProvider = providers.find(p => p.metadata.uid === ownerRef.uid);
+      if (!ownerProvider) continue;
+
+      const providerName = ownerProvider.metadata.name;
+      const entryName = `crossplane-mrd-${mrdName}`;
+      if (!registeredMRDs.has(entryName)) {
+        registeredMRDs.add(entryName);
+        registerSidebarEntry({
+          parent: `crossplane-provider-${providerName}`,
+          name: entryName,
+          label: kind,
+          url: `/crossplane/mrds/${mrdName}`,
+        });
+        registerRoute({
+          path: `/crossplane/mrds/${mrdName}`,
+          sidebar: entryName,
+          name: `crossplane-mrd-detail-${mrdName}`,
+          exact: true,
+          component: () => <MRDDetailPage />,
+        });
+      }
+    }
+  }
+
   // Register the Crossplane map source once, after XRDs have loaded.
   // useEffect fires after render so xrds is guaranteed to be populated here.
   // We use xrds as the dependency so it re-evaluates if the list grows, but
@@ -180,6 +224,7 @@ function XRConditionGlance({ node }: { node: any }) {
 
 registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRConditionGlance });
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
+import { MRDDetailPage } from './pages/MRDDetailPage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
 import {
@@ -344,14 +389,6 @@ registerRoute({
   name: 'crossplane-providers',
   exact: true,
   component: () => <ProviderListPage />,
-});
-
-registerRoute({
-  path: '/crossplane/providers/:name',
-  sidebar: 'crossplane-providers',
-  name: 'crossplane-provider-detail',
-  exact: true,
-  component: () => <ProviderDetailPage />,
 });
 
 registerRoute({
