@@ -192,6 +192,28 @@ export function makeClaimClass(xrd: KubeObject) {
 }
 
 /**
+ * Creates a dynamic KubeObject class for the Managed Resources defined by an MRD.
+ */
+export function makeMRClass(mrd: KubeObject) {
+  const spec = mrd.jsonData?.spec;
+  const isNamespaced = spec?.scope === 'Namespaced';
+
+  const versions: any[] = (spec?.versions ?? []).filter((v: any) => v.served !== false);
+  const apiInfo =
+    versions.length > 0
+      ? versions.map((v: any) => ({ group: spec.group, version: v.name }))
+      : [{ group: spec.group, version: 'v1' }];
+
+  return makeCustomResourceClass({
+    apiInfo,
+    kind: spec.names.kind,
+    pluralName: spec.names.plural,
+    singularName: spec.names.singular ?? spec.names.kind.toLowerCase(),
+    isNamespaced,
+  });
+}
+
+/**
  * Returns the composition reference name from an XR, handling v1 (flat)
  * and v2 (nested under spec.crossplane) layouts.
  */

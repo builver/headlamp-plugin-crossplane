@@ -8,7 +8,7 @@ import {
 import { Box, FormControl, InputLabel, MenuItem, Select } from '@mui/material';
 import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ManagedResourceDefinition, Provider } from '../resources';
+import { ManagedResourceDefinition } from '../resources';
 
 export function MRDDetailPage() {
   const location = useLocation();
@@ -31,35 +31,34 @@ export function MRDDetailPage() {
   return (
     <>
       <MainInfoSection resource={mrd} extraInfo={extraInfo} />
-{mrd && <ConditionsTable resource={mrd.jsonData} />}
+      {mrd && <ConditionsTable resource={mrd.jsonData} />}
     </>
   );
 }
 
 export function MRDListPage() {
   const [mrds] = ManagedResourceDefinition.useList();
-  const [providers] = Provider.useList();
   const [selectedProvider, setSelectedProvider] = useState<string>('');
   const [selectedScope, setSelectedScope] = useState<string>('');
 
   const providerNames: string[] = useMemo(() => {
-    if (!mrds || !providers) return [];
+    if (!mrds) return [];
     const names = new Set<string>();
     for (const mrd of mrds) {
-      const ownerRef = mrd.metadata?.ownerReferences?.find((r: any) => r.kind === 'Provider');
-      const p = providers.find(p => p.metadata.uid === ownerRef?.uid);
-      if (p?.metadata.name) names.add(p.metadata.name);
+      const name = mrd.metadata?.ownerReferences?.find((r: any) => r.kind === 'Provider')?.name;
+      if (name) names.add(name);
     }
     return [...names].sort();
-  }, [mrds, providers]);
+  }, [mrds]);
 
   const filtered = useMemo(() => {
-    if (!mrds || !providers) return null;
+    if (!mrds) return null;
     return mrds.filter(mrd => {
       if (selectedProvider) {
-        const ownerRef = mrd.metadata?.ownerReferences?.find((r: any) => r.kind === 'Provider');
-        const p = providers.find(p => p.metadata.uid === ownerRef?.uid);
-        if (p?.metadata.name !== selectedProvider) return false;
+        const ownerName = mrd.metadata?.ownerReferences?.find(
+          (r: any) => r.kind === 'Provider'
+        )?.name;
+        if (ownerName !== selectedProvider) return false;
       }
       if (selectedScope) {
         const scope = mrd.jsonData?.spec?.scope ?? 'Cluster';
@@ -68,7 +67,7 @@ export function MRDListPage() {
       }
       return true;
     });
-  }, [mrds, providers, selectedProvider, selectedScope]);
+  }, [mrds, selectedProvider, selectedScope]);
 
   return (
     <SectionBox title="Managed Resources">
@@ -106,11 +105,20 @@ export function MRDListPage() {
         loading={filtered === null}
         columns={[
           {
-            header: 'Kind',
+            header: 'Resource',
             accessorFn: (item: any) => item.jsonData?.spec?.names?.kind ?? '-',
             Cell: ({ row: { original: item } }: any) => (
-              <Link routeName={`crossplane-mrd-detail-${item.metadata.name}`}>
+              <Link routeName="crossplane-mr-list" params={{ mrdName: item.metadata.name }}>
                 {item.jsonData?.spec?.names?.kind ?? item.metadata.name}
+              </Link>
+            ),
+          },
+          {
+            header: 'Definition',
+            accessorFn: (item: any) => item.metadata.name,
+            Cell: ({ row: { original: item } }: any) => (
+              <Link routeName={`crossplane-mrd-detail-${item.metadata.name}`}>
+                {item.metadata.name}
               </Link>
             ),
           },
@@ -119,16 +127,20 @@ export function MRDListPage() {
             accessorFn: (item: any) => item.jsonData?.spec?.group ?? '-',
           },
           {
-            header: 'Plural',
-            accessorFn: (item: any) => item.jsonData?.spec?.names?.plural ?? '-',
-          },
-          {
             header: 'Provider',
-            accessorFn: (item: any) => {
-              const ownerRef = item.metadata?.ownerReferences?.find(
+            accessorFn: (item: any) =>
+              item.metadata?.ownerReferences?.find((r: any) => r.kind === 'Provider')?.name ?? '-',
+            Cell: ({ row: { original: item } }: any) => {
+              const providerName = item.metadata?.ownerReferences?.find(
                 (r: any) => r.kind === 'Provider'
+              )?.name;
+              return providerName ? (
+                <Link routeName={`crossplane-provider-detail-${providerName}`}>
+                  {providerName}
+                </Link>
+              ) : (
+                '-'
               );
-              return ownerRef?.name ?? '-';
             },
           },
           {

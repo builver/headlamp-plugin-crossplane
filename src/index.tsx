@@ -198,6 +198,11 @@ function XRConditionGlance({ node }: { node: any }) {
 registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRConditionGlance });
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
 import { MRDDetailPage, MRDListPage } from './pages/MRDDetailPage';
+import {
+  MRInstanceDetailClusterPage,
+  MRInstanceDetailNamespacedPage,
+  MRInstanceListPage,
+} from './pages/MRInstancePage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
 import {
@@ -369,6 +374,30 @@ registerRoute({
   name: 'crossplane-mrds-list',
   exact: true,
   component: () => <MRDListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/mrds/:mrdName/resources',
+  sidebar: 'crossplane-mrds',
+  name: 'crossplane-mr-list',
+  exact: true,
+  component: () => <MRInstanceListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/mrds/:mrdName/resources/:name',
+  sidebar: 'crossplane-mrds',
+  name: 'crossplane-mr-detail-cluster',
+  exact: true,
+  component: () => <MRInstanceDetailClusterPage />,
+});
+
+registerRoute({
+  path: '/crossplane/mrds/:mrdName/resources/:namespace/:name',
+  sidebar: 'crossplane-mrds',
+  name: 'crossplane-mr-detail-namespaced',
+  exact: true,
+  component: () => <MRInstanceDetailNamespacedPage />,
 });
 
 registerRoute({
