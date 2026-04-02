@@ -197,7 +197,6 @@ import { FunctionDetailPage, FunctionListPage } from './pages/FunctionListPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ProviderDetailPage, ProviderListPage } from './pages/ProviderListPage';
 import { XRDetailClusterPage, XRDetailNamespacedPage } from './pages/XRDetailPage';
-import { XRDDetailPage, XRDListPage } from './pages/XRDListPage';
 import { XRKindPage } from './pages/XRKindPage';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -215,13 +214,6 @@ registerSidebarEntry({
   name: 'crossplane-overview',
   label: 'Overview',
   url: '/crossplane/overview',
-});
-
-registerSidebarEntry({
-  parent: 'crossplane',
-  name: 'crossplane-xrds',
-  label: 'XRDs',
-  url: '/crossplane/xrds',
 });
 
 registerSidebarEntry({
@@ -274,22 +266,6 @@ registerRoute({
   name: 'crossplane-overview',
   exact: true,
   component: () => <OverviewPage />,
-});
-
-registerRoute({
-  path: '/crossplane/xrds',
-  sidebar: 'crossplane-xrds',
-  name: 'crossplane-xrds',
-  exact: true,
-  component: () => <XRDListPage />,
-});
-
-registerRoute({
-  path: '/crossplane/xrds/:name',
-  sidebar: 'crossplane-xrds',
-  name: 'crossplane-xrd-detail',
-  exact: true,
-  component: () => <XRDDetailPage />,
 });
 
 registerRoute({

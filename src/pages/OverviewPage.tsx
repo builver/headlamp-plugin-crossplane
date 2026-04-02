@@ -5,7 +5,6 @@ import { Box } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import React from 'react';
 import {
-  CompositeResourceDefinition,
   Composition,
   Configuration,
   CrossplaneFunction,
@@ -69,7 +68,6 @@ function OverviewTile({ label, route, items }: OverviewTileProps) {
 }
 
 export function OverviewPage() {
-  const [xrds] = CompositeResourceDefinition.useList();
   const [compositions] = Composition.useList();
   const [providers] = Provider.useList();
   const [functions] = CrossplaneFunction.useList();
@@ -88,7 +86,6 @@ export function OverviewPage() {
   );
 
   const tiles = [
-    { label: 'XRDs', route: 'crossplane-xrds', items: xrds },
     { label: 'Compositions', route: 'crossplane-compositions', items: compositions },
     { label: 'Providers', route: 'crossplane-providers', items: providers },
     { label: 'Functions', route: 'crossplane-functions', items: functions },
