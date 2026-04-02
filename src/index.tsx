@@ -1,5 +1,4 @@
 import { addIcon } from '@iconify/react';
-import { Icon } from '@iconify/react';
 import {
   registerAppBarAction,
   registerKubeObjectGlance,
@@ -16,6 +15,7 @@ addIcon('crossplane:mono', {
   width: 500,
   height: 500,
 });
+import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
 import { registerCrossplaneMapSource } from './mapSource';
 import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceDefinition, Provider } from './resources';
 
@@ -262,22 +262,15 @@ registerAppBarAction(<CrossplaneWatcher />);
 // ── XR condition glance ───────────────────────────────────────────────────────
 
 function XRConditionGlance({ node }: { node: any }) {
-  const conditions: Array<{ type: string; status: string; reason?: string }> =
-    node?.kubeObject?.jsonData?.status?.conditions ?? [];
+  const item = node?.kubeObject;
+  const conditions: Array<{ type: string }> = item?.jsonData?.status?.conditions ?? [];
 
-  const synced = conditions.find(c => c.type === 'Synced');
-  const ready = conditions.find(c => c.type === 'Ready');
-
-  if (!synced && !ready) return null;
-
-  const notSynced = synced?.status !== 'True';
-  const relevant = notSynced ? synced : ready;
-  if (!relevant?.reason) return null;
+  if (!conditions.some(c => c.type === 'Ready' || c.type === 'Synced')) return null;
 
   return (
-    <Box display="flex" alignItems="center" gap={1} fontSize={14} mt={1}>
-      <Icon icon={notSynced ? 'mdi:sync-alert' : 'mdi:heart-pulse'} />
-      {relevant.reason}
+    <Box display="flex" alignItems="center" gap={1} mt={1}>
+      <ReadyStatus item={item} />
+      <SyncedStatus item={item} />
     </Box>
   );
 }
