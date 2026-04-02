@@ -1,4 +1,5 @@
 import {
+  ActionButton,
   ConditionsTable,
   DateLabel,
   Link,
@@ -6,10 +7,11 @@ import {
   SectionBox,
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import Event from '@kinvolk/headlamp-plugin/lib/K8s/event';
-import { Box, Typography } from '@mui/material';
-import { useMemo } from 'react';
+import { Typography } from '@mui/material';
+import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
 import {
@@ -59,6 +61,60 @@ export function XRDetailNamespacedPage() {
     );
 
   return <XRDetailInner xrd={xrd} name={name} namespace={namespace} />;
+}
+
+// ── Pause / unpause action ────────────────────────────────────────────────────
+
+interface PauseActionProps {
+  item: KubeObject;
+  xrd: KubeObject;
+  scope: XRScope;
+}
+
+function PauseAction({ item, xrd, scope }: PauseActionProps) {
+  const isPaused = item.metadata?.annotations?.['crossplane.io/paused'] === 'true';
+  const [loading, setLoading] = useState(false);
+
+  async function handleClick() {
+    const spec = xrd.jsonData?.spec;
+    const versions: any[] = (spec?.versions ?? []).filter((v: any) => v.served !== false);
+    const version = versions[0]?.name;
+    const group = spec?.group;
+    const plural = spec?.names?.plural;
+    const { name, namespace } = item.metadata;
+
+    const basePath = `/apis/${group}/${version}`;
+    const path =
+      scope === 'Namespaced' && namespace
+        ? `${basePath}/namespaces/${namespace}/${plural}/${name}`
+        : `${basePath}/${plural}/${name}`;
+
+    const patch = {
+      metadata: {
+        annotations: { 'crossplane.io/paused': isPaused ? null : 'true' },
+      },
+    };
+
+    setLoading(true);
+    try {
+      await ApiProxy.request(path, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/merge-patch+json' },
+        body: JSON.stringify(patch),
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <ActionButton
+      description={isPaused ? 'Resume reconciliation' : 'Pause reconciliation'}
+      icon={isPaused ? 'mdi:play' : 'mdi:pause'}
+      onClick={handleClick}
+      disabled={loading}
+    />
+  );
 }
 
 // ── Events section ────────────────────────────────────────────────────────────
@@ -221,7 +277,11 @@ function XRDetailInner({ xrd, name, namespace }: XRDetailInnerProps) {
 
   return (
     <>
-      <MainInfoSection resource={item} extraInfo={extraInfo} />
+      <MainInfoSection
+        resource={item}
+        extraInfo={extraInfo}
+        actions={item ? [<PauseAction item={item} xrd={xrd} scope={scope} />] : []}
+      />
       {item && (
         <>
           <XRTopologySection item={item} xrd={xrd} scope={scope} />
