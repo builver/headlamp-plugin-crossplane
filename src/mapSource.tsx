@@ -1,22 +1,15 @@
 import { Icon } from '@iconify/react';
 import { ApiProxy, K8s, registerMapSource } from '@kinvolk/headlamp-plugin/lib';
 import {
-  ConditionsTable,
-  DateLabel,
   Link,
-  MainInfoSection,
   NameValueTable,
   SectionBox,
-  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
-import Event from '@kinvolk/headlamp-plugin/lib/K8s/event';
 import { useEffect, useState } from 'react';
-import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
+import { XRDetailInner } from './pages/XRDetailPage';
 import {
   CompositeResourceDefinition,
-  getCompositionRef,
-  getResponsiveCondition,
   getXRScope,
   makeXRClass,
   XRScope,
@@ -35,8 +28,7 @@ interface ResourceRef {
 
 /**
  * Detail panel for XR nodes — shown when the user clicks an XR in the Map.
- * Uses the kubeObject already stored on the node; looks up the XRD for scope /
- * composition info.
+ * Delegates to XRDetailInner so the map and the sidebar detail page are identical.
  */
 function XRMapDetail({ node }: { node: any }) {
   const xr = node.kubeObject as KubeObject;
@@ -44,50 +36,15 @@ function XRMapDetail({ node }: { node: any }) {
 
   const kind = xr.jsonData?.kind as string | undefined;
   const xrd = xrds?.find(x => x.jsonData?.spec?.names?.kind === kind) ?? null;
-  const scope: XRScope = xrd ? getXRScope(xrd) : 'LegacyCluster';
-  const responsive = getResponsiveCondition(xr);
 
-  const extraInfo = [
-    { name: 'Ready', value: <ReadyStatus item={xr} /> },
-    { name: 'Synced', value: <SyncedStatus item={xr} /> },
-    ...(responsive ? [{ name: 'Responsive', value: responsive.status }] : []),
-    { name: 'Scope', value: scope },
-    ...(xrd ? [{ name: 'Composition', value: getCompositionRef(xr, scope) }] : []),
-  ];
-
-  const [events] = (Event as any).useList({
-    namespace: xr.metadata.namespace || undefined,
-    fieldSelector: `involvedObject.name=${xr.metadata.name},involvedObject.kind=${kind}`,
-  }) as [any[] | null, any];
+  if (!xrd) return null;
 
   return (
-    <>
-      <MainInfoSection resource={xr} extraInfo={extraInfo} />
-      <ConditionsTable resource={xr.jsonData} />
-      <SectionBox title="Events">
-        <Table
-          data={events}
-          loading={events === null}
-          columns={[
-            { header: 'Type', accessorFn: (e: any) => e.type ?? '-' },
-            { header: 'Reason', accessorFn: (e: any) => e.reason ?? '-' },
-            { header: 'Message', accessorFn: (e: any) => e.message ?? '-' },
-            { header: 'Source', accessorFn: (e: any) => e.source?.component ?? '-' },
-            {
-              header: 'Age',
-              accessorFn: (e: any) =>
-                -new Date(e.lastOccurrence ?? e.metadata?.creationTimestamp).getTime(),
-              Cell: ({ row: { original: e } }: any) => (
-                <DateLabel
-                  date={e.lastOccurrence ?? e.metadata?.creationTimestamp}
-                  format="mini"
-                />
-              ),
-            },
-          ]}
-        />
-      </SectionBox>
-    </>
+    <XRDetailInner
+      xrd={xrd}
+      name={xr.metadata.name}
+      namespace={xr.metadata.namespace || undefined}
+    />
   );
 }
 

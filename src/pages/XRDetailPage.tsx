@@ -2,7 +2,6 @@ import {
   ActionButton,
   ConditionsTable,
   DateLabel,
-  Link,
   MainInfoSection,
   SectionBox,
   Table,
@@ -10,7 +9,6 @@ import {
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import Event from '@kinvolk/headlamp-plugin/lib/K8s/event';
-import { Box, Typography } from '@mui/material';
 import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
@@ -158,87 +156,6 @@ function XREventsSection({ item, kind }: XREventsSectionProps) {
   );
 }
 
-// ── Resource topology section ─────────────────────────────────────────────────
-
-interface ResourceRef {
-  apiVersion: string;
-  kind: string;
-  name: string;
-  namespace?: string;
-}
-
-interface XRTopologySectionProps {
-  item: KubeObject;
-  xrd: KubeObject;
-  scope: XRScope;
-}
-
-function XRTopologySection({ item, xrd, scope }: XRTopologySectionProps) {
-  // Child refs differ between v1 (LegacyCluster) and v2 XRDs
-  const childRefs: ResourceRef[] =
-    scope === 'LegacyCluster'
-      ? (item.jsonData?.spec?.resourceRefs ?? [])
-      : (item.jsonData?.spec?.crossplane?.resourceRefs ?? []);
-
-  // Parent claim only exists for v1 LegacyCluster XRs
-  const claimRef = scope === 'LegacyCluster' ? item.jsonData?.spec?.claimRef : null;
-  const claimPlural: string | undefined = xrd.jsonData?.spec?.claimNames?.plural;
-
-  if (!childRefs.length && !claimRef) return null;
-
-  return (
-    <SectionBox title="Resource Topology">
-      {claimRef && (
-        <Box mb={childRefs.length ? 3 : 0}>
-          <Typography variant="subtitle2" gutterBottom>
-            Parent Claim
-          </Typography>
-          <Box display="flex" gap={1} alignItems="center" pl={1}>
-            <Typography variant="body2" color="textSecondary">
-              {claimRef.kind}
-            </Typography>
-            {claimPlural && claimRef.namespace ? (
-              <Link
-                routeName="crossplane-claim-detail"
-                params={{
-                  plural: claimPlural,
-                  namespace: claimRef.namespace,
-                  name: claimRef.name,
-                }}
-              >
-                {claimRef.name}
-              </Link>
-            ) : (
-              <Typography variant="body2">{claimRef.name}</Typography>
-            )}
-            {claimRef.namespace && (
-              <Typography variant="body2" color="textSecondary">
-                ({claimRef.namespace})
-              </Typography>
-            )}
-          </Box>
-        </Box>
-      )}
-      {childRefs.length > 0 && (
-        <>
-          <Typography variant="subtitle2" gutterBottom>
-            Composed Resources
-          </Typography>
-          <Table
-            data={childRefs}
-            columns={[
-              { header: 'Kind', accessorKey: 'kind' },
-              { header: 'Name', accessorKey: 'name' },
-              { header: 'API Version', accessorKey: 'apiVersion' },
-              { header: 'Namespace', accessorFn: (r: ResourceRef) => r.namespace ?? '-' },
-            ]}
-          />
-        </>
-      )}
-    </SectionBox>
-  );
-}
-
 // ── Inner component — always called with a resolved XRD ──────────────────────
 
 interface XRDetailInnerProps {
@@ -247,7 +164,7 @@ interface XRDetailInnerProps {
   namespace?: string;
 }
 
-function XRDetailInner({ xrd, name, namespace }: XRDetailInnerProps) {
+export function XRDetailInner({ xrd, name, namespace }: XRDetailInnerProps) {
   const scope: XRScope = getXRScope(xrd);
   const DynClass = useMemo(() => makeXRClass(xrd), [xrd.metadata.uid]);
   const [item] = DynClass.useGet(name, namespace);
@@ -284,7 +201,6 @@ function XRDetailInner({ xrd, name, namespace }: XRDetailInnerProps) {
       />
       {item && (
         <>
-          <XRTopologySection item={item} xrd={xrd} scope={scope} />
           <ConditionsTable resource={item.jsonData} />
           <XREventsSection item={item} kind={kind} />
         </>
