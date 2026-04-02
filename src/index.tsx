@@ -196,6 +196,7 @@ import {
 import { FunctionDetailPage, FunctionListPage } from './pages/FunctionListPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ProviderDetailPage, ProviderListPage } from './pages/ProviderListPage';
+import { XRDDetailPage } from './pages/XRDDetailPage';
 import { XRDetailClusterPage, XRDetailNamespacedPage } from './pages/XRDetailPage';
 import { XRKindPage } from './pages/XRKindPage';
 
@@ -266,6 +267,14 @@ registerRoute({
   name: 'crossplane-overview',
   exact: true,
   component: () => <OverviewPage />,
+});
+
+registerRoute({
+  path: '/crossplane/xrds/:name',
+  sidebar: 'crossplane-xrs',
+  name: 'crossplane-xrd-detail',
+  exact: true,
+  component: () => <XRDDetailPage />,
 });
 
 registerRoute({
