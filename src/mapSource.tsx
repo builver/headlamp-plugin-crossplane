@@ -658,7 +658,7 @@ export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
   registerMapSource({
     id: 'crossplane',
     label: 'Crossplane',
-    icon: <Icon icon="crossplane:color" width="100%" height="100%" />,
+    icon: <Icon icon="logos:crossplane-icon" width="100%" height="100%" />,
     sources: subSources,
   } as any);
 }
