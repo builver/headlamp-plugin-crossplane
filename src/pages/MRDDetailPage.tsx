@@ -5,7 +5,8 @@ import {
   SectionBox,
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
-import { Box, Chip } from '@mui/material';
+import { Box, FormControl, InputLabel, MenuItem, Select } from '@mui/material';
+import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ManagedResourceDefinition, Provider } from '../resources';
 
@@ -30,52 +31,79 @@ export function MRDDetailPage() {
   return (
     <>
       <MainInfoSection resource={mrd} extraInfo={extraInfo} />
-      {scope && (
-        <Box mt={1} ml={2}>
-          <Chip
-            label={scope === 'Namespaced' ? 'Namespaced' : 'Cluster-scoped'}
-            color={scope === 'Namespaced' ? 'primary' : 'default'}
-            size="small"
-          />
-        </Box>
-      )}
-      {mrd && <ConditionsTable resource={mrd.jsonData} />}
+{mrd && <ConditionsTable resource={mrd.jsonData} />}
     </>
   );
 }
 
-export function MRDScopeGroupPage() {
-  const location = useLocation();
-  const parts = location.pathname.split('/').filter(Boolean);
-  // path: /crossplane/providers/<providerName>/cluster or /namespaced
-  const scopeSegment = parts[parts.length - 1];
-  const providerName = parts[parts.length - 2];
-  const isNamespaced = scopeSegment === 'namespaced';
-
+export function MRDListPage() {
   const [mrds] = ManagedResourceDefinition.useList();
   const [providers] = Provider.useList();
+  const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [selectedScope, setSelectedScope] = useState<string>('');
 
-  const filteredMRDs =
-    mrds && providers
-      ? mrds.filter(mrd => {
-          const ownerRef = mrd.metadata?.ownerReferences?.find(
-            (ref: any) => ref.kind === 'Provider'
-          );
-          if (!ownerRef) return false;
-          const ownerProvider = providers.find(p => p.metadata.uid === ownerRef.uid);
-          if (!ownerProvider || ownerProvider.metadata.name !== providerName) return false;
-          const mrdScope = mrd.jsonData?.spec?.scope ?? 'Cluster';
-          return isNamespaced ? mrdScope === 'Namespaced' : mrdScope !== 'Namespaced';
-        })
-      : null;
+  const providerNames: string[] = useMemo(() => {
+    if (!mrds || !providers) return [];
+    const names = new Set<string>();
+    for (const mrd of mrds) {
+      const ownerRef = mrd.metadata?.ownerReferences?.find((r: any) => r.kind === 'Provider');
+      const p = providers.find(p => p.metadata.uid === ownerRef?.uid);
+      if (p?.metadata.name) names.add(p.metadata.name);
+    }
+    return [...names].sort();
+  }, [mrds, providers]);
 
-  const title = `${isNamespaced ? 'Namespaced' : 'Cluster-scoped'} Resources`;
+  const filtered = useMemo(() => {
+    if (!mrds || !providers) return null;
+    return mrds.filter(mrd => {
+      if (selectedProvider) {
+        const ownerRef = mrd.metadata?.ownerReferences?.find((r: any) => r.kind === 'Provider');
+        const p = providers.find(p => p.metadata.uid === ownerRef?.uid);
+        if (p?.metadata.name !== selectedProvider) return false;
+      }
+      if (selectedScope) {
+        const scope = mrd.jsonData?.spec?.scope ?? 'Cluster';
+        if (selectedScope === 'Namespaced' && scope !== 'Namespaced') return false;
+        if (selectedScope === 'Cluster' && scope === 'Namespaced') return false;
+      }
+      return true;
+    });
+  }, [mrds, providers, selectedProvider, selectedScope]);
 
   return (
-    <SectionBox title={title}>
+    <SectionBox title="Managed Resources">
+      <Box display="flex" gap={2} mb={2}>
+        <FormControl size="small" sx={{ minWidth: 200 }}>
+          <InputLabel>Provider</InputLabel>
+          <Select
+            value={selectedProvider}
+            label="Provider"
+            onChange={e => setSelectedProvider(e.target.value)}
+          >
+            <MenuItem value="">All</MenuItem>
+            {providerNames.map(n => (
+              <MenuItem key={n} value={n}>
+                {n}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Scope</InputLabel>
+          <Select
+            value={selectedScope}
+            label="Scope"
+            onChange={e => setSelectedScope(e.target.value)}
+          >
+            <MenuItem value="">All</MenuItem>
+            <MenuItem value="Cluster">Cluster</MenuItem>
+            <MenuItem value="Namespaced">Namespaced</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
       <Table
-        data={filteredMRDs}
-        loading={filteredMRDs === null}
+        data={filtered}
+        loading={filtered === null}
         columns={[
           {
             header: 'Kind',
@@ -93,6 +121,19 @@ export function MRDScopeGroupPage() {
           {
             header: 'Plural',
             accessorFn: (item: any) => item.jsonData?.spec?.names?.plural ?? '-',
+          },
+          {
+            header: 'Provider',
+            accessorFn: (item: any) => {
+              const ownerRef = item.metadata?.ownerReferences?.find(
+                (r: any) => r.kind === 'Provider'
+              );
+              return ownerRef?.name ?? '-';
+            },
+          },
+          {
+            header: 'Scope',
+            accessorFn: (item: any) => item.jsonData?.spec?.scope ?? 'Cluster',
           },
         ]}
       />
