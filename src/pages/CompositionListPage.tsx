@@ -9,7 +9,7 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { useParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { ReadyStatus } from '../components/ConditionStatus';
 import { Composition } from '../resources';
 
@@ -43,10 +43,7 @@ export function CompositionListPage() {
             header: 'Name',
             accessorKey: 'metadata.name',
             Cell: ({ row: { original: item } }) => (
-              <Link
-                routeName="crossplane-composition-detail"
-                params={{ name: item.metadata.name }}
-              >
+              <Link routeName={`crossplane-composition-detail-${item.metadata.name}`}>
                 {item.metadata.name}
               </Link>
             ),
@@ -77,7 +74,8 @@ export function CompositionListPage() {
 }
 
 export function CompositionDetailPage() {
-  const { name } = useParams<{ name: string }>();
+  const location = useLocation();
+  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [comp] = Composition.useGet(name);
 
   const compTypeRef = comp?.jsonData?.spec?.compositeTypeRef;

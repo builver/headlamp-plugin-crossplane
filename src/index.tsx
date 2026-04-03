@@ -69,6 +69,13 @@ function CrossplaneWatcher() {
           label: kind,
           url: `/crossplane/xrs/${plural}`,
         });
+        registerRoute({
+          path: `/crossplane/xrs/${plural}`,
+          sidebar: entryName,
+          name: entryName,
+          exact: true,
+          component: () => <XRKindPage />,
+        });
       }
 
     }
@@ -111,6 +118,13 @@ function CrossplaneWatcher() {
           label: configName,
           url: `/crossplane/configurations/${configName}`,
         });
+        registerRoute({
+          path: `/crossplane/configurations/${configName}`,
+          sidebar: entryName,
+          name: `crossplane-configuration-detail-${configName}`,
+          exact: true,
+          component: () => <ConfigurationDetailPage />,
+        });
       }
     }
   }
@@ -128,6 +142,13 @@ function CrossplaneWatcher() {
           label: fnName,
           url: `/crossplane/functions/${fnName}`,
         });
+        registerRoute({
+          path: `/crossplane/functions/${fnName}`,
+          sidebar: entryName,
+          name: `crossplane-function-detail-${fnName}`,
+          exact: true,
+          component: () => <FunctionDetailPage />,
+        });
       }
     }
   }
@@ -144,6 +165,13 @@ function CrossplaneWatcher() {
           name: entryName,
           label: compositionName,
           url: `/crossplane/compositions/${compositionName}`,
+        });
+        registerRoute({
+          path: `/crossplane/compositions/${compositionName}`,
+          sidebar: entryName,
+          name: `crossplane-composition-detail-${compositionName}`,
+          exact: true,
+          component: () => <CompositionDetailPage />,
         });
       }
     }
@@ -308,13 +336,6 @@ registerRoute({
   component: () => <CompositionListPage />,
 });
 
-registerRoute({
-  path: '/crossplane/compositions/:name',
-  sidebar: 'crossplane-compositions',
-  name: 'crossplane-composition-detail',
-  exact: true,
-  component: () => <CompositionDetailPage />,
-});
 
 // Composite Resources (cluster-scoped: Cluster + LegacyCluster)
 registerRoute({
@@ -325,14 +346,6 @@ registerRoute({
   component: () => <CompositeResourcesPage />,
 });
 
-// Per-kind list page — one entry per XRD plural
-registerRoute({
-  path: '/crossplane/xrs/:plural',
-  sidebar: 'crossplane-xrs',
-  name: 'crossplane-xr-kind',
-  exact: true,
-  component: () => <XRKindPage />,
-});
 
 registerRoute({
   path: '/crossplane/xrs/:plural/:name',
@@ -416,13 +429,6 @@ registerRoute({
   component: () => <FunctionListPage />,
 });
 
-registerRoute({
-  path: '/crossplane/functions/:name',
-  sidebar: 'crossplane-functions',
-  name: 'crossplane-function-detail',
-  exact: true,
-  component: () => <FunctionDetailPage />,
-});
 
 registerRoute({
   path: '/crossplane/configurations',
@@ -432,10 +438,3 @@ registerRoute({
   component: () => <ConfigurationListPage />,
 });
 
-registerRoute({
-  path: '/crossplane/configurations/:name',
-  sidebar: 'crossplane-configurations',
-  name: 'crossplane-configuration-detail',
-  exact: true,
-  component: () => <ConfigurationDetailPage />,
-});

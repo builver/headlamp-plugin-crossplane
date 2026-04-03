@@ -1,12 +1,13 @@
 import { CreateResourceButton, Link, SectionBox, SectionFilterHeader } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { Box, Typography } from '@mui/material';
 import { useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { XRTypeSection } from '../components/XRTypeSection';
 import { CompositeResourceDefinition, getXRScope, makeXRClass } from '../resources';
 
 export function XRKindPage() {
-  const { plural } = useParams<{ plural: string }>();
+  const location = useLocation();
+  const plural = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [xrds, error] = CompositeResourceDefinition.useList();
 
   if (error?.status === 404) {

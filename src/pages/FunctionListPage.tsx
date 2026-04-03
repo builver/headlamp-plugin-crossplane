@@ -9,7 +9,7 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { useParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
 import { CrossplaneFunction, getHealthyCondition } from '../resources';
 
@@ -43,7 +43,7 @@ export function FunctionListPage() {
             header: 'Name',
             accessorKey: 'metadata.name',
             Cell: ({ row: { original: item } }) => (
-              <Link routeName="crossplane-function-detail" params={{ name: item.metadata.name }}>
+              <Link routeName={`crossplane-function-detail-${item.metadata.name}`}>
                 {item.metadata.name}
               </Link>
             ),
@@ -81,7 +81,8 @@ export function FunctionListPage() {
 }
 
 export function FunctionDetailPage() {
-  const { name } = useParams<{ name: string }>();
+  const location = useLocation();
+  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [fn] = CrossplaneFunction.useGet(name);
 
   const healthy = fn ? getHealthyCondition(fn) : null;
