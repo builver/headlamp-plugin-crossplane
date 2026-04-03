@@ -92,3 +92,10 @@ src/
 - `pkg.crossplane.io/v1` — Providers, Functions, Configurations
 - `pkg.crossplane.io/v1beta1` — ProviderConfig, etc.
 - Claims/XRs — dynamic, defined by each XRD's `spec.group`
+
+### Crossplane XR resource ref locations
+
+- `LegacyCluster` scope (v1): `spec.resourceRefs[]`
+- `Namespaced`/`Cluster` scope (v2): `spec.crossplane.resourceRefs[]`
+- For `Namespaced` XRs, `ref.namespace` is often unset — resolve with `ref.namespace ?? xr.metadata.namespace`
+- XRD and MRD share the same spec shape (`spec.group`, `spec.versions`, `spec.names.plural`) — components that patch/fetch either can be shared

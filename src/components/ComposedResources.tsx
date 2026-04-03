@@ -24,6 +24,15 @@ function lookupPlural(apiVersion: string, kind: string, crds: KubeObject[]): str
   )?.jsonData?.spec?.names?.plural as string | undefined;
 }
 
+function skeletonRow(ref: ResourceRef, resolvedNs: string | undefined, plural: string | undefined) {
+  return {
+    apiVersion: ref.apiVersion,
+    kind: ref.kind,
+    metadata: { name: ref.name, namespace: resolvedNs },
+    _plural: plural,
+  };
+}
+
 interface ComposedResourcesProps {
   item: KubeObject;
   scope: XRScope;
@@ -48,17 +57,20 @@ export function ComposedResources({ item, scope }: ComposedResourcesProps) {
       : (item.jsonData?.spec?.crossplane?.resourceRefs ?? []);
   const refsKey = refs.map(r => `${r.apiVersion}/${r.kind}/${r.name}`).join('|');
 
-  // Track which (refsKey, crds) combination we've already fetched so that
+  // Track which (refsKey, crdNames) combination we've already fetched so that
   // rapid crds watch updates don't re-fire the fetch unnecessarily.
+  // Uses CRD names (not just length) to detect when the installed CRD set changes.
   const fetchedFor = useRef('');
 
   useEffect(() => {
     if (!crds || refs.length === 0) return;
 
-    const fetchKey = `${refsKey}::${crds.length}`;
+    const crdNames = crds.map(c => c.metadata.name).join(',');
+    const fetchKey = `${refsKey}::${crdNames}`;
     if (fetchedFor.current === fetchKey) return;
     fetchedFor.current = fetchKey;
 
+    let mounted = true;
     const xrNamespace = item.metadata.namespace;
 
     Promise.allSettled(
@@ -73,14 +85,7 @@ export function ComposedResources({ item, scope }: ComposedResourcesProps) {
         const base = group ? `/apis/${group}/${version}` : `/api/${version}`;
 
         if (!plural) {
-          // CRD not found — return skeleton row from the ref itself so the
-          // table still shows something rather than silently dropping the row.
-          return {
-            apiVersion: ref.apiVersion,
-            kind: ref.kind,
-            metadata: { name: ref.name, namespace: resolvedNs },
-            _plural: undefined,
-          };
+          return skeletonRow(ref, resolvedNs, undefined);
         }
 
         const path = resolvedNs
@@ -91,17 +96,15 @@ export function ComposedResources({ item, scope }: ComposedResourcesProps) {
           const raw = await ApiProxy.request(path);
           return { ...raw, _plural: plural };
         } catch {
-          return {
-            apiVersion: ref.apiVersion,
-            kind: ref.kind,
-            metadata: { name: ref.name, namespace: resolvedNs },
-            _plural: plural,
-          };
+          return skeletonRow(ref, resolvedNs, plural);
         }
       })
     ).then(results => {
+      if (!mounted) return;
       setResources(results.flatMap(r => (r.status === 'fulfilled' ? [r.value] : [])));
     });
+
+    return () => { mounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refsKey, crds]);
 
