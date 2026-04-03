@@ -7,6 +7,10 @@ import {
   AccordionDetails,
   AccordionSummary,
   Box,
+  Collapse,
+  MenuItem,
+  Paper,
+  Select,
   Table,
   TableBody,
   TableCell,
@@ -16,7 +20,13 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import React from 'react';
-import { Configuration, CrossplaneFunction, Provider } from '../resources';
+import {
+  CompositeResourceDefinition,
+  Configuration,
+  CrossplaneFunction,
+  makeXRClass,
+  Provider,
+} from '../resources';
 
 interface ResourceStatus {
   ready: number;
@@ -24,7 +34,7 @@ interface ResourceStatus {
   total: number;
 }
 
-function getStatus(items: KubeObject[] | null): ResourceStatus {
+function getStatus(items: KubeObject[] | null, conditionType = 'Healthy'): ResourceStatus {
   if (!items) return { ready: 0, notReady: 0, total: 0 };
   let ready = 0;
   let notReady = 0;
@@ -32,7 +42,7 @@ function getStatus(items: KubeObject[] | null): ResourceStatus {
     const conditions: { type: string; status: string }[] =
       item.jsonData?.status?.conditions ?? [];
     const readyCond =
-      conditions.find(c => c.type === 'Healthy') ?? conditions.find(c => c.type === 'Ready');
+      conditions.find(c => c.type === conditionType) ?? conditions.find(c => c.type === 'Ready');
     if (readyCond?.status === 'True') {
       ready++;
     } else {
@@ -46,11 +56,12 @@ interface OverviewTileProps {
   label: string;
   route: string;
   items: KubeObject[] | null;
+  conditionType?: string;
 }
 
-function OverviewTile({ label, route, items }: OverviewTileProps) {
+function OverviewTile({ label, route, items, conditionType }: OverviewTileProps) {
   const theme = useTheme();
-  const { ready, notReady, total } = getStatus(items);
+  const { ready, notReady, total } = getStatus(items, conditionType);
   const pct = total > 0 ? Math.round((ready / total) * 100) : 0;
 
   const data = [
@@ -72,6 +83,49 @@ function OverviewTile({ label, route, items }: OverviewTileProps) {
     <Box width="280px" m={2}>
       <TileChart data={data} total={100} label={`${pct}%`} legend={legend} />
     </Box>
+  );
+}
+
+type SortOption = 'most-ready' | 'least-ready' | 'most-total' | 'least-total' | 'alpha-az' | 'alpha-za';
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'most-ready', label: 'Most Ready First' },
+  { value: 'least-ready', label: 'Least Ready First' },
+  { value: 'most-total', label: 'Most Total Resources' },
+  { value: 'least-total', label: 'Least Total Resources' },
+  { value: 'alpha-az', label: 'Alphabetical A-Z' },
+  { value: 'alpha-za', label: 'Alphabetical Z-A' },
+];
+
+function XRKindTile({
+  xrd,
+  onStatus,
+}: {
+  xrd: KubeObject;
+  onStatus?: (uid: string, status: ResourceStatus) => void;
+}) {
+  const plural = xrd.jsonData?.spec?.names?.plural as string;
+  const kind = xrd.jsonData?.spec?.names?.kind as string;
+  const DynClass = React.useMemo(() => makeXRClass(xrd), [xrd.metadata.uid]);
+  const [items] = DynClass.useList();
+  const status = getStatus(items, 'Ready');
+  const { ready, notReady, total } = status;
+
+  const onStatusRef = React.useRef(onStatus);
+  onStatusRef.current = onStatus;
+  const uid = xrd.metadata.uid;
+
+  React.useEffect(() => {
+    onStatusRef.current?.(uid, { ready, notReady, total });
+  }, [uid, ready, notReady, total]);
+
+  return (
+    <OverviewTile
+      label={kind}
+      route={`crossplane-xr-kind-${plural}`}
+      items={items}
+      conditionType="Ready"
+    />
   );
 }
 
@@ -140,10 +194,121 @@ function PodSection({ title, pods, defaultExpanded = false }: PodSectionProps) {
   );
 }
 
+const PREVIEW_COUNT = 3;
+
+function CompositeResourcesSection({ xrds }: { xrds: KubeObject[] | null }) {
+  const [sortOption, setSortOption] = React.useState<SortOption>('least-ready');
+  const [statusMap, setStatusMap] = React.useState<Record<string, ResourceStatus>>({});
+  const [expanded, setExpanded] = React.useState(true);
+
+  const handleStatus = React.useCallback((uid: string, status: ResourceStatus) => {
+    setStatusMap(prev => {
+      if (prev[uid]?.ready === status.ready && prev[uid]?.total === status.total) return prev;
+      return { ...prev, [uid]: status };
+    });
+  }, []);
+
+  const sortedXrds = React.useMemo(() => {
+    if (!xrds) return [];
+    return [...xrds].sort((a, b) => {
+      const kindA = (a.jsonData?.spec?.names?.kind as string) ?? '';
+      const kindB = (b.jsonData?.spec?.names?.kind as string) ?? '';
+      const sA = statusMap[a.metadata.uid] ?? { ready: 0, notReady: 0, total: 0 };
+      const sB = statusMap[b.metadata.uid] ?? { ready: 0, notReady: 0, total: 0 };
+      switch (sortOption) {
+        case 'most-ready':
+          return sB.ready - sA.ready;
+        case 'least-ready':
+          return sA.ready - sB.ready;
+        case 'most-total':
+          return sB.total - sA.total;
+        case 'least-total':
+          return sA.total - sB.total;
+        case 'alpha-az':
+          return kindA.localeCompare(kindB);
+        case 'alpha-za':
+          return kindB.localeCompare(kindA);
+        default:
+          return 0;
+      }
+    });
+  }, [xrds, sortOption, statusMap]);
+
+  const previewXrds = sortedXrds.slice(0, PREVIEW_COUNT);
+  const remainingXrds = sortedXrds.slice(PREVIEW_COUNT);
+
+  return (
+    <SectionBox title="Composite Resources">
+      <Paper variant="outlined">
+        {/* Header */}
+        <Box
+          display="flex"
+          alignItems="center"
+          justifyContent="space-between"
+          px={2}
+          sx={{ minHeight: 48, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+          onClick={() => setExpanded(v => !v)}
+        >
+          <Typography variant="subtitle1">
+            Composite Resource Kinds ({xrds?.length ?? 0})
+          </Typography>
+          <Icon icon={expanded ? 'mdi:chevron-up' : 'mdi:chevron-down'} />
+        </Box>
+
+        {/* Body */}
+        {!xrds || xrds.length === 0 ? (
+          <Box p={2}>
+            <Typography variant="body2" color="text.secondary">
+              No composite resource definitions found.
+            </Typography>
+          </Box>
+        ) : (
+          <>
+            {/* Sort control — always visible */}
+            <Box display="flex" justifyContent="flex-end" px={2} pt={1}>
+              <Box display="flex" flexDirection="column" alignItems="flex-start">
+                <Typography variant="caption" color="text.secondary">
+                  Sort by
+                </Typography>
+                <Select
+                  size="small"
+                  value={sortOption}
+                  onChange={e => setSortOption(e.target.value as SortOption)}
+                >
+                  {SORT_OPTIONS.map(opt => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </Box>
+            </Box>
+            {/* Preview tiles — always visible */}
+            <Box display="flex" flexWrap="wrap" px={1}>
+              {previewXrds.map(xrd => (
+                <XRKindTile key={xrd.metadata.uid} xrd={xrd} onStatus={handleStatus} />
+              ))}
+            </Box>
+            {/* Remaining tiles — shown when expanded; kept mounted so hooks run */}
+            <Collapse in={expanded}>
+              <Box display="flex" flexWrap="wrap" px={1} pb={1}>
+                {remainingXrds.map(xrd => (
+                  <XRKindTile key={xrd.metadata.uid} xrd={xrd} onStatus={handleStatus} />
+                ))}
+              </Box>
+            </Collapse>
+          </>
+        )}
+      </Paper>
+    </SectionBox>
+  );
+}
+
 export function OverviewPage() {
   const [providers] = Provider.useList();
   const [functions] = CrossplaneFunction.useList();
   const [configurations] = Configuration.useList();
+  const [xrds] = CompositeResourceDefinition.useList();
 
   const [pods] = K8s.ResourceClasses.Pod.useList();
 
@@ -182,6 +347,8 @@ export function OverviewPage() {
           ))}
         </Box>
       </SectionBox>
+
+      <CompositeResourcesSection xrds={xrds} />
 
       <SectionBox title="Pods">
         <PodSection title="Crossplane System" pods={systemPods} defaultExpanded />
