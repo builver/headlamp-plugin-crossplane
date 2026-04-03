@@ -1,5 +1,4 @@
 import {
-  ActionButton,
   ConditionsTable,
   CreateResourceButton,
   DateLabel,
@@ -9,65 +8,13 @@ import {
   SectionFilterHeader,
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
-import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
+import { PauseAction } from '../components/PauseAction';
 import { ManagedResourceDefinition, makeMRClass } from '../resources';
-
-// ── Pause / resume action ─────────────────────────────────────────────────────
-
-interface PauseActionProps {
-  item: KubeObject;
-  mrd: KubeObject;
-}
-
-function PauseAction({ item, mrd }: PauseActionProps) {
-  const isPaused = item.metadata?.annotations?.['crossplane.io/paused'] === 'true';
-  const [loading, setLoading] = useState(false);
-
-  async function handleClick() {
-    const spec = mrd.jsonData?.spec;
-    const group: string = spec?.group ?? '';
-    const versions: any[] = (spec?.versions ?? []).filter((v: any) => v.served !== false);
-    const version: string = versions[0]?.name ?? 'v1';
-    const plural: string = spec?.names?.plural ?? '';
-    const { name, namespace } = item.metadata;
-
-    const basePath = `/apis/${group}/${version}`;
-    const path = namespace
-      ? `${basePath}/namespaces/${namespace}/${plural}/${name}`
-      : `${basePath}/${plural}/${name}`;
-
-    const patch = {
-      metadata: {
-        annotations: { 'crossplane.io/paused': isPaused ? null : 'true' },
-      },
-    };
-
-    setLoading(true);
-    try {
-      await ApiProxy.request(path, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/merge-patch+json' },
-        body: JSON.stringify(patch),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <ActionButton
-      description={isPaused ? 'Resume reconciliation' : 'Pause reconciliation'}
-      icon={isPaused ? 'mdi:play' : 'mdi:pause'}
-      onClick={handleClick}
-      iconButtonProps={{ disabled: loading }}
-    />
-  );
-}
 
 // ── MR instance list ──────────────────────────────────────────────────────────
 
@@ -201,7 +148,7 @@ export function MRInstanceDetailInner({ mrdName, name, namespace }: MRInstanceDe
       <MainInfoSection
         resource={item}
         extraInfo={extraInfo}
-        actions={item && mrd ? [<PauseAction item={item} mrd={mrd} />] : []}
+        actions={item && mrd ? [<PauseAction item={item} crd={mrd} />] : []}
       />
       {item && <ConditionsTable resource={item.jsonData} />}
     </>
