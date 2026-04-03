@@ -10,7 +10,6 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
-import { ReadyStatus } from '../components/ConditionStatus';
 import { Composition } from '../resources';
 
 export function CompositionListPage() {
@@ -56,11 +55,6 @@ export function CompositionListPage() {
             },
           },
           {
-            header: 'Status',
-            accessorFn: item => item,
-            Cell: ({ row: { original: item } }) => <ReadyStatus item={item} />,
-          },
-          {
             header: 'Age',
             accessorFn: item => -new Date(item.metadata.creationTimestamp).getTime(),
             Cell: ({ row: { original: item } }) => (
@@ -82,7 +76,6 @@ export function CompositionDetailPage() {
 
   const extraInfo = comp
     ? [
-        { name: 'Status', value: <ReadyStatus item={comp} /> },
         {
           name: 'Composite Type',
           value: compTypeRef ? `${compTypeRef.apiVersion} / ${compTypeRef.kind}` : '-',

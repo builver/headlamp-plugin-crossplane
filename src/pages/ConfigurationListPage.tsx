@@ -54,14 +54,13 @@ export function ConfigurationListPage() {
           },
           {
             header: 'Installed',
-            accessorFn: item => {
-              const cond = item.jsonData?.status?.conditions?.find(c => c.type === 'Installed');
-              return cond?.status ?? '-';
-            },
+            accessorFn: item => item.jsonData?.status?.conditions?.find(c => c.type === 'Installed')?.status ?? '-',
+            Cell: ({ row: { original: item } }) => <InstalledStatus item={item} />,
           },
           {
             header: 'Healthy',
             accessorFn: item => item.jsonData?.status?.conditions?.find(c => c.type === 'Healthy')?.status ?? '-',
+            Cell: ({ row: { original: item } }) => <HealthyStatus item={item} />,
           },
           {
             header: 'Current Revision',
