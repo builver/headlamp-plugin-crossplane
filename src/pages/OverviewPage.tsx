@@ -7,6 +7,7 @@ import {
   AccordionDetails,
   AccordionSummary,
   Box,
+  Chip,
   Collapse,
   MenuItem,
   Paper,
@@ -136,12 +137,24 @@ interface PodSectionProps {
 }
 
 function PodSection({ title, pods, defaultExpanded = false }: PodSectionProps) {
+  const running = pods.filter(p => p.jsonData?.status?.phase === 'Running').length;
+  const allRunning = pods.length > 0 && running === pods.length;
+
   return (
     <Accordion defaultExpanded={defaultExpanded}>
       <AccordionSummary expandIcon={<Icon icon="mdi:chevron-down" />}>
-        <Typography variant="subtitle1">
-          {title} ({pods.length})
-        </Typography>
+        <Box display="flex" alignItems="center" gap={1}>
+          <Typography variant="subtitle1">
+            {title} ({pods.length})
+          </Typography>
+          {pods.length > 0 && (
+            <Chip
+              size="small"
+              label={`${running}/${pods.length} Running`}
+              color={allRunning ? 'success' : 'warning'}
+            />
+          )}
+        </Box>
       </AccordionSummary>
       <AccordionDetails sx={{ p: 0 }}>
         {pods.length === 0 ? (
@@ -199,7 +212,7 @@ const PREVIEW_COUNT = 3;
 function CompositeResourcesSection({ xrds }: { xrds: KubeObject[] | null }) {
   const [sortOption, setSortOption] = React.useState<SortOption>('least-ready');
   const [statusMap, setStatusMap] = React.useState<Record<string, ResourceStatus>>({});
-  const [expanded, setExpanded] = React.useState(true);
+  const [expanded, setExpanded] = React.useState(false);
 
   const handleStatus = React.useCallback((uid: string, status: ResourceStatus) => {
     setStatusMap(prev => {
@@ -351,7 +364,7 @@ export function OverviewPage() {
       <CompositeResourcesSection xrds={xrds} />
 
       <SectionBox title="Pods">
-        <PodSection title="Crossplane System" pods={systemPods} defaultExpanded />
+        <PodSection title="Crossplane System" pods={systemPods} />
         <PodSection title="Providers" pods={providerPods} />
         <PodSection title="Functions" pods={functionPods} />
       </SectionBox>
