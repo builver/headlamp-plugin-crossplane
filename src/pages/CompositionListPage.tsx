@@ -1,3 +1,5 @@
+import React from 'react';
+import jsYaml from 'js-yaml';
 import {
   ConditionsTable,
   CreateResourceButton,
@@ -9,8 +11,90 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
+import { Icon } from '@iconify/react';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Box,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
 import { useLocation } from 'react-router-dom';
-import { Composition } from '../resources';
+import { Composition, CompositeResourceDefinition } from '../resources';
+
+const MAX_VISIBLE_STEPS = 7;
+
+interface PipelineStep {
+  step: string;
+  functionRef: { name: string };
+  input?: Record<string, unknown>;
+  requirements?: Record<string, unknown>;
+}
+
+function PipelineSteps({ item }: { item: KubeObject }) {
+  const theme = useTheme();
+  const steps: PipelineStep[] = item.jsonData?.spec?.pipeline ?? [];
+
+  if (steps.length === 0) return <span>-</span>;
+
+  const visible = steps.slice(0, MAX_VISIBLE_STEPS);
+  const overflow = steps.slice(MAX_VISIBLE_STEPS);
+
+  return (
+    <Box display="flex" alignItems="center" flexWrap="nowrap">
+      {visible.map((s, i) => (
+        <React.Fragment key={s.step}>
+          {i > 0 && (
+            <Box sx={{ width: 14, height: 2, flexShrink: 0, bgcolor: 'primary.main', opacity: 0.4 }} />
+          )}
+          <Tooltip
+            title={
+              <Box>
+                <div><strong>{s.step}</strong></div>
+                {s.functionRef?.name && (
+                  <Link routeName={`crossplane-function-detail-${s.functionRef.name}`}>
+                    {s.functionRef.name}
+                  </Link>
+                )}
+              </Box>
+            }
+          >
+            <Box component="span" sx={{ cursor: 'default', lineHeight: 0, flexShrink: 0 }}>
+              <Icon
+                icon="mdi:circle"
+                width="0.875rem"
+                height="0.875rem"
+                style={{ color: theme.palette.primary.main }}
+              />
+            </Box>
+          </Tooltip>
+        </React.Fragment>
+      ))}
+      {overflow.length > 0 && (
+        <>
+          <Box sx={{ width: 14, height: 2, flexShrink: 0, bgcolor: 'primary.main', opacity: 0.4 }} />
+          <Tooltip title={overflow.map(s => s.step).join(', ')}>
+            <Box
+              component="span"
+              sx={{
+                cursor: 'default',
+                fontSize: '0.75rem',
+                color: 'primary.main',
+                flexShrink: 0,
+                lineHeight: 1,
+              }}
+            >
+              +{overflow.length}
+            </Box>
+          </Tooltip>
+        </>
+      )}
+    </Box>
+  );
+}
 
 export function CompositionListPage() {
   const filterFunction = useFilterFunc();
@@ -55,6 +139,12 @@ export function CompositionListPage() {
             },
           },
           {
+            header: 'Pipeline',
+            accessorFn: item =>
+              (item.jsonData?.spec?.pipeline ?? []).map((s: PipelineStep) => s.step).join(', '),
+            Cell: ({ row: { original: item } }) => <PipelineSteps item={item} />,
+          },
+          {
             header: 'Age',
             accessorFn: item => -new Date(item.metadata.creationTimestamp).getTime(),
             Cell: ({ row: { original: item } }) => (
@@ -71,14 +161,27 @@ export function CompositionDetailPage() {
   const location = useLocation();
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [comp] = Composition.useGet(name);
+  const [xrds] = CompositeResourceDefinition.useList();
 
   const compTypeRef = comp?.jsonData?.spec?.compositeTypeRef;
+
+  const matchingXrd = React.useMemo(() => {
+    if (!xrds || !compTypeRef) return null;
+    const group = (compTypeRef.apiVersion as string)?.split('/')[0] ?? '';
+    return xrds.find(
+      x => x.jsonData?.spec?.names?.kind === compTypeRef.kind && x.jsonData?.spec?.group === group
+    ) ?? null;
+  }, [xrds, compTypeRef]);
 
   const extraInfo = comp
     ? [
         {
-          name: 'Composite Type',
-          value: compTypeRef ? `${compTypeRef.apiVersion} / ${compTypeRef.kind}` : '-',
+          name: 'Composite Resource',
+          value: compTypeRef
+            ? matchingXrd
+              ? <Link routeName={`crossplane-xr-kind-${matchingXrd.jsonData?.spec?.names?.plural}`}>{compTypeRef.kind}</Link>
+              : compTypeRef.kind
+            : '-',
         },
         {
           name: 'Mode',
@@ -91,10 +194,58 @@ export function CompositionDetailPage() {
       ]
     : [];
 
+  const pipeline: PipelineStep[] = comp?.jsonData?.spec?.pipeline ?? [];
+
   return (
     <>
       <MainInfoSection resource={comp} extraInfo={extraInfo} />
       {comp && <ConditionsTable resource={comp.jsonData} />}
+      {pipeline.length > 0 && (
+        <SectionBox title="Pipeline">
+          {pipeline.map((s, i) => (
+            <Accordion key={s.step} defaultExpanded={i === 0}>
+              <AccordionSummary expandIcon={<Icon icon="mdi:chevron-down" />}>
+                <Typography variant="subtitle1">{s.step}</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Box display="flex" flexDirection="column" gap={1.5}>
+                  <Typography variant="subtitle2">
+                    {s.functionRef?.name ? (
+                      <Link routeName={`crossplane-function-detail-${s.functionRef.name}`}>
+                        {s.functionRef.name}
+                      </Link>
+                    ) : (
+                      '-'
+                    )}
+                  </Typography>
+                  {s.input && (
+                    <Box>
+                      <Typography variant="overline" display="block" gutterBottom>Input</Typography>
+                      <Box
+                        component="pre"
+                        sx={{ m: 0, p: 1, borderRadius: 1, bgcolor: 'action.hover', fontSize: '0.75rem', overflow: 'auto' }}
+                      >
+                        {jsYaml.dump(s.input)}
+                      </Box>
+                    </Box>
+                  )}
+                  {s.requirements && (
+                    <Box>
+                      <Typography variant="overline" display="block" gutterBottom>Requirements</Typography>
+                      <Box
+                        component="pre"
+                        sx={{ m: 0, p: 1, borderRadius: 1, bgcolor: 'action.hover', fontSize: '0.75rem', overflow: 'auto' }}
+                      >
+                        {jsYaml.dump(s.requirements)}
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+              </AccordionDetails>
+            </Accordion>
+          ))}
+        </SectionBox>
+      )}
     </>
   );
 }
