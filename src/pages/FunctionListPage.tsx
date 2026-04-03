@@ -1,5 +1,6 @@
 import {
   ConditionsTable,
+  CreateResourceButton,
   DateLabel,
   Link,
   MainInfoSection,
@@ -25,7 +26,14 @@ export function FunctionListPage() {
   }
 
   return (
-    <SectionBox title={<SectionFilterHeader title="Functions" />}>
+    <SectionBox
+      title={
+        <SectionFilterHeader
+          title="Functions"
+          titleSideActions={[<CreateResourceButton resourceClass={CrossplaneFunction} resourceName="Function" />]}
+        />
+      }
+    >
       <Table
         data={functions}
         loading={functions === null}

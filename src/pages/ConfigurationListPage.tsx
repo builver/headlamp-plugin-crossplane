@@ -1,5 +1,6 @@
 import {
   ConditionsTable,
+  CreateResourceButton,
   DateLabel,
   Link,
   MainInfoSection,
@@ -25,7 +26,14 @@ export function ConfigurationListPage() {
   }
 
   return (
-    <SectionBox title={<SectionFilterHeader title="Configurations" />}>
+    <SectionBox
+      title={
+        <SectionFilterHeader
+          title="Configurations"
+          titleSideActions={[<CreateResourceButton resourceClass={Configuration} resourceName="Configuration" />]}
+        />
+      }
+    >
       <Table
         data={configurations}
         loading={configurations === null}

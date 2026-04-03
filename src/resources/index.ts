@@ -35,6 +35,10 @@ export class Provider extends KubeObject {
   static apiName = 'providers';
   static apiVersion = 'pkg.crossplane.io/v1';
   static isNamespaced = false;
+
+  static getBaseObject() {
+    return { ...super.getBaseObject(), spec: { package: '' } };
+  }
 }
 
 export class ProviderRevision extends KubeObject {
@@ -49,6 +53,10 @@ export class Configuration extends KubeObject {
   static apiName = 'configurations';
   static apiVersion = 'pkg.crossplane.io/v1';
   static isNamespaced = false;
+
+  static getBaseObject() {
+    return { ...super.getBaseObject(), spec: { package: '' } };
+  }
 }
 
 export class ConfigurationRevision extends KubeObject {
@@ -63,6 +71,10 @@ export class CrossplaneFunction extends KubeObject {
   static apiName = 'functions';
   static apiVersion = 'pkg.crossplane.io/v1';
   static isNamespaced = false;
+
+  static getBaseObject() {
+    return { ...super.getBaseObject(), spec: { package: '' } };
+  }
 }
 
 export class FunctionRevision extends KubeObject {

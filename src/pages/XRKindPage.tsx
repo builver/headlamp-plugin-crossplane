@@ -1,8 +1,9 @@
-import { Link, SectionBox } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { CreateResourceButton, Link, SectionBox, SectionFilterHeader } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { Box, Typography } from '@mui/material';
+import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { XRTypeSection } from '../components/XRTypeSection';
-import { CompositeResourceDefinition, getXRScope } from '../resources';
+import { CompositeResourceDefinition, getXRScope, makeXRClass } from '../resources';
 
 export function XRKindPage() {
   const { plural } = useParams<{ plural: string }>();
@@ -32,9 +33,17 @@ export function XRKindPage() {
 
   const kind = xrd.jsonData?.spec?.names?.kind ?? plural;
   const scope = getXRScope(xrd);
+  const DynClass = useMemo(() => makeXRClass(xrd), [xrd.metadata.uid]);
 
   return (
-    <SectionBox title={kind}>
+    <SectionBox
+      title={
+        <SectionFilterHeader
+          title={kind}
+          titleSideActions={[<CreateResourceButton resourceClass={DynClass} resourceName={kind} />]}
+        />
+      }
+    >
       <Box px={2} pb={1}>
         <Typography variant="subtitle2" color="textSecondary">
           XRD:{' '}
