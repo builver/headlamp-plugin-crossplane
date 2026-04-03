@@ -159,7 +159,7 @@ interface MRInstanceDetailInnerProps {
   namespace?: string;
 }
 
-function MRInstanceDetailInner({ mrdName, name, namespace }: MRInstanceDetailInnerProps) {
+export function MRInstanceDetailInner({ mrdName, name, namespace }: MRInstanceDetailInnerProps) {
   const [mrds] = ManagedResourceDefinition.useList();
   const mrd = mrds?.find(m => m.metadata.name === mrdName) ?? null;
 

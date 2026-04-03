@@ -7,11 +7,13 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useEffect, useState } from 'react';
+import { MRInstanceDetailInner } from './pages/MRInstancePage';
 import { XRDetailInner } from './pages/XRDetailPage';
 import {
   CompositeResourceDefinition,
   getXRScope,
   makeXRClass,
+  ManagedResourceDefinition,
   XRScope,
 } from './resources';
 
@@ -93,6 +95,31 @@ function ClaimMapDetail({ node }: { node: any }) {
       />
     </SectionBox>
   );
+}
+
+/**
+ * Detail panel for managed resource nodes — shown when the user clicks an MR in the Map.
+ * Looks up the MRD by kind+group and delegates to MRInstanceDetailInner.
+ * Returns null for non-MR nodes (native K8s etc.) so the map uses its default.
+ */
+function MRMapDetail({ node }: { node: any }) {
+  const mr = node.kubeObject;
+  const kind: string = mr.kind ?? '';
+  const apiVersion: string = mr.apiVersion ?? '';
+  const name: string = mr.metadata?.name ?? '';
+  const namespace: string | undefined = mr.metadata?.namespace;
+
+  const [mrds] = ManagedResourceDefinition.useList();
+  const [group] = getGroupVersion(apiVersion);
+
+  const mrd =
+    mrds?.find(
+      m => m.jsonData?.spec?.names?.kind === kind && m.jsonData?.spec?.group === group
+    ) ?? null;
+
+  if (!mrd) return null;
+
+  return <MRInstanceDetailInner mrdName={mrd.metadata.name} name={name} namespace={namespace} />;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -218,6 +245,7 @@ function makeChildNode(
   namespace: string | undefined,
   crds: KubeObject[] | null,
   icon = 'mdi:cube-outline',
+  detailsComponent?: (props: { node: any }) => JSX.Element | null,
 ): object {
   const crdName = findCrdName(apiVersion, kind, crds);
   const node: any = {
@@ -228,6 +256,7 @@ function makeChildNode(
     kubeObject: makeKubeObjectLike(apiVersion, kind, name, namespace),
   };
   if (crdName) node.customResourceDefinition = crdName;
+  if (detailsComponent) node.detailsComponent = detailsComponent;
   return node;
 }
 
@@ -373,7 +402,7 @@ async function processGetEntry(
     return [];
   }
   ctx.visited.add(compositeId);
-  ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds));
+  ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds, 'mdi:cube-outline', MRMapDetail));
   addEdge(ctx, parentNodeId, compositeId);
 
   if (depth >= MAX_DEPTH) return [];
