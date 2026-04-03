@@ -1,15 +1,22 @@
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import { Link, SectionBox, TileChart } from '@kinvolk/headlamp-plugin/lib/components/common';
 import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
-import { Box } from '@mui/material';
+import { Icon } from '@iconify/react';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Box,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Typography,
+} from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import React from 'react';
-import {
-  Composition,
-  Configuration,
-  CrossplaneFunction,
-  Provider,
-} from '../resources';
+import { Configuration, CrossplaneFunction, Provider } from '../resources';
 
 interface ResourceStatus {
   ready: number;
@@ -24,7 +31,8 @@ function getStatus(items: KubeObject[] | null): ResourceStatus {
   for (const item of items) {
     const conditions: { type: string; status: string }[] =
       item.jsonData?.status?.conditions ?? [];
-    const readyCond = conditions.find(c => c.type === 'Ready');
+    const readyCond =
+      conditions.find(c => c.type === 'Healthy') ?? conditions.find(c => c.type === 'Ready');
     if (readyCond?.status === 'True') {
       ready++;
     } else {
@@ -67,15 +75,79 @@ function OverviewTile({ label, route, items }: OverviewTileProps) {
   );
 }
 
+interface PodSectionProps {
+  title: string;
+  pods: KubeObject[];
+  defaultExpanded?: boolean;
+}
+
+function PodSection({ title, pods, defaultExpanded = false }: PodSectionProps) {
+  return (
+    <Accordion defaultExpanded={defaultExpanded}>
+      <AccordionSummary expandIcon={<Icon icon="mdi:chevron-down" />}>
+        <Typography variant="subtitle1">
+          {title} ({pods.length})
+        </Typography>
+      </AccordionSummary>
+      <AccordionDetails sx={{ p: 0 }}>
+        {pods.length === 0 ? (
+          <Box p={2}>
+            <Typography variant="body2" color="text.secondary">
+              No pods found.
+            </Typography>
+          </Box>
+        ) : (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Namespace</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Image</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {pods.map(pod => {
+                const containers: { image: string }[] =
+                  pod.jsonData?.spec?.containers ?? [];
+                const images = containers.map(c => c.image).join(', ');
+                return (
+                  <TableRow key={pod.metadata.uid}>
+                    <TableCell>
+                      <Link
+                        routeName="pod"
+                        params={{
+                          name: pod.metadata.name,
+                          namespace: pod.metadata.namespace,
+                        }}
+                      >
+                        {pod.metadata.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell>{pod.metadata.namespace}</TableCell>
+                    <TableCell>{pod.jsonData?.status?.phase ?? '-'}</TableCell>
+                    <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                      {images || '-'}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </AccordionDetails>
+    </Accordion>
+  );
+}
+
 export function OverviewPage() {
-  const [compositions] = Composition.useList();
   const [providers] = Provider.useList();
   const [functions] = CrossplaneFunction.useList();
   const [configurations] = Configuration.useList();
 
-  // Crossplane system pods (crossplane + crossplane-rbac-manager)
   const [pods] = K8s.ResourceClasses.Pod.useList();
-  const crossplanePods = React.useMemo(
+
+  const systemPods = React.useMemo(
     () =>
       pods?.filter(
         p =>
@@ -85,8 +157,17 @@ export function OverviewPage() {
     [pods]
   );
 
+  const providerPods = React.useMemo(
+    () => pods?.filter(p => 'pkg.crossplane.io/provider' in (p.metadata.labels ?? {})) ?? [],
+    [pods]
+  );
+
+  const functionPods = React.useMemo(
+    () => pods?.filter(p => 'pkg.crossplane.io/function' in (p.metadata.labels ?? {})) ?? [],
+    [pods]
+  );
+
   const tiles = [
-    { label: 'Compositions', route: 'crossplane-compositions', items: compositions },
     { label: 'Providers', route: 'crossplane-providers', items: providers },
     { label: 'Functions', route: 'crossplane-functions', items: functions },
     { label: 'Configurations', route: 'crossplane-configurations', items: configurations },
@@ -102,21 +183,10 @@ export function OverviewPage() {
         </Box>
       </SectionBox>
 
-      <SectionBox title="System Pods">
-        <Box p={1}>
-          {crossplanePods.length === 0 ? (
-            <span>No Crossplane system pods found in the current cluster.</span>
-          ) : (
-            crossplanePods.map(pod => (
-              <Box key={pod.metadata.uid} display="flex" gap={2} mb={0.5}>
-                <Link routeName="pod" params={{ name: pod.metadata.name, namespace: pod.metadata.namespace }}>
-                  {pod.metadata.name}
-                </Link>
-                <span>{pod.jsonData?.status?.phase ?? '-'}</span>
-              </Box>
-            ))
-          )}
-        </Box>
+      <SectionBox title="Pods">
+        <PodSection title="Crossplane System" pods={systemPods} defaultExpanded />
+        <PodSection title="Providers" pods={providerPods} />
+        <PodSection title="Functions" pods={functionPods} />
       </SectionBox>
     </>
   );
