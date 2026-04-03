@@ -5,8 +5,7 @@ import {
   SectionBox,
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
-import { Box, FormControl, InputLabel, MenuItem, Select } from '@mui/material';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ManagedResourceDefinition } from '../resources';
 
@@ -38,8 +37,6 @@ export function MRDDetailPage() {
 
 export function MRDListPage() {
   const [mrds] = ManagedResourceDefinition.useList();
-  const [selectedProvider, setSelectedProvider] = useState<string>('');
-  const [selectedScope, setSelectedScope] = useState<string>('');
 
   const providerNames: string[] = useMemo(() => {
     if (!mrds) return [];
@@ -51,58 +48,12 @@ export function MRDListPage() {
     return [...names].sort();
   }, [mrds]);
 
-  const filtered = useMemo(() => {
-    if (!mrds) return null;
-    return mrds.filter(mrd => {
-      if (selectedProvider) {
-        const ownerName = mrd.metadata?.ownerReferences?.find(
-          (r: any) => r.kind === 'Provider'
-        )?.name;
-        if (ownerName !== selectedProvider) return false;
-      }
-      if (selectedScope) {
-        const scope = mrd.jsonData?.spec?.scope ?? 'Cluster';
-        if (selectedScope === 'Namespaced' && scope !== 'Namespaced') return false;
-        if (selectedScope === 'Cluster' && scope === 'Namespaced') return false;
-      }
-      return true;
-    });
-  }, [mrds, selectedProvider, selectedScope]);
-
   return (
     <SectionBox title="Managed Resources">
-      <Box display="flex" gap={2} mb={2}>
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Provider</InputLabel>
-          <Select
-            value={selectedProvider}
-            label="Provider"
-            onChange={e => setSelectedProvider(e.target.value)}
-          >
-            <MenuItem value="">All</MenuItem>
-            {providerNames.map(n => (
-              <MenuItem key={n} value={n}>
-                {n}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel>Scope</InputLabel>
-          <Select
-            value={selectedScope}
-            label="Scope"
-            onChange={e => setSelectedScope(e.target.value)}
-          >
-            <MenuItem value="">All</MenuItem>
-            <MenuItem value="Cluster">Cluster</MenuItem>
-            <MenuItem value="Namespaced">Namespaced</MenuItem>
-          </Select>
-        </FormControl>
-      </Box>
       <Table
-        data={filtered}
-        loading={filtered === null}
+        data={mrds}
+        loading={mrds === null}
+        initialState={{ showColumnFilters: true }}
         columns={[
           {
             header: 'Resource',
@@ -130,6 +81,8 @@ export function MRDListPage() {
             header: 'Provider',
             accessorFn: (item: any) =>
               item.metadata?.ownerReferences?.find((r: any) => r.kind === 'Provider')?.name ?? '-',
+            filterVariant: 'select',
+            filterSelectOptions: providerNames,
             Cell: ({ row: { original: item } }: any) => {
               const providerName = item.metadata?.ownerReferences?.find(
                 (r: any) => r.kind === 'Provider'
@@ -146,6 +99,8 @@ export function MRDListPage() {
           {
             header: 'Scope',
             accessorFn: (item: any) => item.jsonData?.spec?.scope ?? 'Cluster',
+            filterVariant: 'select',
+            filterSelectOptions: ['Cluster', 'Namespaced'],
           },
         ]}
       />
