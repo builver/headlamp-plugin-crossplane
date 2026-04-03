@@ -10,8 +10,8 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
-import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
-import { CrossplaneFunction, getHealthyCondition } from '../resources';
+import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
+import { CrossplaneFunction } from '../resources';
 
 export function FunctionListPage() {
   const filterFunction = useFilterFunc();
@@ -61,7 +61,7 @@ export function FunctionListPage() {
           },
           {
             header: 'Healthy',
-            accessorFn: item => getHealthyCondition(item)?.status ?? '-',
+            accessorFn: item => item.jsonData?.status?.conditions?.find(c => c.type === 'Healthy')?.status ?? '-',
           },
           {
             header: 'Current Revision',
@@ -85,12 +85,10 @@ export function FunctionDetailPage() {
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [fn] = CrossplaneFunction.useGet(name);
 
-  const healthy = fn ? getHealthyCondition(fn) : null;
-
   const extraInfo = fn
     ? [
-        { name: 'Ready', value: <ReadyStatus item={fn} /> },
-        { name: 'Synced', value: <SyncedStatus item={fn} /> },
+        { name: 'Installed', value: <InstalledStatus item={fn} /> },
+        { name: 'Healthy', value: <HealthyStatus item={fn} /> },
         { name: 'Package', value: fn.jsonData?.spec?.package ?? '-' },
         { name: 'Pull Policy', value: fn.jsonData?.spec?.packagePullPolicy ?? '-' },
         {
@@ -98,7 +96,6 @@ export function FunctionDetailPage() {
           value: fn.jsonData?.spec?.revisionActivationPolicy ?? '-',
         },
         { name: 'Current Revision', value: fn.jsonData?.status?.currentRevision ?? '-' },
-        { name: 'Healthy', value: healthy?.status ?? '-' },
       ]
     : [];
 

@@ -10,8 +10,8 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
-import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
-import { getHealthyCondition,Provider } from '../resources';
+import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
+import { Provider } from '../resources';
 
 export function ProviderListPage() {
   const filterFunction = useFilterFunc();
@@ -62,7 +62,7 @@ export function ProviderListPage() {
           {
             header: 'Healthy',
             accessorFn: item => {
-              const cond = getHealthyCondition(item);
+              const cond = item.jsonData?.status?.conditions?.find(c => c.type === 'Healthy');
               return cond?.status ?? '-';
             },
           },
@@ -88,12 +88,10 @@ export function ProviderDetailPage() {
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [provider] = Provider.useGet(name);
 
-  const healthy = provider ? getHealthyCondition(provider) : null;
-
   const extraInfo = provider
     ? [
-        { name: 'Ready', value: <ReadyStatus item={provider} /> },
-        { name: 'Synced', value: <SyncedStatus item={provider} /> },
+        { name: 'Installed', value: <InstalledStatus item={provider} /> },
+        { name: 'Healthy', value: <HealthyStatus item={provider} /> },
         { name: 'Package', value: provider.jsonData?.spec?.package ?? '-' },
         { name: 'Pull Policy', value: provider.jsonData?.spec?.packagePullPolicy ?? '-' },
         {
@@ -101,7 +99,6 @@ export function ProviderDetailPage() {
           value: provider.jsonData?.spec?.revisionActivationPolicy ?? '-',
         },
         { name: 'Current Revision', value: provider.jsonData?.status?.currentRevision ?? '-' },
-        { name: 'Healthy', value: healthy?.status ?? '-' },
       ]
     : [];
 

@@ -10,8 +10,8 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
-import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
-import { Configuration, getHealthyCondition } from '../resources';
+import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
+import { Configuration } from '../resources';
 
 export function ConfigurationListPage() {
   const filterFunction = useFilterFunc();
@@ -61,7 +61,7 @@ export function ConfigurationListPage() {
           },
           {
             header: 'Healthy',
-            accessorFn: item => getHealthyCondition(item)?.status ?? '-',
+            accessorFn: item => item.jsonData?.status?.conditions?.find(c => c.type === 'Healthy')?.status ?? '-',
           },
           {
             header: 'Current Revision',
@@ -85,12 +85,10 @@ export function ConfigurationDetailPage() {
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [config] = Configuration.useGet(name);
 
-  const healthy = config ? getHealthyCondition(config) : null;
-
   const extraInfo = config
     ? [
-        { name: 'Ready', value: <ReadyStatus item={config} /> },
-        { name: 'Synced', value: <SyncedStatus item={config} /> },
+        { name: 'Installed', value: <InstalledStatus item={config} /> },
+        { name: 'Healthy', value: <HealthyStatus item={config} /> },
         { name: 'Package', value: config.jsonData?.spec?.package ?? '-' },
         { name: 'Pull Policy', value: config.jsonData?.spec?.packagePullPolicy ?? '-' },
         {
@@ -98,7 +96,6 @@ export function ConfigurationDetailPage() {
           value: config.jsonData?.spec?.revisionActivationPolicy ?? '-',
         },
         { name: 'Current Revision', value: config.jsonData?.status?.currentRevision ?? '-' },
-        { name: 'Healthy', value: healthy?.status ?? '-' },
       ]
     : [];
 

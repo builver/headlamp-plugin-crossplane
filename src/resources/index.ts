@@ -122,6 +122,16 @@ export function getSyncedCondition(item: KubeObject) {
 }
 
 /**
+ * Returns the Installed condition from a Crossplane package resource's status.
+ * Present on pkg.crossplane.io resources (Provider, Configuration, Function).
+ */
+export function getInstalledCondition(item: KubeObject) {
+  const conditions: { type: string; status: string; reason?: string; message?: string }[] =
+    item?.jsonData?.status?.conditions ?? [];
+  return conditions.find(c => c.type === 'Installed') ?? null;
+}
+
+/**
  * Returns the Healthy condition from a Crossplane resource's status.
  * Present on package resources (Provider, Configuration, Function).
  */
