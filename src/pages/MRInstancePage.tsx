@@ -1,10 +1,12 @@
 import {
   ActionButton,
   ConditionsTable,
+  CreateResourceButton,
   DateLabel,
   Link,
   MainInfoSection,
   SectionBox,
+  SectionFilterHeader,
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
@@ -77,7 +79,21 @@ export function MRInstanceListPage() {
   const mrd = mrds?.find(m => m.metadata.name === mrdName) ?? null;
   const isNamespaced = mrd?.jsonData?.spec?.scope === 'Namespaced';
 
-  const DynClass = useMemo(() => (mrd ? makeMRClass(mrd) : null), [mrd?.metadata.uid]);
+  const DynClass = useMemo(() => {
+    if (!mrd) return null;
+    const cls = makeMRClass(mrd);
+    const orig = cls.getBaseObject.bind(cls);
+    cls.getBaseObject = () => ({
+      ...orig(),
+      spec: {
+        providerConfigRef: isNamespaced
+          ? { name: '', kind: 'ClusterProviderConfig' }
+          : { name: '' },
+        forProvider: {},
+      },
+    });
+    return cls;
+  }, [mrd?.metadata.uid, isNamespaced]);
   const [items] = (DynClass?.useList() ?? [null]) as [KubeObject[] | null, any];
 
   const kind: string = mrd?.jsonData?.spec?.names?.kind ?? mrdName;
@@ -91,7 +107,14 @@ export function MRInstanceListPage() {
     );
 
   return (
-    <SectionBox title={kind}>
+    <SectionBox
+      title={
+        <SectionFilterHeader
+          title={kind}
+          titleSideActions={DynClass ? [<CreateResourceButton resourceClass={DynClass} resourceName={kind} />] : []}
+        />
+      }
+    >
       <Table
         data={items}
         loading={items === null}
