@@ -1,11 +1,10 @@
 import { Icon } from '@iconify/react';
 import {
   ConditionsTable,
-  DateLabel,
   Link,
   MainInfoSection,
+  ResourceTable,
   SectionBox,
-  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
@@ -44,15 +43,15 @@ function ClaimTypeSection({ xrd }: ClaimTypeSectionProps) {
   if (!items?.length) return null;
 
   return (
-    <Table
+    <ResourceTable.default
       data={items}
-      loading={items === null}
       filterFunction={filterFunction}
+      enableRowActions
       columns={[
         {
-          header: 'Name',
-          accessorKey: 'metadata.name',
-          Cell: ({ row: { original: item } }: any) => (
+          label: 'Name',
+          getValue: (item: KubeObject) => item.metadata.name,
+          render: (item: KubeObject) => (
             <Link
               routeName="crossplane-claim-detail"
               params={{
@@ -65,32 +64,22 @@ function ClaimTypeSection({ xrd }: ClaimTypeSectionProps) {
             </Link>
           ),
         },
+        'namespace',
         {
-          header: 'Namespace',
-          accessorKey: 'metadata.namespace',
+          label: 'XR Ref',
+          getValue: (item: KubeObject) => item.jsonData?.spec?.resourceRef?.name ?? '-',
         },
         {
-          header: 'XR Ref',
-          accessorFn: (item: KubeObject) =>
-            item.jsonData?.spec?.resourceRef?.name ?? '-',
+          label: 'Ready',
+          getValue: (item: KubeObject) => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Ready')?.status ?? '-',
+          render: (item: KubeObject) => <ReadyStatus item={item} />,
         },
         {
-          header: 'Ready',
-          accessorFn: (item: KubeObject) => item,
-          Cell: ({ row: { original: item } }: any) => <ReadyStatus item={item} />,
+          label: 'Synced',
+          getValue: (item: KubeObject) => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Synced')?.status ?? '-',
+          render: (item: KubeObject) => <SyncedStatus item={item} />,
         },
-        {
-          header: 'Synced',
-          accessorFn: (item: KubeObject) => item,
-          Cell: ({ row: { original: item } }: any) => <SyncedStatus item={item} />,
-        },
-        {
-          header: 'Age',
-          accessorFn: (item: KubeObject) => -new Date(item.metadata.creationTimestamp).getTime(),
-          Cell: ({ row: { original: item } }: any) => (
-            <DateLabel date={item.metadata.creationTimestamp} format="mini" />
-          ),
-        },
+        'age',
       ]}
     />
   );

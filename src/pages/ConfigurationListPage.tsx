@@ -1,12 +1,11 @@
 import {
   ConditionsTable,
   CreateResourceButton,
-  DateLabel,
   Link,
   MainInfoSection,
+  ResourceTable,
   SectionBox,
   SectionFilterHeader,
-  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
@@ -34,45 +33,39 @@ export function ConfigurationListPage() {
         />
       }
     >
-      <Table
+      <ResourceTable.default
         data={configurations}
-        loading={configurations === null}
         filterFunction={filterFunction}
+        enableRowActions
         columns={[
           {
-            header: 'Name',
-            accessorKey: 'metadata.name',
-            Cell: ({ row: { original: item } }) => (
+            label: 'Name',
+            getValue: item => item.metadata.name,
+            render: item => (
               <Link routeName={`crossplane-configuration-detail-${item.metadata.name}`}>
                 {item.metadata.name}
               </Link>
             ),
           },
           {
-            header: 'Package',
-            accessorFn: item => item.jsonData?.spec?.package ?? '-',
+            label: 'Package',
+            getValue: item => item.jsonData?.spec?.package ?? '-',
           },
           {
-            header: 'Installed',
-            accessorFn: item => item.jsonData?.status?.conditions?.find(c => c.type === 'Installed')?.status ?? '-',
-            Cell: ({ row: { original: item } }) => <InstalledStatus item={item} />,
+            label: 'Installed',
+            getValue: item => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Installed')?.status ?? '-',
+            render: item => <InstalledStatus item={item} />,
           },
           {
-            header: 'Healthy',
-            accessorFn: item => item.jsonData?.status?.conditions?.find(c => c.type === 'Healthy')?.status ?? '-',
-            Cell: ({ row: { original: item } }) => <HealthyStatus item={item} />,
+            label: 'Healthy',
+            getValue: item => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Healthy')?.status ?? '-',
+            render: item => <HealthyStatus item={item} />,
           },
           {
-            header: 'Current Revision',
-            accessorFn: item => item.jsonData?.status?.currentRevision ?? '-',
+            label: 'Current Revision',
+            getValue: item => item.jsonData?.status?.currentRevision ?? '-',
           },
-          {
-            header: 'Age',
-            accessorFn: item => -new Date(item.metadata.creationTimestamp).getTime(),
-            Cell: ({ row: { original: item } }) => (
-              <DateLabel date={item.metadata.creationTimestamp} format="mini" />
-            ),
-          },
+          'age',
         ]}
       />
     </SectionBox>

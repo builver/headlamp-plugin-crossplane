@@ -3,12 +3,11 @@ import jsYaml from 'js-yaml';
 import {
   ConditionsTable,
   CreateResourceButton,
-  DateLabel,
   Link,
   MainInfoSection,
+  ResourceTable,
   SectionBox,
   SectionFilterHeader,
-  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { Icon } from '@iconify/react';
@@ -117,40 +116,34 @@ export function CompositionListPage() {
         />
       }
     >
-      <Table
+      <ResourceTable.default
         data={compositions}
-        loading={compositions === null}
         filterFunction={filterFunction}
+        enableRowActions
         columns={[
           {
-            header: 'Name',
-            accessorKey: 'metadata.name',
-            Cell: ({ row: { original: item } }) => (
+            label: 'Name',
+            getValue: item => item.metadata.name,
+            render: item => (
               <Link routeName={`crossplane-composition-detail-${item.metadata.name}`}>
                 {item.metadata.name}
               </Link>
             ),
           },
           {
-            header: 'Composite Type',
-            accessorFn: item => {
+            label: 'Composite Type',
+            getValue: item => {
               const ref = item.jsonData?.spec?.compositeTypeRef;
               return ref ? `${ref.apiVersion}/${ref.kind}` : '-';
             },
           },
           {
-            header: 'Pipeline',
-            accessorFn: item =>
+            label: 'Pipeline',
+            getValue: item =>
               (item.jsonData?.spec?.pipeline ?? []).map((s: PipelineStep) => s.step).join(', '),
-            Cell: ({ row: { original: item } }) => <PipelineSteps item={item} />,
+            render: item => <PipelineSteps item={item} />,
           },
-          {
-            header: 'Age',
-            accessorFn: item => -new Date(item.metadata.creationTimestamp).getTime(),
-            Cell: ({ row: { original: item } }) => (
-              <DateLabel date={item.metadata.creationTimestamp} format="mini" />
-            ),
-          },
+          'age',
         ]}
       />
     </SectionBox>
