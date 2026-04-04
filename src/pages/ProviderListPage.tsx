@@ -10,6 +10,7 @@ import {
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
 import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
+import { packageResourceColumns } from '../components/columns';
 import { Provider } from '../resources';
 
 export function ProviderListPage() {
@@ -47,25 +48,7 @@ export function ProviderListPage() {
               </Link>
             ),
           },
-          {
-            label: 'Package',
-            getValue: item => item.jsonData?.spec?.package ?? '-',
-          },
-          {
-            label: 'Installed',
-            getValue: item => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Installed')?.status ?? '-',
-            render: item => <InstalledStatus item={item} />,
-          },
-          {
-            label: 'Healthy',
-            getValue: item => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Healthy')?.status ?? '-',
-            render: item => <HealthyStatus item={item} />,
-          },
-          {
-            label: 'Current Revision',
-            getValue: item => item.jsonData?.status?.currentRevision ?? '-',
-          },
-          'age',
+          ...packageResourceColumns,
         ]}
       />
     </SectionBox>

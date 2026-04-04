@@ -3,7 +3,7 @@ import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useMemo } from 'react';
 import { getCompositionRef, makeXRClass, XRScope } from '../resources';
-import { ReadyStatus, SyncedStatus } from './ConditionStatus';
+import { readyColumn, syncedColumn } from './columns';
 
 interface XRTypeSectionProps {
   xrd: KubeObject;
@@ -50,16 +50,8 @@ export function XRTypeSection({ xrd, scope }: XRTypeSectionProps) {
       label: 'Composition',
       getValue: (item: KubeObject) => getCompositionRef(item, scope),
     },
-    {
-      label: 'Ready',
-      getValue: (item: KubeObject) => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Ready')?.status ?? '-',
-      render: (item: KubeObject) => <ReadyStatus item={item} />,
-    },
-    {
-      label: 'Synced',
-      getValue: (item: KubeObject) => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Synced')?.status ?? '-',
-      render: (item: KubeObject) => <SyncedStatus item={item} />,
-    },
+    readyColumn,
+    syncedColumn,
     'age' as const,
   ];
 

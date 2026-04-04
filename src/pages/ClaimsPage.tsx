@@ -23,6 +23,7 @@ import {
   getXRScope,
   makeClaimClass,
 } from '../resources';
+import { readyColumn, syncedColumn } from '../components/columns';
 
 // ── Claim type section (one per XRD) ─────────────────────────────────────────
 
@@ -69,16 +70,8 @@ function ClaimTypeSection({ xrd }: ClaimTypeSectionProps) {
           label: 'XR Ref',
           getValue: (item: KubeObject) => item.jsonData?.spec?.resourceRef?.name ?? '-',
         },
-        {
-          label: 'Ready',
-          getValue: (item: KubeObject) => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Ready')?.status ?? '-',
-          render: (item: KubeObject) => <ReadyStatus item={item} />,
-        },
-        {
-          label: 'Synced',
-          getValue: (item: KubeObject) => item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Synced')?.status ?? '-',
-          render: (item: KubeObject) => <SyncedStatus item={item} />,
-        },
+        readyColumn,
+        syncedColumn,
         'age',
       ]}
     />
