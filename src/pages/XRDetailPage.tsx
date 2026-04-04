@@ -22,13 +22,19 @@ import {
   XRScope,
 } from '../resources';
 
+// ── Shared hook ───────────────────────────────────────────────────────────────
+
+function useXRPlural() {
+  const { pathname } = useLocation();
+  const segments = pathname.split('/').filter(Boolean);
+  return segments[segments.indexOf('xrs') + 1] ?? '';
+}
+
 // ── Cluster-scoped XR detail ─────────────────────────────────────────────────
 
 export function XRDetailClusterPage() {
   const { name } = useParams<{ name: string }>();
-  const { pathname } = useLocation();
-  const segments = pathname.split('/').filter(Boolean);
-  const plural = segments[segments.indexOf('xrs') + 1] ?? '';
+  const plural = useXRPlural();
   const [xrds] = CompositeResourceDefinition.useList();
   const xrd = xrds?.find(x => x.jsonData?.spec?.names?.plural === plural) ?? null;
 
@@ -47,9 +53,7 @@ export function XRDetailClusterPage() {
 
 export function XRDetailNamespacedPage() {
   const { namespace, name } = useParams<{ namespace: string; name: string }>();
-  const { pathname } = useLocation();
-  const segments = pathname.split('/').filter(Boolean);
-  const plural = segments[segments.indexOf('xrs') + 1] ?? '';
+  const plural = useXRPlural();
   const [xrds] = CompositeResourceDefinition.useList();
   const xrd = xrds?.find(x => x.jsonData?.spec?.names?.plural === plural) ?? null;
 
