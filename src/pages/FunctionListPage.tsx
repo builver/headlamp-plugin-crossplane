@@ -8,10 +8,11 @@ import {
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
+import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
-import { packageResourceColumns } from '../components/columns';
-import { CrossplaneFunction } from '../resources';
+import { makeCompositeTypeColumn, packageResourceColumns } from '../components/columns';
+import { Composition, CompositeResourceDefinition, CrossplaneFunction } from '../resources';
 
 export function FunctionListPage() {
   const filterFunction = useFilterFunc();
@@ -55,6 +56,47 @@ export function FunctionListPage() {
   );
 }
 
+function CompositionsUsingFunction({ functionName }: { functionName: string }) {
+  const filterFunction = useFilterFunc();
+  const [compositions] = Composition.useList();
+  const [xrds] = CompositeResourceDefinition.useList();
+
+  const filtered = useMemo(
+    () =>
+      compositions?.filter(c =>
+        (c.jsonData?.spec?.pipeline ?? []).some(
+          (s: { functionRef?: { name?: string } }) => s.functionRef?.name === functionName
+        )
+      ) ?? [],
+    [compositions, functionName]
+  );
+
+  if (!filtered.length) return null;
+
+  return (
+    <SectionBox title="Used by Compositions">
+      <ResourceTable.default
+        data={filtered}
+        filterFunction={filterFunction}
+        enableRowActions
+        columns={[
+          {
+            label: 'Name',
+            getValue: item => item.metadata.name,
+            render: item => (
+              <Link routeName={`crossplane-composition-detail-${item.metadata.name}`}>
+                {item.metadata.name}
+              </Link>
+            ),
+          },
+          makeCompositeTypeColumn(xrds),
+          'age' as const,
+        ]}
+      />
+    </SectionBox>
+  );
+}
+
 export function FunctionDetailPage() {
   const location = useLocation();
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
@@ -78,6 +120,7 @@ export function FunctionDetailPage() {
     <>
       <MainInfoSection resource={fn} extraInfo={extraInfo} />
       {fn && <ConditionsTable resource={fn.jsonData} />}
+      {fn && <CompositionsUsingFunction functionName={fn.metadata.name} />}
     </>
   );
 }

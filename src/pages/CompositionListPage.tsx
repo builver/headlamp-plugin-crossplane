@@ -27,7 +27,7 @@ import { useTheme } from '@mui/material/styles';
 import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { makeXRNameColumn, readyColumn, syncedColumn } from '../components/columns';
+import { makeCompositeTypeColumn, makeXRNameColumn, readyColumn, syncedColumn } from '../components/columns';
 import {
   Composition,
   CompositeResourceDefinition,
@@ -132,6 +132,7 @@ function PipelineSteps({ item }: { item: KubeObject }) {
 export function CompositionListPage() {
   const filterFunction = useFilterFunc();
   const [compositions, error] = Composition.useList();
+  const [xrds] = CompositeResourceDefinition.useList();
 
   if (error?.status === 404) {
     return (
@@ -164,13 +165,7 @@ export function CompositionListPage() {
               </Link>
             ),
           },
-          {
-            label: 'Composite Type',
-            getValue: item => {
-              const ref = item.jsonData?.spec?.compositeTypeRef;
-              return ref ? `${ref.apiVersion}/${ref.kind}` : '-';
-            },
-          },
+          makeCompositeTypeColumn(xrds),
           {
             label: 'Pipeline',
             getValue: item =>

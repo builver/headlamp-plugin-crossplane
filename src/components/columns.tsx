@@ -1,5 +1,6 @@
 import { Link } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
+import { Box, Typography } from '@mui/material';
 import {
   getHealthyCondition,
   getInstalledCondition,
@@ -46,6 +47,42 @@ export const syncedColumn = {
   getValue: (item: KubeObject) => getSyncedCondition(item)?.status ?? '-',
   render: (item: KubeObject) => <SyncedStatus item={item} />,
 };
+
+/**
+ * Composite Type column — shows Kind (linked to XR list) + apiVersion in subtle style.
+ * Pass the current xrds list so the render can resolve plural for the route link.
+ */
+export function makeCompositeTypeColumn(xrds: KubeObject[] | null) {
+  // Pre-build a lookup map (kind/group → plural) once per xrds snapshot
+  const pluralByKindGroup = new Map(
+    (xrds ?? []).map(x => [
+      `${x.jsonData?.spec?.names?.kind}/${x.jsonData?.spec?.group}`,
+      x.jsonData?.spec?.names?.plural as string | undefined,
+    ])
+  );
+  return {
+    label: 'Composite Type',
+    getValue: (item: KubeObject) => {
+      const ref = item.jsonData?.spec?.compositeTypeRef;
+      return ref ? `${ref.apiVersion}/${ref.kind}` : '-';
+    },
+    render: (item: KubeObject) => {
+      const ref = item.jsonData?.spec?.compositeTypeRef;
+      if (!ref) return <span>-</span>;
+      const group = (ref.apiVersion as string)?.split('/')[0] ?? '';
+      const plural = pluralByKindGroup.get(`${ref.kind}/${group}`);
+      return (
+        <Box display="flex" alignItems="center" gap={1}>
+          {plural
+            ? <Link routeName={`crossplane-xr-kind-${plural}`}>{ref.kind}</Link>
+            : ref.kind
+          }
+          <Typography variant="caption" color="text.secondary">{ref.apiVersion}</Typography>
+        </Box>
+      );
+    },
+  };
+}
 
 /**
  * Shared columns for Provider, Function, and Configuration list tables.
