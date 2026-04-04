@@ -3,12 +3,15 @@ import jsYaml from 'js-yaml';
 import {
   ConditionsTable,
   CreateResourceButton,
+  DataField,
   Link,
   MainInfoSection,
   ResourceTable,
   SectionBox,
   SectionFilterHeader,
+  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { MatchExpressions } from '@kinvolk/headlamp-plugin/lib/components/common/Resource';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { Icon } from '@iconify/react';
 import {
@@ -26,11 +29,31 @@ import { Composition, CompositeResourceDefinition } from '../resources';
 
 const MAX_VISIBLE_STEPS = 7;
 
+interface RequiredResource {
+  requirementName: string;
+  apiVersion: string;
+  kind: string;
+  name?: string;
+  matchLabels?: Record<string, string>;
+  namespace?: string;
+}
+
+interface RequiredSchema {
+  requirementName: string;
+  apiVersion: string;
+  kind: string;
+}
+
+interface PipelineStepRequirements {
+  requiredResources?: RequiredResource[];
+  requiredSchemas?: RequiredSchema[];
+}
+
 interface PipelineStep {
   step: string;
   functionRef: { name: string };
   input?: Record<string, unknown>;
-  requirements?: Record<string, unknown>;
+  requirements?: PipelineStepRequirements;
 }
 
 function PipelineSteps({ item }: { item: KubeObject }) {
@@ -214,23 +237,51 @@ export function CompositionDetailPage() {
                   {s.input && (
                     <Box>
                       <Typography variant="overline" display="block" gutterBottom>Input</Typography>
-                      <Box
-                        component="pre"
-                        sx={{ m: 0, p: 1, borderRadius: 1, bgcolor: 'action.hover', fontSize: '0.75rem', overflow: 'auto' }}
-                      >
-                        {jsYaml.dump(s.input)}
-                      </Box>
+                      <DataField
+                        label="input.yaml"
+                        disableLabel
+                        value={jsYaml.dump(s.input)}
+                        onChange={() => {}}
+                      />
                     </Box>
                   )}
-                  {s.requirements && (
+                  {(s.requirements?.requiredResources?.length ?? 0) > 0 && (
                     <Box>
-                      <Typography variant="overline" display="block" gutterBottom>Requirements</Typography>
-                      <Box
-                        component="pre"
-                        sx={{ m: 0, p: 1, borderRadius: 1, bgcolor: 'action.hover', fontSize: '0.75rem', overflow: 'auto' }}
-                      >
-                        {jsYaml.dump(s.requirements)}
-                      </Box>
+                      <Typography variant="overline" display="block" gutterBottom>Required Resources</Typography>
+                      <Table
+                        data={s.requirements!.requiredResources!}
+                        columns={[
+                          { header: 'Name', accessorKey: 'requirementName' },
+                          { header: 'API Version', accessorKey: 'apiVersion' },
+                          { header: 'Kind', accessorKey: 'kind' },
+                          {
+                            header: 'Selector',
+                            accessorFn: (r: RequiredResource) =>
+                              r.name ?? Object.entries(r.matchLabels ?? {}).map(([k, v]) => `${k}=${v}`).join(', '),
+                            Cell: ({ row }: { row: { original: RequiredResource } }) =>
+                              row.original.name
+                                ? <>{row.original.name}</>
+                                : <MatchExpressions matchLabels={row.original.matchLabels} />,
+                          },
+                          {
+                            header: 'Namespace',
+                            accessorFn: (r: RequiredResource) => r.namespace ?? '-',
+                          },
+                        ]}
+                      />
+                    </Box>
+                  )}
+                  {(s.requirements?.requiredSchemas?.length ?? 0) > 0 && (
+                    <Box>
+                      <Typography variant="overline" display="block" gutterBottom>Required Schemas</Typography>
+                      <Table
+                        data={s.requirements!.requiredSchemas!}
+                        columns={[
+                          { header: 'Name', accessorKey: 'requirementName' },
+                          { header: 'API Version', accessorKey: 'apiVersion' },
+                          { header: 'Kind', accessorKey: 'kind' },
+                        ]}
+                      />
                     </Box>
                   )}
                 </Box>
