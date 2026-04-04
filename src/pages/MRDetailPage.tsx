@@ -16,9 +16,9 @@ import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
 import { PauseAction } from '../components/PauseAction';
 import { ManagedResourceDefinition, makeMRClass } from '../resources';
 
-// ── MR instance list ──────────────────────────────────────────────────────────
+// ── MR list ───────────────────────────────────────────────────────────────────
 
-export function MRInstanceListPage() {
+export function MRListPage() {
   const { mrdName } = useParams<{ mrdName: string }>();
   const [mrds] = ManagedResourceDefinition.useList();
   const filterFunction = useFilterFunc();
@@ -107,29 +107,29 @@ export function MRInstanceListPage() {
   );
 }
 
-// ── MR instance detail ────────────────────────────────────────────────────────
+// ── MR detail ─────────────────────────────────────────────────────────────────
 
-export function MRInstanceDetailClusterPage() {
+export function MRDetailClusterPage() {
   const { mrdName, name } = useParams<{ mrdName: string; name: string }>();
-  return <MRInstanceDetailInner mrdName={mrdName} name={name} />;
+  return <MRDetailInner mrdName={mrdName} name={name} />;
 }
 
-export function MRInstanceDetailNamespacedPage() {
+export function MRDetailNamespacedPage() {
   const { mrdName, namespace, name } = useParams<{
     mrdName: string;
     namespace: string;
     name: string;
   }>();
-  return <MRInstanceDetailInner mrdName={mrdName} name={name} namespace={namespace} />;
+  return <MRDetailInner mrdName={mrdName} name={name} namespace={namespace} />;
 }
 
-interface MRInstanceDetailInnerProps {
+interface MRDetailInnerProps {
   mrdName: string;
   name: string;
   namespace?: string;
 }
 
-export function MRInstanceDetailInner({ mrdName, name, namespace }: MRInstanceDetailInnerProps) {
+export function MRDetailInner({ mrdName, name, namespace }: MRDetailInnerProps) {
   const [mrds] = ManagedResourceDefinition.useList();
   const mrd = mrds?.find(m => m.metadata.name === mrdName) ?? null;
 

@@ -241,10 +241,10 @@ registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRCondition
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
 import { MRDDetailPage, MRDListPage } from './pages/MRDDetailPage';
 import {
-  MRInstanceDetailClusterPage,
-  MRInstanceDetailNamespacedPage,
-  MRInstanceListPage,
-} from './pages/MRInstancePage';
+  MRDetailClusterPage,
+  MRDetailNamespacedPage,
+  MRListPage,
+} from './pages/MRDetailPage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
 import {
@@ -392,7 +392,7 @@ registerRoute({
   sidebar: 'crossplane-mrds',
   name: 'crossplane-mr-list',
   exact: true,
-  component: () => <MRInstanceListPage />,
+  component: () => <MRListPage />,
 });
 
 registerRoute({
@@ -400,7 +400,7 @@ registerRoute({
   sidebar: 'crossplane-mrds',
   name: 'crossplane-mr-detail-cluster',
   exact: true,
-  component: () => <MRInstanceDetailClusterPage />,
+  component: () => <MRDetailClusterPage />,
 });
 
 registerRoute({
@@ -408,7 +408,7 @@ registerRoute({
   sidebar: 'crossplane-mrds',
   name: 'crossplane-mr-detail-namespaced',
   exact: true,
-  component: () => <MRInstanceDetailNamespacedPage />,
+  component: () => <MRDetailNamespacedPage />,
 });
 
 registerRoute({

@@ -7,7 +7,7 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useEffect, useState } from 'react';
-import { MRInstanceDetailInner } from './pages/MRInstancePage';
+import { MRDetailInner } from './pages/MRDetailPage';
 import { XRDetailInner } from './pages/XRDetailPage';
 import {
   CompositeResourceDefinition,
@@ -119,7 +119,7 @@ function MRMapDetail({ node }: { node: any }) {
 
   if (!mrd) return null;
 
-  return <MRInstanceDetailInner mrdName={mrd.metadata.name} name={name} namespace={namespace} />;
+  return <MRDetailInner mrdName={mrd.metadata.name} name={name} namespace={namespace} />;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────

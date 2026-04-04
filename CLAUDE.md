@@ -87,7 +87,7 @@ src/
 │   ├── ClaimsPage.tsx
 │   ├── CompositionListPage.tsx
 │   ├── ProviderListPage.tsx / FunctionListPage.tsx / ConfigurationListPage.tsx
-│   ├── MRDDetailPage.tsx / MRInstancePage.tsx
+│   ├── MRDDetailPage.tsx / MRDetailPage.tsx
 │   └── ...
 └── components/
     ├── columns.tsx              # shared ResourceTable column definitions (readyColumn, syncedColumn, packageResourceColumns, makeXRNameColumn)
