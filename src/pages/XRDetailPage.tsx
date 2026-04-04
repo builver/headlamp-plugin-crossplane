@@ -1,6 +1,7 @@
 import {
   ConditionsTable,
   DateLabel,
+  Link,
   MainInfoSection,
   SectionBox,
   Table,
@@ -125,7 +126,15 @@ export function XRDetailInner({ xrd, name, namespace }: XRDetailInnerProps) {
           ? [{ name: 'Responsive', value: responsive.status }]
           : []),
         { name: 'Scope', value: scope },
-        { name: 'Composition', value: getCompositionRef(item, scope) },
+        {
+          name: 'Composition',
+          value: (() => {
+            const name = getCompositionRef(item, scope);
+            return name !== '-'
+              ? <Link routeName={`crossplane-composition-detail-${name}`}>{name}</Link>
+              : '-';
+          })(),
+        },
         {
           name: 'Composition Revision',
           value:

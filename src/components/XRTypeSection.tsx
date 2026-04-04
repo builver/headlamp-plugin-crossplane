@@ -1,4 +1,4 @@
-import { ResourceTable } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { Link, ResourceTable } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useMemo } from 'react';
@@ -33,6 +33,12 @@ export function XRTypeSection({ xrd, scope }: XRTypeSectionProps) {
     {
       label: 'Composition',
       getValue: (item: KubeObject) => getCompositionRef(item, scope),
+      render: (item: KubeObject) => {
+        const name = getCompositionRef(item, scope);
+        return name !== '-'
+          ? <Link routeName={`crossplane-composition-detail-${name}`}>{name}</Link>
+          : <span>-</span>;
+      },
     },
     readyColumn,
     syncedColumn,
