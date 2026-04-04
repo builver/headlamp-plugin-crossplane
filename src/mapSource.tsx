@@ -7,6 +7,7 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useEffect, useState } from 'react';
+import { HealthyStatus, InstalledStatus } from './components/ConditionStatus';
 import { MRDetailInner } from './pages/MRDetailPage';
 import { XRDetailInner } from './pages/XRDetailPage';
 import {
@@ -14,6 +15,8 @@ import {
   getXRScope,
   makeXRClass,
   ManagedResourceDefinition,
+  Provider,
+  ProviderRevision,
   XRScope,
 } from './resources';
 
@@ -120,6 +123,68 @@ function MRMapDetail({ node }: { node: any }) {
   if (!mrd) return null;
 
   return <MRDetailInner mrdName={mrd.metadata.name} name={name} namespace={namespace} />;
+}
+
+/**
+ * Detail panel for Provider nodes.
+ */
+function ProviderMapDetail({ node }: { node: any }) {
+  const provider = node.kubeObject as KubeObject;
+  const name: string = provider.metadata.name;
+  const spec = provider.jsonData?.spec ?? {};
+  const status = provider.jsonData?.status ?? {};
+
+  return (
+    <SectionBox title="Provider">
+      <NameValueTable
+        rows={[
+          {
+            name: 'Name',
+            value: <Link routeName={`crossplane-provider-detail-${name}`}>{name}</Link>,
+          },
+          { name: 'Package', value: spec.package ?? '-' },
+          { name: 'Pull Policy', value: spec.packagePullPolicy ?? '-' },
+          { name: 'Revision Activation', value: spec.revisionActivationPolicy ?? '-' },
+          { name: 'Current Revision', value: status.currentRevision ?? '-' },
+          { name: 'Resolved Package', value: status.currentIdentifier ?? '-' },
+          { name: 'Installed', value: <InstalledStatus item={provider} /> },
+          { name: 'Healthy', value: <HealthyStatus item={provider} /> },
+        ]}
+      />
+    </SectionBox>
+  );
+}
+
+/**
+ * Detail panel for ProviderRevision nodes.
+ */
+function ProviderRevisionMapDetail({ node }: { node: any }) {
+  const rev = node.kubeObject as KubeObject;
+  const name: string = rev.metadata.name;
+  const spec = rev.jsonData?.spec ?? {};
+  const status = rev.jsonData?.status ?? {};
+
+  const depRow = (label: string, val: number | undefined) =>
+    ({ name: label, value: val !== undefined ? String(val) : '-' });
+
+  return (
+    <SectionBox title="Provider Revision">
+      <NameValueTable
+        rows={[
+          { name: 'Name', value: name },
+          { name: 'Revision #', value: spec.revision !== undefined ? String(spec.revision) : '-' },
+          { name: 'Desired State', value: spec.desiredState ?? '-' },
+          { name: 'Image', value: spec.image ?? '-' },
+          { name: 'Resolved Image', value: status.resolvedImage ?? '-' },
+          depRow('Found Dependencies', status.foundDependencies),
+          depRow('Installed Dependencies', status.installedDependencies),
+          depRow('Invalid Dependencies', status.invalidDependencies),
+          { name: 'Installed', value: <InstalledStatus item={rev} /> },
+          { name: 'Healthy', value: <HealthyStatus item={rev} /> },
+        ]}
+      />
+    </SectionBox>
+  );
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -423,6 +488,15 @@ async function processGetEntry(
   const uid: string | undefined = rawJson?.metadata?.uid;
   if (!uid) return [];
 
+  // Enrich the stub kubeObject with the full JSON so Headlamp's graph renderer
+  // can access status fields like readyReplicas on Deployment nodes.
+  const existingNode = ctx.nodeMap.get(compositeId) as any;
+  if (existingNode?.kubeObject) {
+    existingNode.kubeObject.jsonData = rawJson;
+    existingNode.kubeObject.spec   = rawJson?.spec;
+    existingNode.kubeObject.status = rawJson?.status;
+  }
+
   return ownerChildren.map(child => ({
     type: 'list-by-owner' as const,
     apiVersion: child.apiVersion,
@@ -468,6 +542,12 @@ async function processListByOwnerEntry(
     }
     ctx.visited.add(compositeId);
     ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds));
+    const listNode = ctx.nodeMap.get(compositeId) as any;
+    if (listNode?.kubeObject) {
+      listNode.kubeObject.jsonData = item;
+      listNode.kubeObject.spec   = item?.spec;
+      listNode.kubeObject.status = item?.status;
+    }
     addEdge(ctx, parentNodeId, compositeId);
 
     if (depth >= MAX_DEPTH) continue;
@@ -610,6 +690,140 @@ async function expandGraphAsync(
   }
 }
 
+// ── Provider graph expansion ──────────────────────────────────────────────────
+
+/**
+ * Detects the namespace where Crossplane is installed by looking for a
+ * Deployment named "crossplane". Tries crossplane-system first for speed,
+ * then falls back to a cluster-wide list.
+ */
+async function detectCrossplaneNamespace(signal: AbortSignal): Promise<string> {
+  try {
+    await ApiProxy.request('/apis/apps/v1/namespaces/crossplane-system/deployments/crossplane');
+    return 'crossplane-system';
+  } catch {
+    // not in crossplane-system, search all namespaces
+  }
+  if (signal.aborted) return 'crossplane-system';
+  try {
+    const resp = await ApiProxy.request('/apis/apps/v1/deployments');
+    if (signal.aborted) return 'crossplane-system';
+    const items: any[] = resp?.items ?? [];
+    const found = items.find((d: any) => d.metadata?.name === 'crossplane');
+    if (found?.metadata?.namespace) return found.metadata.namespace as string;
+  } catch {
+    // ignore
+  }
+  return 'crossplane-system';
+}
+
+/**
+ * Builds the Provider graph: Provider → ProviderRevision → Deployment → ReplicaSet → Pod.
+ * Provider and ProviderRevision nodes are seeded from the already-fetched lists;
+ * the Deployment and its owned children are resolved via the standard BFS.
+ */
+async function expandProviderGraphAsync(
+  providers: KubeObject[],
+  revisions: KubeObject[],
+  crds: KubeObject[] | null,
+  signal: AbortSignal,
+  onUpdate: (state: GraphState) => void,
+): Promise<void> {
+  const ctx: ExpandContext = {
+    xrdGroupSet: new Set(),
+    claimKindSet: new Set(),
+    xrdScopeMap: new Map(),
+    crds,
+    nodeMap: new Map(),
+    edgeSet: new Set(),
+    edges: [],
+    visited: new Set(),
+    signal,
+  };
+
+  const crossplaneNs = await detectCrossplaneNamespace(signal);
+  if (signal.aborted) return;
+
+  const revByName = new Map<string, KubeObject>(
+    revisions.map(r => [r.metadata.name as string, r])
+  );
+
+  let queue: QueueEntry[] = [];
+
+  for (const provider of providers) {
+    const uid: string = provider.metadata.uid;
+    if (ctx.visited.has(uid)) continue;
+    ctx.visited.add(uid);
+
+    ctx.nodeMap.set(uid, {
+      id: uid,
+      label: provider.metadata.name,
+      subtitle: 'Provider',
+      icon: <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />,
+      kubeObject: provider,
+      weight: 2000,
+      detailsComponent: ProviderMapDetail,
+    });
+
+    const currentRevision = provider.jsonData?.status?.currentRevision as string | undefined;
+    if (!currentRevision) continue;
+
+    const revision = revByName.get(currentRevision);
+    if (!revision) continue;
+
+    const revUid: string = revision.metadata.uid;
+    if (!ctx.visited.has(revUid)) {
+      ctx.visited.add(revUid);
+      ctx.nodeMap.set(revUid, {
+        id: revUid,
+        label: currentRevision,
+        subtitle: 'ProviderRevision',
+        icon: <Icon icon="mdi:source-branch" width="100%" height="100%" />,
+        kubeObject: revision,
+        detailsComponent: ProviderRevisionMapDetail,
+      });
+    }
+    addEdge(ctx, uid, revUid);
+
+    // The Deployment created by this revision shares its name and lives in the
+    // crossplane system namespace. Queue it for BFS expansion.
+    queue.push({
+      type: 'get',
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      name: currentRevision,
+      namespace: crossplaneNs,
+      parentNodeId: revUid,
+      depth: 1,
+      isXR: false,
+    });
+  }
+
+  onUpdate({ nodes: [...ctx.nodeMap.values()], edges: [...ctx.edges] });
+
+  while (queue.length > 0 && !signal.aborted) {
+    const wave = queue;
+    queue = [];
+
+    const results = await Promise.allSettled(
+      wave.map(entry => {
+        if (entry.type === 'get') return processGetEntry(entry, ctx);
+        return processListByOwnerEntry(entry, ctx);
+      })
+    );
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        queue.push(...result.value);
+      }
+    }
+
+    if (!signal.aborted) {
+      onUpdate({ nodes: [...ctx.nodeMap.values()], edges: [...ctx.edges] });
+    }
+  }
+}
+
 // ── Map source registration ───────────────────────────────────────────────────
 
 export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
@@ -672,10 +886,48 @@ export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
     };
   });
 
+  const compositeResourcesSource = {
+    id: 'crossplane-composite-resources',
+    label: 'Composite Resources',
+    icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
+    sources: subSources,
+  };
+
+  const providersSource = {
+    id: 'crossplane-providers',
+    label: 'Providers',
+    icon: <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />,
+    useData() {
+      const [graph, setGraph] = useState<GraphState | null>(null);
+      const [providers] = Provider.useList();
+      const [revisions] = ProviderRevision.useList();
+      const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList();
+
+      useEffect(() => {
+        if (!providers || !revisions) return;
+        const abort = new AbortController();
+        setGraph(null);
+
+        expandProviderGraphAsync(
+          providers,
+          revisions,
+          crds ?? null,
+          abort.signal,
+          setGraph,
+        );
+
+        return () => abort.abort();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [providers, revisions, crds]);
+
+      return graph;
+    },
+  };
+
   registerMapSource({
     id: 'crossplane',
     label: 'Crossplane',
     icon: <Icon icon="logos:crossplane-icon" width="100%" height="100%" />,
-    sources: subSources,
+    sources: [compositeResourcesSource, providersSource],
   } as any);
 }
