@@ -1,11 +1,31 @@
+import { Link } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import {
   getHealthyCondition,
   getInstalledCondition,
   getReadyCondition,
   getSyncedCondition,
+  XRScope,
 } from '../resources';
 import { HealthyStatus, InstalledStatus, ReadyStatus, SyncedStatus } from './ConditionStatus';
+
+/**
+ * Name column for XR tables — links to the correct detail route based on scope.
+ */
+export function makeXRNameColumn(plural: string, scope: XRScope) {
+  const isNamespaced = scope === 'Namespaced';
+  const detailRoute = isNamespaced ? 'crossplane-xr-detail-namespaced' : 'crossplane-xr-detail-cluster';
+  return {
+    label: 'Name',
+    getValue: (item: KubeObject) => item.metadata.name,
+    render: (item: KubeObject) => {
+      const params = isNamespaced
+        ? { plural, namespace: item.metadata.namespace, name: item.metadata.name }
+        : { plural, name: item.metadata.name };
+      return <Link routeName={detailRoute} params={params}>{item.metadata.name}</Link>;
+    },
+  };
+}
 
 /**
  * Ready condition column — used in XR and Claim tables.

@@ -1,9 +1,9 @@
-import { Link, ResourceTable } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { ResourceTable } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useMemo } from 'react';
 import { getCompositionRef, makeXRClass, XRScope } from '../resources';
-import { readyColumn, syncedColumn } from './columns';
+import { makeXRNameColumn, readyColumn, syncedColumn } from './columns';
 
 interface XRTypeSectionProps {
   xrd: KubeObject;
@@ -26,25 +26,9 @@ export function XRTypeSection({ xrd, scope }: XRTypeSectionProps) {
   if (!items?.length) return null;
 
   const isNamespaced = scope === 'Namespaced';
-  const detailRoute = isNamespaced
-    ? 'crossplane-xr-detail-namespaced'
-    : 'crossplane-xr-detail-cluster';
 
   const columns = [
-    {
-      label: 'Name',
-      getValue: (item: KubeObject) => item.metadata.name,
-      render: (item: KubeObject) => {
-        const params = isNamespaced
-          ? { plural, namespace: item.metadata.namespace, name: item.metadata.name }
-          : { plural, name: item.metadata.name };
-        return (
-          <Link routeName={detailRoute} params={params}>
-            {item.metadata.name}
-          </Link>
-        );
-      },
-    },
+    makeXRNameColumn(plural, scope),
     ...(isNamespaced ? ['namespace' as const] : []),
     {
       label: 'Composition',

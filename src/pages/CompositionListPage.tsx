@@ -1,5 +1,5 @@
 import React from 'react';
-import jsYaml from 'js-yaml';
+import { stringify as yamlStringify } from 'yaml';
 import {
   ConditionsTable,
   CreateResourceButton,
@@ -19,15 +19,26 @@ import {
   AccordionDetails,
   AccordionSummary,
   Box,
+  Chip,
   Tooltip,
   Typography,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
+import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Composition, CompositeResourceDefinition } from '../resources';
+import { makeXRNameColumn, readyColumn, syncedColumn } from '../components/columns';
+import {
+  Composition,
+  CompositeResourceDefinition,
+  getCompositionRef,
+  getXRScope,
+  makeXRClass,
+  XRScope,
+} from '../resources';
 
 const MAX_VISIBLE_STEPS = 7;
+
 
 interface RequiredResource {
   requirementName: string;
@@ -173,6 +184,41 @@ export function CompositionListPage() {
   );
 }
 
+interface ComposedXRsProps {
+  xrd: KubeObject;
+  compositionName: string;
+}
+
+function ComposedXRs({ xrd, compositionName }: ComposedXRsProps) {
+  const filterFunction = useFilterFunc();
+  const scope: XRScope = getXRScope(xrd);
+  const plural = xrd.jsonData?.spec?.names?.plural ?? '';
+  const DynClass = useMemo(() => makeXRClass(xrd), [xrd.metadata.uid]);
+  const [items] = DynClass.useList();
+
+  const filtered = useMemo(
+    () => items?.filter(item => getCompositionRef(item, scope) === compositionName) ?? [],
+    [items, compositionName, scope]
+  );
+
+  return (
+    <SectionBox title="Composite Resources">
+      <ResourceTable.default
+        data={filtered}
+        filterFunction={filterFunction}
+        enableRowActions
+        columns={[
+          makeXRNameColumn(plural, scope),
+          ...(scope === 'Namespaced' ? ['namespace' as const] : []),
+          readyColumn,
+          syncedColumn,
+          'age' as const,
+        ]}
+      />
+    </SectionBox>
+  );
+}
+
 export function CompositionDetailPage() {
   const location = useLocation();
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
@@ -212,6 +258,11 @@ export function CompositionDetailPage() {
 
   const pipeline: PipelineStep[] = comp?.jsonData?.spec?.pipeline ?? [];
 
+  const pipelineInputYaml = useMemo(
+    () => new Map(pipeline.filter(s => s.input).map(s => [s.step, yamlStringify(s.input!, { blockQuote: true })])),
+    [pipeline]
+  );
+
   return (
     <>
       <MainInfoSection resource={comp} extraInfo={extraInfo} />
@@ -221,26 +272,31 @@ export function CompositionDetailPage() {
           {pipeline.map((s, i) => (
             <Accordion key={s.step} defaultExpanded={i === 0}>
               <AccordionSummary expandIcon={<Icon icon="mdi:chevron-down" />}>
-                <Typography variant="subtitle1">{s.step}</Typography>
+                <Box display="flex" alignItems="center" width="100%" gap={1}>
+                  <Typography variant="subtitle1">{s.step}</Typography>
+                  {s.functionRef?.name && (
+                    <Box ml="auto" mr={1}>
+                      <Link routeName={`crossplane-function-detail-${s.functionRef.name}`}>
+                        <Chip
+                          label={s.functionRef.name}
+                          size="small"
+                          icon={<Icon icon="mdi:function" />}
+                          clickable
+                        />
+                      </Link>
+                    </Box>
+                  )}
+                </Box>
               </AccordionSummary>
               <AccordionDetails>
                 <Box display="flex" flexDirection="column" gap={1.5}>
-                  <Typography variant="subtitle2">
-                    {s.functionRef?.name ? (
-                      <Link routeName={`crossplane-function-detail-${s.functionRef.name}`}>
-                        {s.functionRef.name}
-                      </Link>
-                    ) : (
-                      '-'
-                    )}
-                  </Typography>
-                  {s.input && (
+                  {pipelineInputYaml.has(s.step) && (
                     <Box>
                       <Typography variant="overline" display="block" gutterBottom>Input</Typography>
                       <DataField
                         label="input.yaml"
                         disableLabel
-                        value={jsYaml.dump(s.input)}
+                        value={pipelineInputYaml.get(s.step)!}
                         onChange={() => {}}
                       />
                     </Box>
@@ -289,6 +345,9 @@ export function CompositionDetailPage() {
             </Accordion>
           ))}
         </SectionBox>
+      )}
+      {matchingXrd && comp && (
+        <ComposedXRs xrd={matchingXrd} compositionName={comp.metadata.name} />
       )}
     </>
   );
