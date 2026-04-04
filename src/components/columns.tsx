@@ -14,7 +14,9 @@ import { HealthyStatus, InstalledStatus, ReadyStatus, SyncedStatus } from './Con
  */
 export function makeXRNameColumn(plural: string, scope: XRScope) {
   const isNamespaced = scope === 'Namespaced';
-  const detailRoute = isNamespaced ? 'crossplane-xr-detail-namespaced' : 'crossplane-xr-detail-cluster';
+  const detailRoute = isNamespaced
+    ? `crossplane-xr-detail-namespaced-${plural}`
+    : `crossplane-xr-detail-cluster-${plural}`;
   return {
     label: 'Name',
     getValue: (item: KubeObject) => item.metadata.name,

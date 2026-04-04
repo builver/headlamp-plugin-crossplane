@@ -76,6 +76,20 @@ function CrossplaneWatcher() {
           exact: true,
           component: () => <XRKindPage />,
         });
+        registerRoute({
+          path: `/crossplane/xrs/${plural}/:name`,
+          sidebar: entryName,
+          name: `crossplane-xr-detail-cluster-${plural}`,
+          exact: true,
+          component: () => <XRDetailClusterPage />,
+        });
+        registerRoute({
+          path: `/crossplane/xrs/${plural}/:namespace/:name`,
+          sidebar: entryName,
+          name: `crossplane-xr-detail-namespaced-${plural}`,
+          exact: true,
+          component: () => <XRDetailNamespacedPage />,
+        });
       }
 
     }
@@ -347,22 +361,6 @@ registerRoute({
 });
 
 
-registerRoute({
-  path: '/crossplane/xrs/:plural/:name',
-  sidebar: 'crossplane-xrs',
-  name: 'crossplane-xr-detail-cluster',
-  exact: true,
-  component: () => <XRDetailClusterPage />,
-});
-
-// Composite Resources (namespaced — v2 Namespaced scope)
-registerRoute({
-  path: '/crossplane/xrs/:plural/:namespace/:name',
-  sidebar: 'crossplane-xrs',
-  name: 'crossplane-xr-detail-namespaced',
-  exact: true,
-  component: () => <XRDetailNamespacedPage />,
-});
 
 // Claims (LegacyCluster only)
 registerRoute({

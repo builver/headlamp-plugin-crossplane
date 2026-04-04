@@ -9,7 +9,7 @@ import {
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import Event from '@kinvolk/headlamp-plugin/lib/K8s/event';
 import { useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import { ComposedResources } from '../components/ComposedResources';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
 import { PauseAction } from '../components/PauseAction';
@@ -25,7 +25,10 @@ import {
 // ── Cluster-scoped XR detail ─────────────────────────────────────────────────
 
 export function XRDetailClusterPage() {
-  const { plural, name } = useParams<{ plural: string; name: string }>();
+  const { name } = useParams<{ name: string }>();
+  const { pathname } = useLocation();
+  const segments = pathname.split('/').filter(Boolean);
+  const plural = segments[segments.indexOf('xrs') + 1] ?? '';
   const [xrds] = CompositeResourceDefinition.useList();
   const xrd = xrds?.find(x => x.jsonData?.spec?.names?.plural === plural) ?? null;
 
@@ -43,11 +46,10 @@ export function XRDetailClusterPage() {
 // ── Namespaced XR detail ──────────────────────────────────────────────────────
 
 export function XRDetailNamespacedPage() {
-  const { plural, namespace, name } = useParams<{
-    plural: string;
-    namespace: string;
-    name: string;
-  }>();
+  const { namespace, name } = useParams<{ namespace: string; name: string }>();
+  const { pathname } = useLocation();
+  const segments = pathname.split('/').filter(Boolean);
+  const plural = segments[segments.indexOf('xrs') + 1] ?? '';
   const [xrds] = CompositeResourceDefinition.useList();
   const xrd = xrds?.find(x => x.jsonData?.spec?.names?.plural === plural) ?? null;
 
