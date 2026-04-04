@@ -340,6 +340,7 @@ function makeSubXRNode(
     subtitle: namespace ? `${kind} · ${namespace}` : kind,
     icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
     kubeObject: makeXRKubeObjectFromJson(rawJson),
+    weight: 1000,
     detailsComponent: XRMapDetail,
   };
 }
@@ -467,7 +468,12 @@ async function processGetEntry(
     return [];
   }
   ctx.visited.add(compositeId);
-  ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds, 'mdi:cube-outline', MRMapDetail));
+  const mrNode = makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds, 'mdi:cube-outline', MRMapDetail) as any;
+  // In the XR context (non-empty xrdGroupSet), direct children of an XR (depth 1)
+  // are intermediate nodes — give them weight 1000 so the layout places them
+  // between the root XR (2000) and any downstream resources (no weight).
+  if (ctx.xrdGroupSet.size > 0 && depth === 1) mrNode.weight = 1000;
+  ctx.nodeMap.set(compositeId, mrNode);
   addEdge(ctx, parentNodeId, compositeId);
 
   if (depth >= MAX_DEPTH) return [];
@@ -780,6 +786,7 @@ async function expandProviderGraphAsync(
         subtitle: 'ProviderRevision',
         icon: <Icon icon="mdi:source-branch" width="100%" height="100%" />,
         kubeObject: revision,
+        weight: 1000,
         detailsComponent: ProviderRevisionMapDetail,
       });
     }
