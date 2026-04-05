@@ -89,7 +89,10 @@ function PipelineSteps({ item }: { item: KubeObject }) {
                 <div><strong>{s.step}</strong></div>
                 {s.functionRef?.name && (
                   <Link routeName={`crossplane-function-detail-${s.functionRef.name}`}>
-                    {s.functionRef.name}
+                    <Box display="flex" alignItems="center" gap={0.5} component="span">
+                      <Icon icon="mdi:function" width="1em" height="1em" />
+                      {s.functionRef.name}
+                    </Box>
                   </Link>
                 )}
               </Box>
