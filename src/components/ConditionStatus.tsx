@@ -1,104 +1,46 @@
 import { StatusLabel } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { Tooltip, Typography } from '@mui/material';
-import { getHealthyCondition, getInstalledCondition, getReadyCondition, getSyncedCondition } from '../resources';
+import { type Condition, getHealthyCondition, getInstalledCondition, getReadyCondition, getRevisionHealthyCondition, getRuntimeHealthyCondition, getSyncedCondition } from '../resources';
 
-interface ReadyStatusProps {
-  item: KubeObject;
-}
-
-/**
- * Displays the Ready condition of a Crossplane resource.
- * Mirrors the pattern from the Flux plugin's StatusLabel.
- */
-export function ReadyStatus({ item }: ReadyStatusProps) {
-  const ready = getReadyCondition(item);
-
-  if (!ready) {
-    return <span>-</span>;
-  }
-
-  if (ready.status === 'Unknown') {
-    return <StatusLabel status="warning">Reconciling…</StatusLabel>;
-  }
-
-  const isReady = ready.status === 'True';
+function renderConditionStatus(
+  cond: Condition | null,
+  unknownLabel: string,
+  trueLabel: string,
+  falseLabel: string,
+): JSX.Element {
+  if (!cond) return <span>-</span>;
+  if (cond.status === 'Unknown') return <StatusLabel status="warning">{unknownLabel}</StatusLabel>;
+  const ok = cond.status === 'True';
   return (
-    <StatusLabel status={isReady ? 'success' : 'error'}>
-      <Tooltip title={ready.message ?? ''}>
-        <Typography component="span">{isReady ? 'Ready' : ready.reason ?? 'Not Ready'}</Typography>
+    <StatusLabel status={ok ? 'success' : 'error'}>
+      <Tooltip title={cond.message ?? ''}>
+        <Typography component="span">{ok ? trueLabel : cond.reason ?? falseLabel}</Typography>
       </Tooltip>
     </StatusLabel>
   );
+}
+
+export function ReadyStatus({ item }: { item: KubeObject }) {
+  return renderConditionStatus(getReadyCondition(item), 'Reconciling…', 'Ready', 'Not Ready');
 }
 
 export function InstalledStatus({ item }: { item: KubeObject }) {
-  const installed = getInstalledCondition(item);
-
-  if (!installed) {
-    return <span>-</span>;
-  }
-
-  if (installed.status === 'Unknown') {
-    return <StatusLabel status="warning">Installing…</StatusLabel>;
-  }
-
-  const isInstalled = installed.status === 'True';
-  return (
-    <StatusLabel status={isInstalled ? 'success' : 'error'}>
-      <Tooltip title={installed.message ?? ''}>
-        <Typography component="span">{isInstalled ? 'Installed' : installed.reason ?? 'Not Installed'}</Typography>
-      </Tooltip>
-    </StatusLabel>
-  );
+  return renderConditionStatus(getInstalledCondition(item), 'Installing…', 'Installed', 'Not Installed');
 }
 
 export function HealthyStatus({ item }: { item: KubeObject }) {
-  const healthy = getHealthyCondition(item);
-
-  if (!healthy) {
-    return <span>-</span>;
-  }
-
-  if (healthy.status === 'Unknown') {
-    return <StatusLabel status="warning">Unknown</StatusLabel>;
-  }
-
-  const isHealthy = healthy.status === 'True';
-  return (
-    <StatusLabel status={isHealthy ? 'success' : 'error'}>
-      <Tooltip title={healthy.message ?? ''}>
-        <Typography component="span">{isHealthy ? 'Healthy' : healthy.reason ?? 'Unhealthy'}</Typography>
-      </Tooltip>
-    </StatusLabel>
-  );
+  return renderConditionStatus(getHealthyCondition(item), 'Unknown', 'Healthy', 'Unhealthy');
 }
 
-interface SyncedStatusProps {
-  item: KubeObject;
+export function RuntimeHealthyStatus({ item }: { item: KubeObject }) {
+  return renderConditionStatus(getRuntimeHealthyCondition(item), 'Unknown', 'Runtime Healthy', 'Runtime Unhealthy');
 }
 
-/**
- * Displays the Synced condition of a Crossplane resource.
- * Most Crossplane managed resources expose both Ready and Synced conditions.
- */
-export function SyncedStatus({ item }: SyncedStatusProps) {
-  const synced = getSyncedCondition(item);
+export function RevisionHealthyStatus({ item }: { item: KubeObject }) {
+  return renderConditionStatus(getRevisionHealthyCondition(item), 'Unknown', 'Revision Healthy', 'Revision Unhealthy');
+}
 
-  if (!synced) {
-    return <span>-</span>;
-  }
-
-  if (synced.status === 'Unknown') {
-    return <StatusLabel status="warning">Unknown</StatusLabel>;
-  }
-
-  const isSynced = synced.status === 'True';
-  return (
-    <StatusLabel status={isSynced ? 'success' : 'error'}>
-      <Tooltip title={synced.message ?? ''}>
-        <Typography component="span">{isSynced ? 'Synced' : synced.reason ?? 'Not Synced'}</Typography>
-      </Tooltip>
-    </StatusLabel>
-  );
+export function SyncedStatus({ item }: { item: KubeObject }) {
+  return renderConditionStatus(getSyncedCondition(item), 'Unknown', 'Synced', 'Not Synced');
 }

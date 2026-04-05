@@ -102,53 +102,25 @@ export class EnvironmentConfig extends KubeObject {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/**
- * Returns the Ready condition from a Crossplane resource's status.
- * Access via item.jsonData.status.conditions
- */
-export function getReadyCondition(item: KubeObject) {
-  const conditions: { type: string; status: string; reason?: string; message?: string }[] =
-    item?.jsonData?.status?.conditions ?? [];
-  return conditions.find(c => c.type === 'Ready') ?? null;
+export type Condition = { type: string; status: string; reason?: string; message?: string };
+
+function findCondition(item: KubeObject, type: string): Condition | null {
+  const conditions: Condition[] = item?.jsonData?.status?.conditions ?? [];
+  return conditions.find(c => c.type === type) ?? null;
 }
 
-/**
- * Returns the Synced condition from a Crossplane resource's status.
- */
-export function getSyncedCondition(item: KubeObject) {
-  const conditions: { type: string; status: string; reason?: string; message?: string }[] =
-    item?.jsonData?.status?.conditions ?? [];
-  return conditions.find(c => c.type === 'Synced') ?? null;
-}
-
-/**
- * Returns the Installed condition from a Crossplane package resource's status.
- * Present on pkg.crossplane.io resources (Provider, Configuration, Function).
- */
-export function getInstalledCondition(item: KubeObject) {
-  const conditions: { type: string; status: string; reason?: string; message?: string }[] =
-    item?.jsonData?.status?.conditions ?? [];
-  return conditions.find(c => c.type === 'Installed') ?? null;
-}
-
-/**
- * Returns the Healthy condition from a Crossplane resource's status.
- * Present on package resources (Provider, Configuration, Function).
- */
-export function getHealthyCondition(item: KubeObject) {
-  const conditions: { type: string; status: string; reason?: string; message?: string }[] =
-    item?.jsonData?.status?.conditions ?? [];
-  return conditions.find(c => c.type === 'Healthy') ?? null;
-}
-
-/**
- * Returns the Responsive condition (v2 only) — tracks circuit-breaker state.
- */
-export function getResponsiveCondition(item: KubeObject) {
-  const conditions: { type: string; status: string; reason?: string; message?: string }[] =
-    item?.jsonData?.status?.conditions ?? [];
-  return conditions.find(c => c.type === 'Responsive') ?? null;
-}
+export const getReadyCondition           = (item: KubeObject) => findCondition(item, 'Ready');
+export const getSyncedCondition          = (item: KubeObject) => findCondition(item, 'Synced');
+/** Present on pkg.crossplane.io resources (Provider, Configuration, Function). */
+export const getInstalledCondition       = (item: KubeObject) => findCondition(item, 'Installed');
+/** Present on package resources (Provider, Configuration, Function). */
+export const getHealthyCondition         = (item: KubeObject) => findCondition(item, 'Healthy');
+/** ProviderRevision: whether the runtime Deployment/Pod is healthy. */
+export const getRuntimeHealthyCondition  = (item: KubeObject) => findCondition(item, 'RuntimeHealthy');
+/** ProviderRevision: whether the revision itself is healthy. */
+export const getRevisionHealthyCondition = (item: KubeObject) => findCondition(item, 'RevisionHealthy');
+/** v2 only — tracks circuit-breaker state. */
+export const getResponsiveCondition      = (item: KubeObject) => findCondition(item, 'Responsive');
 
 // ── XR / Claim dynamic class helpers ────────────────────────────────────────
 

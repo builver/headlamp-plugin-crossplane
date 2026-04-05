@@ -1,14 +1,16 @@
 import { Icon } from '@iconify/react';
-import { ApiProxy, K8s, registerMapSource } from '@kinvolk/headlamp-plugin/lib';
+import { ApiProxy, K8s, registerKubeObjectGlance, registerMapSource } from '@kinvolk/headlamp-plugin/lib';
 import {
   Link,
   NameValueTable,
   SectionBox,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
+import { Box } from '@mui/material';
 import { useEffect, useState } from 'react';
-import { HealthyStatus, InstalledStatus } from './components/ConditionStatus';
+import { HealthyStatus, InstalledStatus, RevisionHealthyStatus, RuntimeHealthyStatus } from './components/ConditionStatus';
 import { MRDetailInner } from './pages/MRDetailPage';
+import { ProviderDetailInner } from './pages/ProviderListPage';
 import { XRDetailInner } from './pages/XRDetailPage';
 import {
   CompositeResourceDefinition,
@@ -126,33 +128,11 @@ function MRMapDetail({ node }: { node: any }) {
 }
 
 /**
- * Detail panel for Provider nodes.
+ * Detail panel for Provider nodes — delegates to the Provider detail page component.
  */
 function ProviderMapDetail({ node }: { node: any }) {
   const provider = node.kubeObject as KubeObject;
-  const name: string = provider.metadata.name;
-  const spec = provider.jsonData?.spec ?? {};
-  const status = provider.jsonData?.status ?? {};
-
-  return (
-    <SectionBox title="Provider">
-      <NameValueTable
-        rows={[
-          {
-            name: 'Name',
-            value: <Link routeName={`crossplane-provider-detail-${name}`}>{name}</Link>,
-          },
-          { name: 'Package', value: spec.package ?? '-' },
-          { name: 'Pull Policy', value: spec.packagePullPolicy ?? '-' },
-          { name: 'Revision Activation', value: spec.revisionActivationPolicy ?? '-' },
-          { name: 'Current Revision', value: status.currentRevision ?? '-' },
-          { name: 'Resolved Package', value: status.currentIdentifier ?? '-' },
-          { name: 'Installed', value: <InstalledStatus item={provider} /> },
-          { name: 'Healthy', value: <HealthyStatus item={provider} /> },
-        ]}
-      />
-    </SectionBox>
-  );
+  return <ProviderDetailInner name={provider.metadata.name} />;
 }
 
 /**
@@ -179,8 +159,8 @@ function ProviderRevisionMapDetail({ node }: { node: any }) {
           depRow('Found Dependencies', status.foundDependencies),
           depRow('Installed Dependencies', status.installedDependencies),
           depRow('Invalid Dependencies', status.invalidDependencies),
-          { name: 'Installed', value: <InstalledStatus item={rev} /> },
-          { name: 'Healthy', value: <HealthyStatus item={rev} /> },
+          { name: 'Runtime Healthy', value: <RuntimeHealthyStatus item={rev} /> },
+          { name: 'Revision Healthy', value: <RevisionHealthyStatus item={rev} /> },
         ]}
       />
     </SectionBox>
@@ -783,16 +763,9 @@ async function expandProviderGraphAsync(
         subtitle: `Deployment · ${deployNs}`,
         kubeObject: deployment,
       });
-      // Continue BFS expansion to ReplicaSet → Pod from the deployment's UID.
-      queue.push({
-        type: 'list-by-owner',
-        apiVersion: 'apps/v1',
-        kind: 'ReplicaSet',
-        namespace: deployNs,
-        ownerUid: deployUid,
-        parentNodeId: deployUid,
-        depth: 2,
-      });
+      // Do NOT BFS-expand the Deployment's children — Headlamp's built-in
+      // workloads source already owns the ReplicaSet → Pod chain via the
+      // pre-existing node, so expanding here would duplicate the ReplicaSet.
     }
     addEdge(ctx, revUid, deployUid);
   }
@@ -821,6 +794,33 @@ async function expandProviderGraphAsync(
     }
   }
 }
+
+// ── Map source registration ───────────────────────────────────────────────────
+
+// ── Glance views ──────────────────────────────────────────────────────────────
+
+type StatusChip = (props: { item: KubeObject }) => JSX.Element;
+
+function makeGlance(kind: string, chips: StatusChip[]) {
+  return function GlanceComponent({ node }: { node: any }) {
+    const item = node.kubeObject as KubeObject | undefined;
+    if (item?.kind !== kind) return null;
+    return (
+      <Box display="flex" gap={0.5} flexWrap="wrap">
+        {chips.map((Chip, i) => <Chip key={i} item={item} />)}
+      </Box>
+    );
+  };
+}
+
+registerKubeObjectGlance({
+  id: 'crossplane-provider-glance',
+  component: makeGlance('Provider', [InstalledStatus, HealthyStatus]),
+});
+registerKubeObjectGlance({
+  id: 'crossplane-provider-revision-glance',
+  component: makeGlance('ProviderRevision', [RuntimeHealthyStatus, RevisionHealthyStatus]),
+});
 
 // ── Map source registration ───────────────────────────────────────────────────
 

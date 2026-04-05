@@ -55,9 +55,7 @@ export function ProviderListPage() {
   );
 }
 
-export function ProviderDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+export function ProviderDetailInner({ name }: { name: string }) {
   const [provider] = Provider.useGet(name);
 
   const extraInfo = provider
@@ -80,4 +78,10 @@ export function ProviderDetailPage() {
       {provider && <ConditionsTable resource={provider.jsonData} />}
     </>
   );
+}
+
+export function ProviderDetailPage() {
+  const location = useLocation();
+  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  return <ProviderDetailInner name={name} />;
 }
