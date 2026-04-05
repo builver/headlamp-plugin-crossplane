@@ -97,9 +97,7 @@ function CompositionsUsingFunction({ functionName }: { functionName: string }) {
   );
 }
 
-export function FunctionDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+export function FunctionDetailInner({ name }: { name: string }) {
   const [fn] = CrossplaneFunction.useGet(name);
 
   const extraInfo = fn
@@ -123,4 +121,10 @@ export function FunctionDetailPage() {
       {fn && <CompositionsUsingFunction functionName={fn.metadata.name} />}
     </>
   );
+}
+
+export function FunctionDetailPage() {
+  const location = useLocation();
+  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  return <FunctionDetailInner name={name} />;
 }

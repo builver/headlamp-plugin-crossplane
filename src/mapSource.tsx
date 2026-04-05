@@ -9,11 +9,14 @@ import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { Box } from '@mui/material';
 import { useEffect, useState } from 'react';
 import { HealthyStatus, InstalledStatus, RevisionHealthyStatus, RuntimeHealthyStatus } from './components/ConditionStatus';
+import { FunctionDetailInner } from './pages/FunctionListPage';
 import { MRDetailInner } from './pages/MRDetailPage';
 import { ProviderDetailInner } from './pages/ProviderListPage';
 import { XRDetailInner } from './pages/XRDetailPage';
 import {
   CompositeResourceDefinition,
+  CrossplaneFunction,
+  FunctionRevision,
   getXRScope,
   makeXRClass,
   ManagedResourceDefinition,
@@ -127,45 +130,46 @@ function MRMapDetail({ node }: { node: any }) {
   return <MRDetailInner mrdName={mrd.metadata.name} name={name} namespace={namespace} />;
 }
 
-/**
- * Detail panel for Provider nodes — delegates to the Provider detail page component.
- */
 function ProviderMapDetail({ node }: { node: any }) {
   const provider = node.kubeObject as KubeObject;
   return <ProviderDetailInner name={provider.metadata.name} />;
 }
 
-/**
- * Detail panel for ProviderRevision nodes.
- */
-function ProviderRevisionMapDetail({ node }: { node: any }) {
-  const rev = node.kubeObject as KubeObject;
-  const name: string = rev.metadata.name;
-  const spec = rev.jsonData?.spec ?? {};
-  const status = rev.jsonData?.status ?? {};
-
-  const depRow = (label: string, val: number | undefined) =>
-    ({ name: label, value: val !== undefined ? String(val) : '-' });
-
-  return (
-    <SectionBox title="Provider Revision">
-      <NameValueTable
-        rows={[
-          { name: 'Name', value: name },
-          { name: 'Revision #', value: spec.revision !== undefined ? String(spec.revision) : '-' },
-          { name: 'Desired State', value: spec.desiredState ?? '-' },
-          { name: 'Image', value: spec.image ?? '-' },
-          { name: 'Resolved Image', value: status.resolvedImage ?? '-' },
-          depRow('Found Dependencies', status.foundDependencies),
-          depRow('Installed Dependencies', status.installedDependencies),
-          depRow('Invalid Dependencies', status.invalidDependencies),
-          { name: 'Runtime Healthy', value: <RuntimeHealthyStatus item={rev} /> },
-          { name: 'Revision Healthy', value: <RevisionHealthyStatus item={rev} /> },
-        ]}
-      />
-    </SectionBox>
-  );
+function FunctionMapDetail({ node }: { node: any }) {
+  const fn = node.kubeObject as KubeObject;
+  return <FunctionDetailInner name={fn.metadata.name} />;
 }
+
+function makeRevisionMapDetail(title: string) {
+  return function RevisionMapDetail({ node }: { node: any }) {
+    const rev = node.kubeObject as KubeObject;
+    const spec = rev.jsonData?.spec ?? {};
+    const status = rev.jsonData?.status ?? {};
+    const depRow = (label: string, val: number | undefined) =>
+      ({ name: label, value: val !== undefined ? String(val) : '-' });
+    return (
+      <SectionBox title={title}>
+        <NameValueTable
+          rows={[
+            { name: 'Name', value: rev.metadata.name },
+            { name: 'Revision #', value: spec.revision !== undefined ? String(spec.revision) : '-' },
+            { name: 'Desired State', value: spec.desiredState ?? '-' },
+            { name: 'Image', value: spec.image ?? '-' },
+            { name: 'Resolved Image', value: status.resolvedImage ?? '-' },
+            depRow('Found Dependencies', status.foundDependencies),
+            depRow('Installed Dependencies', status.installedDependencies),
+            depRow('Invalid Dependencies', status.invalidDependencies),
+            { name: 'Runtime Healthy', value: <RuntimeHealthyStatus item={rev} /> },
+            { name: 'Revision Healthy', value: <RevisionHealthyStatus item={rev} /> },
+          ]}
+        />
+      </SectionBox>
+    );
+  };
+}
+
+const ProviderRevisionMapDetail = makeRevisionMapDetail('Provider Revision');
+const FunctionRevisionMapDetail = makeRevisionMapDetail('Function Revision');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -676,22 +680,30 @@ async function expandGraphAsync(
   }
 }
 
-// ── Provider graph expansion ──────────────────────────────────────────────────
+// ── Package graph expansion (Provider + Function) ─────────────────────────────
 
+interface PackageGraphConfig {
+  rootSubtitle: string;
+  rootIcon: JSX.Element;
+  rootDetailsComponent: (props: { node: any }) => JSX.Element | null;
+  revisionSubtitle: string;
+  revisionDetailsComponent: (props: { node: any }) => JSX.Element | null;
+}
 
 /**
- * Builds the Provider graph: Provider → ProviderRevision → Deployment → ReplicaSet → Pod.
- * Provider and ProviderRevision nodes are seeded from the already-fetched lists.
+ * Builds a package graph: Package → PackageRevision → Deployment.
+ * Shared by Provider and Function sources — only icons/labels differ.
  * The Deployment edge targets the pre-existing node (by real UID) from Deployment.useList(),
  * mirroring the flux plugin pattern so the node is shared with Headlamp's workloads map.
  */
-async function expandProviderGraphAsync(
-  providers: KubeObject[],
+async function expandPackageGraphAsync(
+  packages: KubeObject[],
   revisions: KubeObject[],
   deployments: KubeObject[] | null,
   crds: KubeObject[] | null,
   signal: AbortSignal,
   onUpdate: (state: GraphState) => void,
+  config: PackageGraphConfig,
 ): Promise<void> {
   const ctx: ExpandContext = {
     xrdGroupSet: new Set(),
@@ -711,22 +723,22 @@ async function expandProviderGraphAsync(
 
   let queue: QueueEntry[] = [];
 
-  for (const provider of providers) {
-    const uid: string = provider.metadata.uid;
+  for (const pkg of packages) {
+    const uid: string = pkg.metadata.uid;
     if (ctx.visited.has(uid)) continue;
     ctx.visited.add(uid);
 
     ctx.nodeMap.set(uid, {
       id: uid,
-      label: provider.metadata.name,
-      subtitle: 'Provider',
-      icon: <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />,
-      kubeObject: provider,
+      label: pkg.metadata.name,
+      subtitle: config.rootSubtitle,
+      icon: config.rootIcon,
+      kubeObject: pkg,
       weight: 2000,
-      detailsComponent: ProviderMapDetail,
+      detailsComponent: config.rootDetailsComponent,
     });
 
-    const currentRevision = provider.jsonData?.status?.currentRevision as string | undefined;
+    const currentRevision = pkg.jsonData?.status?.currentRevision as string | undefined;
     if (!currentRevision) continue;
 
     const revision = revByName.get(currentRevision);
@@ -738,11 +750,11 @@ async function expandProviderGraphAsync(
       ctx.nodeMap.set(revUid, {
         id: revUid,
         label: currentRevision,
-        subtitle: 'ProviderRevision',
+        subtitle: config.revisionSubtitle,
         icon: <Icon icon="mdi:source-branch" width="100%" height="100%" />,
         kubeObject: revision,
         weight: 1000,
-        detailsComponent: ProviderRevisionMapDetail,
+        detailsComponent: config.revisionDetailsComponent,
       });
     }
     addEdge(ctx, uid, revUid);
@@ -821,8 +833,58 @@ registerKubeObjectGlance({
   id: 'crossplane-provider-revision-glance',
   component: makeGlance('ProviderRevision', [RuntimeHealthyStatus, RevisionHealthyStatus]),
 });
+registerKubeObjectGlance({
+  id: 'crossplane-function-glance',
+  component: makeGlance('Function', [InstalledStatus, HealthyStatus]),
+});
+registerKubeObjectGlance({
+  id: 'crossplane-function-revision-glance',
+  component: makeGlance('FunctionRevision', [RuntimeHealthyStatus, RevisionHealthyStatus]),
+});
 
 // ── Map source registration ───────────────────────────────────────────────────
+
+function makePackageSource(
+  id: string,
+  label: string,
+  usePackages: () => [KubeObject[] | null, any],
+  useRevisions: () => [KubeObject[] | null, any],
+  config: PackageGraphConfig,
+) {
+  return {
+    id,
+    label,
+    icon: config.rootIcon,
+    useData() {
+      const [graph, setGraph] = useState<GraphState | null>(null);
+      const [packages] = usePackages();
+      const [revisions] = useRevisions();
+      const [deployments] = K8s.ResourceClasses.Deployment.useList();
+      const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList();
+
+      useEffect(() => {
+        if (!packages || !revisions) return;
+        const abort = new AbortController();
+        setGraph(null);
+
+        expandPackageGraphAsync(
+          packages,
+          revisions,
+          deployments ?? null,
+          crds ?? null,
+          abort.signal,
+          setGraph,
+          config,
+        );
+
+        return () => abort.abort();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [packages, revisions, deployments, crds]);
+
+      return graph;
+    },
+  };
+}
 
 export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
   // Build lookup structures from XRDs
@@ -891,43 +953,38 @@ export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
     sources: subSources,
   };
 
-  const providersSource = {
-    id: 'crossplane-providers',
-    label: 'Providers',
-    icon: <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />,
-    useData() {
-      const [graph, setGraph] = useState<GraphState | null>(null);
-      const [providers] = Provider.useList();
-      const [revisions] = ProviderRevision.useList();
-      const [deployments] = K8s.ResourceClasses.Deployment.useList();
-      const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList();
-
-      useEffect(() => {
-        if (!providers || !revisions) return;
-        const abort = new AbortController();
-        setGraph(null);
-
-        expandProviderGraphAsync(
-          providers,
-          revisions,
-          deployments ?? null,
-          crds ?? null,
-          abort.signal,
-          setGraph,
-        );
-
-        return () => abort.abort();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [providers, revisions, deployments, crds]);
-
-      return graph;
+  const providersSource = makePackageSource(
+    'crossplane-providers',
+    'Providers',
+    Provider.useList.bind(Provider),
+    ProviderRevision.useList.bind(ProviderRevision),
+    {
+      rootSubtitle: 'Provider',
+      rootIcon: <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />,
+      rootDetailsComponent: ProviderMapDetail,
+      revisionSubtitle: 'ProviderRevision',
+      revisionDetailsComponent: ProviderRevisionMapDetail,
     },
-  };
+  );
+
+  const functionsSource = makePackageSource(
+    'crossplane-functions',
+    'Functions',
+    CrossplaneFunction.useList.bind(CrossplaneFunction),
+    FunctionRevision.useList.bind(FunctionRevision),
+    {
+      rootSubtitle: 'Function',
+      rootIcon: <Icon icon="mdi:function" width="100%" height="100%" />,
+      rootDetailsComponent: FunctionMapDetail,
+      revisionSubtitle: 'FunctionRevision',
+      revisionDetailsComponent: FunctionRevisionMapDetail,
+    },
+  );
 
   registerMapSource({
     id: 'crossplane',
     label: 'Crossplane',
     icon: <Icon icon="logos:crossplane-icon" width="100%" height="100%" />,
-    sources: [compositeResourcesSource, providersSource],
+    sources: [compositeResourcesSource, providersSource, functionsSource],
   } as any);
 }
