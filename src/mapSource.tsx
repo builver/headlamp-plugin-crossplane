@@ -698,39 +698,17 @@ async function expandGraphAsync(
 
 // ── Provider graph expansion ──────────────────────────────────────────────────
 
-/**
- * Detects the namespace where Crossplane is installed by looking for a
- * Deployment named "crossplane". Tries crossplane-system first for speed,
- * then falls back to a cluster-wide list.
- */
-async function detectCrossplaneNamespace(signal: AbortSignal): Promise<string> {
-  try {
-    await ApiProxy.request('/apis/apps/v1/namespaces/crossplane-system/deployments/crossplane');
-    return 'crossplane-system';
-  } catch {
-    // not in crossplane-system, search all namespaces
-  }
-  if (signal.aborted) return 'crossplane-system';
-  try {
-    const resp = await ApiProxy.request('/apis/apps/v1/deployments');
-    if (signal.aborted) return 'crossplane-system';
-    const items: any[] = resp?.items ?? [];
-    const found = items.find((d: any) => d.metadata?.name === 'crossplane');
-    if (found?.metadata?.namespace) return found.metadata.namespace as string;
-  } catch {
-    // ignore
-  }
-  return 'crossplane-system';
-}
 
 /**
  * Builds the Provider graph: Provider → ProviderRevision → Deployment → ReplicaSet → Pod.
- * Provider and ProviderRevision nodes are seeded from the already-fetched lists;
- * the Deployment and its owned children are resolved via the standard BFS.
+ * Provider and ProviderRevision nodes are seeded from the already-fetched lists.
+ * The Deployment edge targets the pre-existing node (by real UID) from Deployment.useList(),
+ * mirroring the flux plugin pattern so the node is shared with Headlamp's workloads map.
  */
 async function expandProviderGraphAsync(
   providers: KubeObject[],
   revisions: KubeObject[],
+  deployments: KubeObject[] | null,
   crds: KubeObject[] | null,
   signal: AbortSignal,
   onUpdate: (state: GraphState) => void,
@@ -746,9 +724,6 @@ async function expandProviderGraphAsync(
     visited: new Set(),
     signal,
   };
-
-  const crossplaneNs = await detectCrossplaneNamespace(signal);
-  if (signal.aborted) return;
 
   const revByName = new Map<string, KubeObject>(
     revisions.map(r => [r.metadata.name as string, r])
@@ -792,18 +767,34 @@ async function expandProviderGraphAsync(
     }
     addEdge(ctx, uid, revUid);
 
-    // The Deployment created by this revision shares its name and lives in the
-    // crossplane system namespace. Queue it for BFS expansion.
-    queue.push({
-      type: 'get',
-      apiVersion: 'apps/v1',
-      kind: 'Deployment',
-      name: currentRevision,
-      namespace: crossplaneNs,
-      parentNodeId: revUid,
-      depth: 1,
-      isXR: false,
-    });
+    // Find the pre-existing Deployment node by name (same name as the revision).
+    // Using the real UID lets the map share/merge this node with Headlamp's
+    // built-in workloads view, matching the flux plugin pattern.
+    const deployment = deployments?.find(d => d.metadata.name === currentRevision);
+    if (!deployment) continue;
+
+    const deployUid: string = deployment.metadata.uid;
+    const deployNs: string = deployment.metadata.namespace ?? '';
+    if (!ctx.visited.has(deployUid)) {
+      ctx.visited.add(deployUid);
+      ctx.nodeMap.set(deployUid, {
+        id: deployUid,
+        label: deployment.metadata.name,
+        subtitle: `Deployment · ${deployNs}`,
+        kubeObject: deployment,
+      });
+      // Continue BFS expansion to ReplicaSet → Pod from the deployment's UID.
+      queue.push({
+        type: 'list-by-owner',
+        apiVersion: 'apps/v1',
+        kind: 'ReplicaSet',
+        namespace: deployNs,
+        ownerUid: deployUid,
+        parentNodeId: deployUid,
+        depth: 2,
+      });
+    }
+    addEdge(ctx, revUid, deployUid);
   }
 
   onUpdate({ nodes: [...ctx.nodeMap.values()], edges: [...ctx.edges] });
@@ -908,6 +899,7 @@ export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
       const [graph, setGraph] = useState<GraphState | null>(null);
       const [providers] = Provider.useList();
       const [revisions] = ProviderRevision.useList();
+      const [deployments] = K8s.ResourceClasses.Deployment.useList();
       const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList();
 
       useEffect(() => {
@@ -918,6 +910,7 @@ export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
         expandProviderGraphAsync(
           providers,
           revisions,
+          deployments ?? null,
           crds ?? null,
           abort.signal,
           setGraph,
@@ -925,7 +918,7 @@ export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
 
         return () => abort.abort();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [providers, revisions, crds]);
+      }, [providers, revisions, deployments, crds]);
 
       return graph;
     },
