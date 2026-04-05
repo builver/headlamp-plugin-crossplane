@@ -6,12 +6,14 @@ import {
   ResourceTable,
   SectionBox,
   SectionFilterHeader,
+  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
+import { useMemo } from 'react';
 import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
 import { packageResourceColumns } from '../components/columns';
-import { Configuration } from '../resources';
+import { CompositeResourceDefinition, Configuration, ConfigurationRevision } from '../resources';
 
 export function ConfigurationListPage() {
   const filterFunction = useFilterFunc();
@@ -55,6 +57,54 @@ export function ConfigurationListPage() {
   );
 }
 
+interface ObjectRef {
+  apiVersion: string;
+  kind: string;
+  name: string;
+}
+
+function ObjectRefName({ objectRef, xrdPlural }: { objectRef: ObjectRef; xrdPlural?: string }) {
+  if (objectRef.kind === 'CompositeResourceDefinition' && xrdPlural) {
+    return <Link routeName={`crossplane-xr-kind-${xrdPlural}`}>{objectRef.name}</Link>;
+  }
+  if (objectRef.kind === 'Composition') {
+    return <Link routeName={`crossplane-composition-detail-${objectRef.name}`}>{objectRef.name}</Link>;
+  }
+  return <>{objectRef.name}</>;
+}
+
+function ObjectRefsSection({ revisionName }: { revisionName: string }) {
+  const [revision] = ConfigurationRevision.useGet(revisionName);
+  const [xrds] = CompositeResourceDefinition.useList();
+  const refs: ObjectRef[] = revision?.jsonData?.status?.objectRefs ?? [];
+
+  const xrdPluralByName = useMemo(
+    () => new Map(xrds?.map(x => [x.metadata.name as string, x.jsonData?.spec?.names?.plural as string]) ?? []),
+    [xrds],
+  );
+
+  if (revision && !refs.length) return null;
+
+  return (
+    <SectionBox title="Installed Objects">
+      <Table
+        data={refs}
+        columns={[
+          { header: 'Kind', accessorKey: 'kind' },
+          { header: 'API Version', accessorKey: 'apiVersion' },
+          {
+            header: 'Name',
+            accessorKey: 'name',
+            Cell: ({ row }: { row: { original: ObjectRef } }) => (
+              <ObjectRefName objectRef={row.original} xrdPlural={xrdPluralByName.get(row.original.name)} />
+            ),
+          },
+        ]}
+      />
+    </SectionBox>
+  );
+}
+
 export function ConfigurationDetailPage() {
   const location = useLocation();
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
@@ -74,10 +124,13 @@ export function ConfigurationDetailPage() {
       ]
     : [];
 
+  const currentRevision: string | undefined = config?.jsonData?.status?.currentRevision;
+
   return (
     <>
       <MainInfoSection resource={config} extraInfo={extraInfo} />
       {config && <ConditionsTable resource={config.jsonData} />}
+      {currentRevision && <ObjectRefsSection revisionName={currentRevision} />}
     </>
   );
 }
