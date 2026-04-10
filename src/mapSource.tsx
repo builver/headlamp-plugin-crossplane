@@ -861,6 +861,15 @@ function makePackageSource(
       const [revisions] = useRevisions();
       const [deployments] = K8s.ResourceClasses.Deployment.useList();
       const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList();
+      // Periodic refresh counter — increments every 10 s to re-run the graph
+      // build and pick up deployments that may have been missed by the watch
+      // (e.g. when the deployment didn't exist yet at page-load time and a
+      // WebSocket event was lost before it was delivered).
+      const [tick, setTick] = useState(0);
+      useEffect(() => {
+        const id = setInterval(() => setTick(t => t + 1), 10_000);
+        return () => clearInterval(id);
+      }, []);
 
       useEffect(() => {
         if (!packages || !revisions) return;
@@ -879,7 +888,7 @@ function makePackageSource(
 
         return () => abort.abort();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [packages, revisions, deployments, crds]);
+      }, [packages, revisions, deployments, crds, tick]);
 
       return graph;
     },

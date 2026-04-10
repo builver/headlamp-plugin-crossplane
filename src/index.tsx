@@ -206,12 +206,12 @@ function CrossplaneWatcher() {
     }
   }
 
-  // Register the Crossplane map source once, after XRDs have loaded.
-  // useEffect fires after render so xrds is guaranteed to be populated here.
-  // We use xrds as the dependency so it re-evaluates if the list grows, but
-  // mapSourceRegistered prevents duplicate registration (Redux also de-dupes by ID).
+  // Register the Crossplane map source once xrds has loaded (even if empty), so the
+  // map appears as soon as Crossplane is installed rather than waiting for the first
+  // XR instance. Waiting for xrds specifically (not just any list) ensures sub-sources
+  // are built from the correct XRD snapshot rather than an empty fallback.
   useEffect(() => {
-    if (!xrds?.length || mapSourceRegistered) return;
+    if (xrds === null || mapSourceRegistered) return;
     mapSourceRegistered = true;
     registerCrossplaneMapSource(xrds);
   }, [xrds]);
