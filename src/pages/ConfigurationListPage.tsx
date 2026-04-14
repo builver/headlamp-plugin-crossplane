@@ -9,10 +9,10 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
-import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
+import { useLocation } from 'react-router-dom';
 import { packageResourceColumns } from '../components/columns';
+import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
 import { CompositeResourceDefinition, Configuration, ConfigurationRevision } from '../resources';
 
 export function ConfigurationListPage() {

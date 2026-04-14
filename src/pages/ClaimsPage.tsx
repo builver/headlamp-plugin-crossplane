@@ -17,13 +17,13 @@ import {
 } from '@mui/material';
 import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { readyColumn, syncedColumn } from '../components/columns';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
 import {
   CompositeResourceDefinition,
   getXRScope,
   makeClaimClass,
 } from '../resources';
-import { readyColumn, syncedColumn } from '../components/columns';
 
 // ── Claim type section (one per XRD) ─────────────────────────────────────────
 

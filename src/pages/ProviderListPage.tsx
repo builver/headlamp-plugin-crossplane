@@ -9,8 +9,8 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useLocation } from 'react-router-dom';
-import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
 import { packageResourceColumns } from '../components/columns';
+import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
 import { Provider } from '../resources';
 
 export function ProviderListPage() {

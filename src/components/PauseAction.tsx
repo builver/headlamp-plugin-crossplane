@@ -1,5 +1,5 @@
-import { ActionButton } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
+import { ActionButton } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useState } from 'react';
 

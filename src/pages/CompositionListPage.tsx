@@ -1,5 +1,4 @@
-import React from 'react';
-import { stringify as yamlStringify } from 'yaml';
+import { Icon } from '@iconify/react';
 import {
   ConditionsTable,
   CreateResourceButton,
@@ -12,8 +11,8 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { MatchExpressions } from '@kinvolk/headlamp-plugin/lib/components/common/Resource';
+import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Icon } from '@iconify/react';
 import {
   Accordion,
   AccordionDetails,
@@ -24,13 +23,14 @@ import {
   Typography,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
-import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
+import React from 'react';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
+import { stringify as yamlStringify } from 'yaml';
 import { makeCompositeTypeColumn, makeXRNameColumn, readyColumn, syncedColumn } from '../components/columns';
 import {
-  Composition,
   CompositeResourceDefinition,
+  Composition,
   getCompositionRef,
   getXRScope,
   makeXRClass,

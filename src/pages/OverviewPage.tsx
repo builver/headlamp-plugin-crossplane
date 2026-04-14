@@ -1,7 +1,7 @@
+import { Icon } from '@iconify/react';
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import { Link, SectionBox, TileChart } from '@kinvolk/headlamp-plugin/lib/components/common';
 import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
-import { Icon } from '@iconify/react';
 import {
   Accordion,
   AccordionDetails,

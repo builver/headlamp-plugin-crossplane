@@ -239,12 +239,6 @@ function XRConditionGlance({ node }: { node: any }) {
 
 registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRConditionGlance });
 import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
-import { MRDDetailPage, MRDListPage } from './pages/MRDDetailPage';
-import {
-  MRDetailClusterPage,
-  MRDetailNamespacedPage,
-  MRListPage,
-} from './pages/MRDetailPage';
 import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
 import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
 import {
@@ -252,6 +246,12 @@ import {
   ConfigurationListPage,
 } from './pages/ConfigurationListPage';
 import { FunctionDetailPage, FunctionListPage } from './pages/FunctionListPage';
+import { MRDDetailPage, MRDListPage } from './pages/MRDDetailPage';
+import {
+  MRDetailClusterPage,
+  MRDetailNamespacedPage,
+  MRListPage,
+} from './pages/MRDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ProviderDetailPage, ProviderListPage } from './pages/ProviderListPage';
 import { XRDDetailPage } from './pages/XRDDetailPage';

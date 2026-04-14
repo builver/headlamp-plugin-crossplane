@@ -14,7 +14,7 @@ import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
 import { PauseAction } from '../components/PauseAction';
-import { ManagedResourceDefinition, makeMRClass } from '../resources';
+import { makeMRClass,ManagedResourceDefinition } from '../resources';
 
 // ── MR list ───────────────────────────────────────────────────────────────────
 
