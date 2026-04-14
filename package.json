@@ -1,7 +1,8 @@
 {
   "name": "headlamp-plugin-crossplane",
   "version": "0.1.0",
-  "description": "Your Headlamp plugin",
+  "description": "A Headlamp plugin for viewing and managing Crossplane resources.",
+  "license": "Apache-2.0",
   "scripts": {
     "start": "headlamp-plugin start",
     "build": "headlamp-plugin build",

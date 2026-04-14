@@ -1,0 +1,11 @@
+version: 0.1.0
+name: headlamp_crossplane
+displayName: Crossplane
+createdAt: "2026-04-07T00:00:00Z"
+logoURL: "https://raw.githubusercontent.com/cncf/artwork/main/projects/crossplane/icon/color/crossplane-icon-color.svg"
+description: A Headlamp plugin for viewing and managing Crossplane resources.
+annotations:
+  headlamp/plugin/archive-url: "PLACEHOLDER_URL"
+  headlamp/plugin/archive-checksum: "PLACEHOLDER_CHECKSUM"
+  headlamp/plugin/version-compat: ">=0.22"
+  headlamp/plugin/distro-compat: "in-cluster,web,docker-desktop,desktop"
