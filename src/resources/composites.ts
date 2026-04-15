@@ -1,5 +1,20 @@
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { makeCustomResourceClass } from '@kinvolk/headlamp-plugin/lib/lib/k8s/crd';
+import { getXRScope } from './helpers';
+import type { Condition, XRScope } from './helpers';
+
+export type { Condition, XRScope };
+export {
+  getCompositionRef,
+  getHealthyCondition,
+  getInstalledCondition,
+  getReadyCondition,
+  getResponsiveCondition,
+  getRevisionHealthyCondition,
+  getRuntimeHealthyCondition,
+  getSyncedCondition,
+  getXRScope,
+} from './helpers';
 
 // ── apiextensions.crossplane.io/v1 + v2 ─────────────────────────────────────
 
@@ -28,47 +43,7 @@ export class CompositionRevision extends KubeObject {
   static isNamespaced = false;
 }
 
-// ── Condition helpers (shared across all Crossplane resource types) ───────────
-
-export type Condition = { type: string; status: string; reason?: string; message?: string };
-
-function findCondition(item: KubeObject, type: string): Condition | null {
-  const conditions: Condition[] = item?.jsonData?.status?.conditions ?? [];
-  return conditions.find(c => c.type === type) ?? null;
-}
-
-export const getReadyCondition           = (item: KubeObject) => findCondition(item, 'Ready');
-export const getSyncedCondition          = (item: KubeObject) => findCondition(item, 'Synced');
-/** Present on pkg.crossplane.io resources (Provider, Configuration, Function). */
-export const getInstalledCondition       = (item: KubeObject) => findCondition(item, 'Installed');
-/** Present on package resources (Provider, Configuration, Function). */
-export const getHealthyCondition         = (item: KubeObject) => findCondition(item, 'Healthy');
-/** ProviderRevision: whether the runtime Deployment/Pod is healthy. */
-export const getRuntimeHealthyCondition  = (item: KubeObject) => findCondition(item, 'RuntimeHealthy');
-/** ProviderRevision: whether the revision itself is healthy. */
-export const getRevisionHealthyCondition = (item: KubeObject) => findCondition(item, 'RevisionHealthy');
-/** v2 only — tracks circuit-breaker state. */
-export const getResponsiveCondition      = (item: KubeObject) => findCondition(item, 'Responsive');
-
 // ── XR / Claim dynamic class helpers ─────────────────────────────────────────
-
-/**
- * The three XR scope modes that exist across Crossplane v1 and v2.
- * - Namespaced:    v2 default; XR lives in a namespace; no claims.
- * - Cluster:       v2 explicit; cluster-scoped XR; no claims.
- * - LegacyCluster: v1 implicit; cluster-scoped XR + claims supported.
- */
-export type XRScope = 'Namespaced' | 'Cluster' | 'LegacyCluster';
-
-/**
- * Reads the scope from an XRD object.
- * v1 XRDs have no spec.scope → treated as LegacyCluster.
- */
-export function getXRScope(xrd: KubeObject): XRScope {
-  const scope = xrd.jsonData?.spec?.scope as string | undefined;
-  if (scope === 'Namespaced' || scope === 'Cluster') return scope;
-  return 'LegacyCluster';
-}
 
 /**
  * Creates a dynamic KubeObject class for the Composite Resources (XRs)
@@ -113,13 +88,3 @@ export function makeClaimClass(xrd: KubeObject) {
   });
 }
 
-/**
- * Returns the composition reference name from an XR, handling v1 (flat)
- * and v2 (nested under spec.crossplane) layouts.
- */
-export function getCompositionRef(item: KubeObject, scope: XRScope): string {
-  if (scope === 'LegacyCluster') {
-    return item.jsonData?.spec?.compositionRef?.name ?? '-';
-  }
-  return item.jsonData?.spec?.crossplane?.compositionRef?.name ?? '-';
-}
