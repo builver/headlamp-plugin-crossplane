@@ -8,8 +8,8 @@ import {
   Box,
   Typography,
 } from '@mui/material';
-import { XRTypeSection } from '../components/XRTypeSection';
-import { CompositeResourceDefinition, getXRScope, XRScope } from '../resources';
+import { CompositeResourceDefinition, getXRScope, XRScope } from '../../resources';
+import { XRTypeSection } from './XRTypeSection';
 
 const SCOPE_LABELS: Record<XRScope, string> = {
   Namespaced: 'Namespaced Composite Resources (v2)',
@@ -62,7 +62,7 @@ function ScopeSection({ title, description, xrds, scope }: ScopeSectionProps) {
   );
 }
 
-export function CompositeResourcesPage() {
+export function XRDListPage() {
   const [xrds, error] = CompositeResourceDefinition.useList();
 
   if (error?.status === 404) {

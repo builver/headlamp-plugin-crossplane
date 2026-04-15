@@ -8,11 +8,10 @@ import {
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { Box } from '@mui/material';
 import { useEffect, useState } from 'react';
-import { HealthyStatus, InstalledStatus, RevisionHealthyStatus, RuntimeHealthyStatus } from './components/ConditionStatus';
-import { FunctionDetailInner } from './pages/FunctionListPage';
-import { MRDetailInner } from './pages/MRDetailPage';
-import { ProviderDetailInner } from './pages/ProviderListPage';
-import { XRDetailInner } from './pages/XRDetailPage';
+import { XRDetailInner } from '../features/composites/XRDetailPage';
+import { MRDetailInner } from '../features/managed/MRDetailPage';
+import { FunctionDetailInner } from '../features/packages/FunctionListPage';
+import { ProviderDetailInner } from '../features/packages/ProviderListPage';
 import {
   CompositeResourceDefinition,
   CrossplaneFunction,
@@ -23,7 +22,8 @@ import {
   Provider,
   ProviderRevision,
   XRScope,
-} from './resources';
+} from '../resources';
+import { HealthyStatus, InstalledStatus, RevisionHealthyStatus, RuntimeHealthyStatus } from './ConditionStatus';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

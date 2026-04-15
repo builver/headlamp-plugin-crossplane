@@ -10,9 +10,8 @@ import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import Event from '@kinvolk/headlamp-plugin/lib/K8s/event';
 import { useMemo } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { ComposedResources } from '../components/ComposedResources';
-import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
-import { PauseAction } from '../components/PauseAction';
+import { ReadyStatus, SyncedStatus } from '../../components/ConditionStatus';
+import { PauseAction } from '../../components/PauseAction';
 import {
   CompositeResourceDefinition,
   getCompositionRef,
@@ -20,7 +19,8 @@ import {
   getXRScope,
   makeXRClass,
   XRScope,
-} from '../resources';
+} from '../../resources';
+import { ComposedResources } from '../managed/ComposedResources';
 
 // ── Shared hook ───────────────────────────────────────────────────────────────
 

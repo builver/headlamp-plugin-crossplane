@@ -2,8 +2,8 @@ import { ApiProxy, K8s } from '@kinvolk/headlamp-plugin/lib';
 import { DateLabel, Link, Table } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useEffect, useRef, useState } from 'react';
-import { XRScope } from '../resources';
-import { ReadyStatus, SyncedStatus } from './ConditionStatus';
+import { ReadyStatus, SyncedStatus } from '../../components/ConditionStatus';
+import { XRScope } from '../../resources';
 
 interface ResourceRef {
   apiVersion: string;

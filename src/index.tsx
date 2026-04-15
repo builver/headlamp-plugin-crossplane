@@ -16,7 +16,7 @@ addIcon('crossplane:mono', {
   height: 900,
 });
 import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
-import { registerCrossplaneMapSource } from './mapSource';
+import { registerCrossplaneMapSource } from './components/mapSource';
 import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceDefinition, Provider } from './resources';
 
 // ── Sidebar state — updated by CrossplaneWatcher on every render cycle ────────
@@ -74,7 +74,7 @@ function CrossplaneWatcher() {
           sidebar: entryName,
           name: entryName,
           exact: true,
-          component: () => <XRKindPage />,
+          component: () => <XRListPage />,
         });
         registerRoute({
           path: `/crossplane/xrs/${plural}/:name`,
@@ -238,25 +238,26 @@ function XRConditionGlance({ node }: { node: any }) {
 }
 
 registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRConditionGlance });
-import { ClaimDetailPage, ClaimsPage } from './pages/ClaimsPage';
-import { CompositeResourcesPage } from './pages/CompositeResourcesPage';
-import { CompositionDetailPage, CompositionListPage } from './pages/CompositionListPage';
-import {
-  ConfigurationDetailPage,
-  ConfigurationListPage,
-} from './pages/ConfigurationListPage';
-import { FunctionDetailPage, FunctionListPage } from './pages/FunctionListPage';
-import { MRDDetailPage, MRDListPage } from './pages/MRDDetailPage';
+import { ClaimDetailPage, ClaimsPage } from './features/composites/ClaimsPage';
+import { XRDDetailPage } from './features/composites/XRDDetailPage';
+import { XRDetailClusterPage, XRDetailNamespacedPage } from './features/composites/XRDetailPage';
+import { XRDListPage } from './features/composites/XRDListPage';
+import { XRListPage } from './features/composites/XRListPage';
+import { CompositionDetailPage } from './features/compositions/CompositionDetailPage';
+import { CompositionListPage } from './features/compositions/CompositionListPage';
+import { MRDDetailPage, MRDListPage } from './features/managed/MRDDetailPage';
 import {
   MRDetailClusterPage,
   MRDetailNamespacedPage,
   MRListPage,
-} from './pages/MRDetailPage';
-import { OverviewPage } from './pages/OverviewPage';
-import { ProviderDetailPage, ProviderListPage } from './pages/ProviderListPage';
-import { XRDDetailPage } from './pages/XRDDetailPage';
-import { XRDetailClusterPage, XRDetailNamespacedPage } from './pages/XRDetailPage';
-import { XRKindPage } from './pages/XRKindPage';
+} from './features/managed/MRDetailPage';
+import { OverviewPage } from './features/overview/OverviewPage';
+import {
+  ConfigurationDetailPage,
+  ConfigurationListPage,
+} from './features/packages/ConfigurationListPage';
+import { FunctionDetailPage, FunctionListPage } from './features/packages/FunctionListPage';
+import { ProviderDetailPage, ProviderListPage } from './features/packages/ProviderListPage';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
@@ -357,7 +358,7 @@ registerRoute({
   sidebar: 'crossplane-xrs',
   name: 'crossplane-xrs',
   exact: true,
-  component: () => <CompositeResourcesPage />,
+  component: () => <XRDListPage />,
 });
 
 

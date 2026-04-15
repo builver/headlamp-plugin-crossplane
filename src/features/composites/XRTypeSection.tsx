@@ -2,8 +2,8 @@ import { Link, ResourceTable } from '@kinvolk/headlamp-plugin/lib/components/com
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useMemo } from 'react';
-import { getCompositionRef, makeXRClass, XRScope } from '../resources';
-import { makeXRNameColumn, readyColumn, syncedColumn } from './columns';
+import { makeXRNameColumn, readyColumn, syncedColumn } from '../../components/columns';
+import { getCompositionRef, makeXRClass, XRScope } from '../../resources';
 
 interface XRTypeSectionProps {
   xrd: KubeObject;

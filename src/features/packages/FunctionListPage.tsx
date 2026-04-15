@@ -10,9 +10,9 @@ import {
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { makeCompositeTypeColumn, packageResourceColumns } from '../components/columns';
-import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
-import { CompositeResourceDefinition, Composition, CrossplaneFunction } from '../resources';
+import { makeCompositeTypeColumn, packageResourceColumns } from '../../components/columns';
+import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
+import { CompositeResourceDefinition, Composition, CrossplaneFunction } from '../../resources';
 
 export function FunctionListPage() {
   const filterFunction = useFilterFunc();

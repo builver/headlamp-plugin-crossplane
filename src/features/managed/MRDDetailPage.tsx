@@ -7,7 +7,7 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ManagedResourceDefinition } from '../resources';
+import { ManagedResourceDefinition } from '../../resources';
 
 export function MRDDetailPage() {
   const location = useLocation();

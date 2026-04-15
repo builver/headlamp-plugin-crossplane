@@ -11,9 +11,9 @@ import {
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { packageResourceColumns } from '../components/columns';
-import { HealthyStatus, InstalledStatus } from '../components/ConditionStatus';
-import { CompositeResourceDefinition, Configuration, ConfigurationRevision } from '../resources';
+import { packageResourceColumns } from '../../components/columns';
+import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
+import { CompositeResourceDefinition, Configuration, ConfigurationRevision } from '../../resources';
 
 export function ConfigurationListPage() {
   const filterFunction = useFilterFunc();

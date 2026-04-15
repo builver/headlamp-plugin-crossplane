@@ -2,10 +2,10 @@ import { CreateResourceButton, Link, SectionBox, SectionFilterHeader } from '@ki
 import { Box, Typography } from '@mui/material';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { XRTypeSection } from '../components/XRTypeSection';
-import { CompositeResourceDefinition, getXRScope, makeXRClass } from '../resources';
+import { CompositeResourceDefinition, getXRScope, makeXRClass } from '../../resources';
+import { XRTypeSection } from './XRTypeSection';
 
-export function XRKindPage() {
+export function XRListPage() {
   const location = useLocation();
   const plural = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [xrds, error] = CompositeResourceDefinition.useList();

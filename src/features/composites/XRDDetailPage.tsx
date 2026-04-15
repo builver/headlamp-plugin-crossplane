@@ -3,8 +3,8 @@ import {
   MainInfoSection,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useParams } from 'react-router-dom';
-import { ReadyStatus } from '../components/ConditionStatus';
-import { CompositeResourceDefinition, getXRScope } from '../resources';
+import { ReadyStatus } from '../../components/ConditionStatus';
+import { CompositeResourceDefinition, getXRScope } from '../../resources';
 
 export function XRDDetailPage() {
   const { name } = useParams<{ name: string }>();

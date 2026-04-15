@@ -12,9 +12,9 @@ import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { ReadyStatus, SyncedStatus } from '../components/ConditionStatus';
-import { PauseAction } from '../components/PauseAction';
-import { makeMRClass,ManagedResourceDefinition } from '../resources';
+import { ReadyStatus, SyncedStatus } from '../../components/ConditionStatus';
+import { PauseAction } from '../../components/PauseAction';
+import { makeMRClass, ManagedResourceDefinition } from '../../resources';
 
 // ── MR list ───────────────────────────────────────────────────────────────────
 

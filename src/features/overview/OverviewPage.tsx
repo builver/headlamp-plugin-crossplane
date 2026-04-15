@@ -27,7 +27,7 @@ import {
   CrossplaneFunction,
   makeXRClass,
   Provider,
-} from '../resources';
+} from '../../resources';
 
 interface ResourceStatus {
   ready: number;
