@@ -1,7 +1,7 @@
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { makeCustomResourceClass } from '@kinvolk/headlamp-plugin/lib/lib/k8s/crd';
-import { getXRScope } from './helpers';
 import type { Condition, XRScope } from './helpers';
+import { getXRScope } from './helpers';
 
 export type { Condition, XRScope };
 export {

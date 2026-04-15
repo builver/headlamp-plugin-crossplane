@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-
 // helpers.ts has no headlamp-plugin dependency — no mocking required.
 import {
   getCompositionRef,
