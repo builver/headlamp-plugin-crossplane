@@ -38,12 +38,3 @@ export function buildGetPath(
     : `${base}/${plural}/${name}`;
 }
 
-export function buildListPath(
-  apiVersion: string,
-  plural: string,
-  namespace?: string,
-): string {
-  const [group, version] = getGroupVersion(apiVersion);
-  const base = group ? `/apis/${group}/${version}` : `/api/${version}`;
-  return namespace ? `${base}/namespaces/${namespace}/${plural}` : `${base}/${plural}`;
-}

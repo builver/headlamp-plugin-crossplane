@@ -2,32 +2,20 @@ import { Icon } from '@iconify/react';
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { XRScope } from '../../resources';
-import { buildGetPath, buildListPath, getGroupVersion, lookupPlural } from './apiPaths';
-import { MAX_DEPTH,OWNER_REF_CHILDREN } from './constants';
+import { buildGetPath, getGroupVersion, lookupPlural } from './apiPaths';
 import { ClaimMapDetail, MRMapDetail, XRMapDetail } from './detailComponents';
 import { makeChildNode, makeSubXRNode } from './nodeFactories';
 import { ExpandContext, GraphState, ResourceRef } from './types';
 
-export type QueueEntry =
-  | {
-      type: 'get';
-      apiVersion: string;
-      kind: string;
-      name: string;
-      namespace?: string;
-      parentNodeId: string;
-      depth: number;
-      isXR: boolean;
-    }
-  | {
-      type: 'list-by-owner';
-      apiVersion: string;
-      kind: string;
-      namespace: string;
-      ownerUid: string;
-      parentNodeId: string;
-      depth: number;
-    };
+export interface QueueEntry {
+  apiVersion: string;
+  kind: string;
+  name: string;
+  namespace?: string;
+  parentNodeId: string;
+  depth: number;
+  isXR: boolean;
+}
 
 export function addEdge(ctx: ExpandContext, source: string, target: string) {
   const id = `${source}-->${target}`;
@@ -38,7 +26,7 @@ export function addEdge(ctx: ExpandContext, source: string, target: string) {
 }
 
 export async function processGetEntry(
-  entry: Extract<QueueEntry, { type: 'get' }>,
+  entry: QueueEntry,
   ctx: ExpandContext,
 ): Promise<QueueEntry[]> {
   const { apiVersion, kind, name, namespace, parentNodeId, depth, isXR } = entry;
@@ -78,7 +66,7 @@ export async function processGetEntry(
     ctx.nodeMap.set(uid, makeSubXRNode(uid, apiVersion, kind, name, namespace, rawJson));
     addEdge(ctx, parentNodeId, uid);
 
-    if (depth >= MAX_DEPTH) return [];
+    if (depth >= 5) return [];
 
     const [group] = getGroupVersion(apiVersion);
     const childScope = ctx.xrdScopeMap.get(`${group}/${kind}`) ?? 'LegacyCluster';
@@ -96,7 +84,6 @@ export async function processGetEntry(
       if (ctx.claimKindSet.has(`${refGroup}/${ref.kind}`)) continue;
       const isChildXR = ctx.xrdGroupSet.has(`${refGroup}/${ref.kind}`);
       next.push({
-        type: 'get',
         apiVersion: ref.apiVersion,
         kind: ref.kind,
         name: ref.name,
@@ -116,113 +103,13 @@ export async function processGetEntry(
   }
   ctx.visited.add(compositeId);
   const mrNode = makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds, 'mdi:cube-outline', MRMapDetail) as any;
-  // In the XR context (non-empty xrdGroupSet), direct children of an XR (depth 1)
-  // are intermediate nodes — give them weight 1000 so the layout places them
-  // between the root XR (2000) and any downstream resources (no weight).
+  // Direct children of an XR (depth 1) are intermediate nodes — give them
+  // weight 1000 so the layout places them between the root XR (2000) and any
+  // downstream resources (no weight).
   if (ctx.xrdGroupSet.size > 0 && depth === 1) mrNode.weight = 1000;
   ctx.nodeMap.set(compositeId, mrNode);
   addEdge(ctx, parentNodeId, compositeId);
-
-  if (depth >= MAX_DEPTH) return [];
-
-  const ownerChildren = OWNER_REF_CHILDREN[kind];
-  if (!ownerChildren || !namespace || !plural) return [];
-
-  // Fetch to get UID for owner-reference filtering
-  const path = buildGetPath(apiVersion, plural, name, namespace);
-  let rawJson: any;
-  try {
-    rawJson = await ApiProxy.request(path);
-  } catch {
-    return [];
-  }
-  if (ctx.signal.aborted) return [];
-
-  const uid: string | undefined = rawJson?.metadata?.uid;
-  if (!uid) return [];
-
-  // Enrich the stub kubeObject with the full JSON so Headlamp's graph renderer
-  // can access status fields like readyReplicas on Deployment nodes.
-  const existingNode = ctx.nodeMap.get(compositeId) as any;
-  if (existingNode?.kubeObject) {
-    existingNode.kubeObject.jsonData = rawJson;
-    existingNode.kubeObject.spec   = rawJson?.spec;
-    existingNode.kubeObject.status = rawJson?.status;
-  }
-
-  return ownerChildren.map(child => ({
-    type: 'list-by-owner' as const,
-    apiVersion: child.apiVersion,
-    kind: child.kind,
-    namespace,
-    ownerUid: uid,
-    parentNodeId: compositeId,
-    depth: depth + 1,
-  }));
-}
-
-export async function processListByOwnerEntry(
-  entry: Extract<QueueEntry, { type: 'list-by-owner' }>,
-  ctx: ExpandContext,
-): Promise<QueueEntry[]> {
-  const { apiVersion, kind, namespace, ownerUid, parentNodeId, depth } = entry;
-  const plural = lookupPlural(apiVersion, kind, ctx.crds);
-  if (!plural) return [];
-
-  const path = buildListPath(apiVersion, plural, namespace);
-  let response: any;
-  try {
-    response = await ApiProxy.request(path);
-  } catch {
-    return [];
-  }
-  if (ctx.signal.aborted) return [];
-
-  const items: any[] = response?.items ?? [];
-  const owned = items.filter((item: any) =>
-    item.metadata?.ownerReferences?.some((ref: any) => ref.uid === ownerUid)
-  );
-
-  const next: QueueEntry[] = [];
-  for (const item of owned) {
-    const name = item.metadata?.name as string | undefined;
-    if (!name) continue;
-    const compositeId = `${apiVersion}::${kind}::${namespace}::${name}`;
-
-    if (ctx.visited.has(compositeId)) {
-      addEdge(ctx, parentNodeId, compositeId);
-      continue;
-    }
-    ctx.visited.add(compositeId);
-    ctx.nodeMap.set(compositeId, makeChildNode(compositeId, apiVersion, kind, name, namespace, ctx.crds));
-    const listNode = ctx.nodeMap.get(compositeId) as any;
-    if (listNode?.kubeObject) {
-      listNode.kubeObject.jsonData = item;
-      listNode.kubeObject.spec   = item?.spec;
-      listNode.kubeObject.status = item?.status;
-    }
-    addEdge(ctx, parentNodeId, compositeId);
-
-    if (depth >= MAX_DEPTH) continue;
-
-    const childUid: string | undefined = item.metadata?.uid;
-    const ownerChildren = OWNER_REF_CHILDREN[kind];
-    if (ownerChildren && childUid) {
-      for (const child of ownerChildren) {
-        next.push({
-          type: 'list-by-owner',
-          apiVersion: child.apiVersion,
-          kind: child.kind,
-          namespace,
-          ownerUid: childUid,
-          parentNodeId: compositeId,
-          depth: depth + 1,
-        });
-      }
-    }
-  }
-
-  return next;
+  return [];
 }
 
 export async function runBfsWaves(
@@ -234,12 +121,7 @@ export async function runBfsWaves(
   while (queue.length > 0 && !signal.aborted) {
     const wave = queue.splice(0);
 
-    const results = await Promise.allSettled(
-      wave.map(entry => {
-        if (entry.type === 'get') return processGetEntry(entry, ctx);
-        return processListByOwnerEntry(entry, ctx);
-      })
-    );
+    const results = await Promise.allSettled(wave.map(entry => processGetEntry(entry, ctx)));
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
@@ -326,7 +208,6 @@ export async function expandGraphAsync(
       if (claimKindSet.has(`${refGroup}/${ref.kind}`)) continue;
       const isChildXR = xrdGroupSet.has(`${refGroup}/${ref.kind}`);
       queue.push({
-        type: 'get',
         apiVersion: ref.apiVersion,
         kind: ref.kind,
         name: ref.name,

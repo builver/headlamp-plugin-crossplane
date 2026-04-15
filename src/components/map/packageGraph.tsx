@@ -2,7 +2,7 @@ import { Icon } from '@iconify/react';
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useEffect, useState } from 'react';
-import { addEdge, QueueEntry,runBfsWaves } from './bfsExpansion';
+import { addEdge } from './bfsExpansion';
 import { ExpandContext, GraphState } from './types';
 
 export interface PackageGraphConfig {
@@ -43,8 +43,6 @@ export async function expandPackageGraphAsync(
   const revByName = new Map<string, KubeObject>(
     revisions.map(r => [r.metadata.name as string, r])
   );
-
-  const queue: QueueEntry[] = [];
 
   for (const pkg of packages) {
     const uid: string = pkg.metadata.uid;
@@ -98,16 +96,11 @@ export async function expandPackageGraphAsync(
         subtitle: `Deployment · ${deployNs}`,
         kubeObject: deployment,
       });
-      // Do NOT BFS-expand the Deployment's children — Headlamp's built-in
-      // workloads source already owns the ReplicaSet → Pod chain via the
-      // pre-existing node, so expanding here would duplicate the ReplicaSet.
     }
     addEdge(ctx, revUid, deployUid);
   }
 
   onUpdate({ nodes: [...ctx.nodeMap.values()], edges: [...ctx.edges] });
-
-  await runBfsWaves(queue, ctx, signal, onUpdate);
 }
 
 export function makePackageSource(
