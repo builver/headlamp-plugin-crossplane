@@ -94,7 +94,15 @@ src/
     ├── ConditionStatus.tsx      # ReadyStatus, SyncedStatus, InstalledStatus, HealthyStatus chips
     ├── XRTypeSection.tsx        # renders one XR type table (one useList() call per instance)
     ├── ComposedResources.tsx    # fetches + displays composed managed resources for an XR
-    └── PauseAction.tsx          # pause/resume action for XRs
+    ├── PauseAction.tsx          # pause/resume action for XRs
+    └── map/                     # Map visualization modules
+        ├── types.ts             # ResourceRef, GraphState, ExpandContext
+        ├── apiPaths.ts          # getGroupVersion, lookupPlural, buildGetPath
+        ├── detailComponents.tsx # *MapDetail components for the map sidebar
+        ├── nodeFactories.tsx    # makeChildNode, makeSubXRNode, makeKubeObjectLike
+        ├── bfsExpansion.tsx     # QueueEntry, expandGraphAsync, runBfsWaves
+        ├── packageGraph.tsx     # expandPackageGraphAsync, makePackageSource
+        └── glances.tsx          # registerKubeObjectGlance side-effects
 ```
 
 ### Shared helpers (`src/resources/index.ts`)
@@ -162,6 +170,19 @@ import { MatchExpressions } from '@kinvolk/headlamp-plugin/lib/components/common
 import { stringify as yamlStringify } from 'yaml';
 yamlStringify(obj, { blockQuote: true })  // multiline strings → | block literal style
 ```
+
+### K8s.ResourceClasses plural lookup
+
+`Object.values(K8s.ResourceClasses).find(cls => cls.kind === kind && cls.apiVersion === apiVersion)?.apiName`
+returns the plural name for any native K8s resource — no hardcoded map needed. Each class carries
+`static kind`, `static apiVersion`, `static apiName` (plural).
+
+### Map visualization (src/components/map/)
+
+- Files containing JSX must be `.tsx` even if named conceptually as logic-only modules.
+- `spec.resourceRefs` in Crossplane v2 XRs can include native K8s resources (Deployment, Service, etc.)
+  but they are directly Crossplane-managed — do not expand their owner-reference children.
+- `mapSource.tsx` re-exports only `registerCrossplaneMapSource`; all implementation lives in `map/`.
 
 ### Local references
 
