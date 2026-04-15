@@ -1,5 +1,5 @@
+import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
-import { NATIVE_PLURALS } from './constants';
 
 export function getGroupVersion(apiVersion: string): [string, string] {
   const parts = apiVersion.split('/');
@@ -11,9 +11,15 @@ export function lookupPlural(
   kind: string,
   crds: KubeObject[] | null,
 ): string | undefined {
+  // K8s.ResourceClasses covers all native K8s resources (Deployment, Pod, Service, etc.)
+  // Each class carries static apiVersion and apiName (plural) set by Headlamp.
+  const builtin = Object.values(K8s.ResourceClasses).find(
+    cls => cls.kind === kind && cls.apiVersion === apiVersion
+  );
+  if (builtin?.apiName) return builtin.apiName as string;
+
+  // Fall back to CRD list for custom resources
   const [group] = getGroupVersion(apiVersion);
-  const key = `${group}/${kind}`;
-  if (NATIVE_PLURALS[key]) return NATIVE_PLURALS[key];
   return crds?.find(
     crd => crd.jsonData?.spec?.names?.kind === kind && crd.jsonData?.spec?.group === group
   )?.jsonData?.spec?.names?.plural as string | undefined;
