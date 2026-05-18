@@ -1,5 +1,5 @@
 version: 0.1.0
-name: headlamp_crossplane
+name: crossplane
 displayName: Crossplane
 createdAt: "2026-04-07T00:00:00Z"
 logoURL: "https://raw.githubusercontent.com/cncf/artwork/main/projects/crossplane/icon/color/crossplane-icon-color.svg"
