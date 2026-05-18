@@ -19,6 +19,13 @@ npm run i18n           # extract translatable strings
 
 All scripts delegate to the `headlamp-plugin` CLI (the only dev dependency: `@kinvolk/headlamp-plugin`).
 
+### ESLint rules to watch
+
+- **React imports** — named imports only, no default `React`. Use `import { Fragment, memo, MouseEvent, CSSProperties, useMemo, ... } from 'react'`. Never `import React from 'react'` or `React.Fragment`/`React.MouseEvent`.
+- **`simple-import-sort`** — imports must be sorted; run `npm run lint-fix` to auto-sort.
+- **`jsx-a11y/no-static-element-interactions`** — any `<div>`/`<span>` with `onMouseDown`/`onClick` needs `role="button"` (add `tabIndex={-1}` for pointer-only targets).
+- **`no-unused-vars`** — lint runs with `--max-warnings 0`; unused constants, props, and local variables are errors.
+
 Hot reload during development requires the **Headlamp desktop app** running. The plugin directory it watches is `~/.config/Headlamp/plugins/` (macOS/Linux).
 
 ## Architecture
@@ -79,21 +86,29 @@ All three return a class compatible with `.useList()` / `.useGet()`. Always wrap
 src/
 ├── index.tsx                    # registration only (sidebar, routes)
 ├── resources/
-│   ├── index.ts                 # KubeObject subclasses + shared helpers
+│   ├── index.ts                 # KubeObject subclasses + shared helpers (re-exports composites/managed/packages)
 │   └── types.ts                 # shared TypeScript interfaces
-├── pages/                       # full-page React components per route
-│   ├── OverviewPage.tsx
-│   ├── CompositeResourcesPage.tsx / XRKindPage.tsx / XRDetailPage.tsx / XRDDetailPage.tsx
-│   ├── ClaimsPage.tsx
-│   ├── CompositionListPage.tsx
-│   ├── ProviderListPage.tsx / FunctionListPage.tsx / ConfigurationListPage.tsx
-│   ├── MRDDetailPage.tsx / MRDetailPage.tsx
-│   └── ...
+├── features/                    # feature-scoped pages and components
+│   ├── composites/              # XR / Claim list and detail pages
+│   ├── compositions/            # Composition list and detail pages
+│   │   ├── CompositionDetailPage.tsx
+│   │   ├── CompositionNodeEditor.tsx  # KroStepGraph export (graph/YAML toggle)
+│   │   └── graph/               # kro ResourceGraph editor internals
+│   │       ├── types.ts         # all shared TS interfaces (GNode, GEdge, TRow, …)
+│   │       ├── constants.ts     # layout numbers, NODE_CFG, K8S_MAP_PATHS, refToNodeId/nodeIdToRef
+│   │       ├── celUtils.ts      # CEL parsing, token building, template serialization
+│   │       ├── schemaUtils.ts   # flattenJsonSchema, findMapPaths, getResApiVersion/Kind
+│   │       ├── rowUtils.ts      # buildTemplateRows, insertRowAtPath, applyExtraEdgesToInput
+│   │       ├── graphUtils.ts    # dagLayout, buildGraph, bezierPath, portY helpers
+│   │       ├── NodeCard.tsx     # NodeCard memo + SegmentedControl
+│   │       └── GraphCanvas.tsx  # main canvas (pan/zoom/draw/edit, ~870 lines)
+│   ├── managed/                 # Managed Resource list and detail pages
+│   ├── overview/                # Overview page
+│   └── packages/                # Provider/Function/Configuration pages
 └── components/
-    ├── columns.tsx              # shared ResourceTable column definitions (readyColumn, syncedColumn, packageResourceColumns, makeXRNameColumn)
+    ├── columns.tsx              # shared ResourceTable column definitions
     ├── ConditionStatus.tsx      # ReadyStatus, SyncedStatus, InstalledStatus, HealthyStatus chips
     ├── XRTypeSection.tsx        # renders one XR type table (one useList() call per instance)
-    ├── ComposedResources.tsx    # fetches + displays composed managed resources for an XR
     ├── PauseAction.tsx          # pause/resume action for XRs
     └── map/                     # Map visualization modules
         ├── types.ts             # ResourceRef, GraphState, ExpandContext
@@ -104,6 +119,12 @@ src/
         ├── packageGraph.tsx     # expandPackageGraphAsync, makePackageSource
         └── glances.tsx          # registerKubeObjectGlance side-effects
 ```
+
+### Kro pipeline graph editor
+
+`CompositionNodeEditor.tsx` exports `KroStepGraph` — the sole entry point for the graph editor. `CompositionDetailPage.tsx` detects kro steps via `isKroStep()` (checks `functionRef.name` contains "kro" or `input.kind === "ResourceGraph"`) and renders `KroStepGraph` for those steps.
+
+`getServedSchema(jsonData)` — extracts `openAPIV3Schema` from the first served version; used for both XRD and MRD schemas in `CompositionDetailPage`.
 
 ### Shared helpers (`src/resources/index.ts`)
 

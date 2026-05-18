@@ -19,19 +19,21 @@ import {
   Chip,
   Typography,
 } from '@mui/material';
-import React from 'react';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { stringify as yamlStringify } from 'yaml';
 import { makeXRNameColumn, readyColumn, syncedColumn } from '../../components/columns';
+import { getGroupVersion } from '../../components/map/apiPaths';
 import {
   CompositeResourceDefinition,
   Composition,
   getCompositionRef,
   getXRScope,
   makeXRClass,
+  ManagedResourceDefinition,
   XRScope,
 } from '../../resources';
+import { KroStepGraph } from './CompositionNodeEditor';
 
 interface RequiredResource {
   requirementName: string;
@@ -60,6 +62,19 @@ interface PipelineStep {
   requirements?: PipelineStepRequirements;
 }
 
+function getServedSchema(jsonData: any): any {
+  const versions: any[] = jsonData?.spec?.versions ?? [];
+  const served = versions.find((v: any) => v.served !== false) ?? versions[0];
+  return served?.schema?.openAPIV3Schema ?? null;
+}
+
+function isKroStep(s: PipelineStep): boolean {
+  return !!(
+    s.functionRef?.name?.includes('kro') ||
+    (s.input as any)?.kind === 'ResourceGraph'
+  );
+}
+
 interface ComposedXRsProps {
   xrd: KubeObject;
   compositionName: string;
@@ -77,19 +92,21 @@ function ComposedXRs({ xrd, compositionName }: ComposedXRsProps) {
     [items, compositionName, scope]
   );
 
+  const columns = useMemo(() => [
+    makeXRNameColumn(plural, scope),
+    ...(scope === 'Namespaced' ? ['namespace' as const] : []),
+    readyColumn,
+    syncedColumn,
+    'age' as const,
+  ], [plural, scope]);
+
   return (
     <SectionBox title="Composite Resources">
       <ResourceTable.default
         data={filtered}
         filterFunction={filterFunction}
         enableRowActions
-        columns={[
-          makeXRNameColumn(plural, scope),
-          ...(scope === 'Namespaced' ? ['namespace' as const] : []),
-          readyColumn,
-          syncedColumn,
-          'age' as const,
-        ]}
+        columns={columns}
       />
     </SectionBox>
   );
@@ -100,26 +117,45 @@ export function CompositionDetailPage() {
   const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [comp] = Composition.useGet(name);
   const [xrds] = CompositeResourceDefinition.useList();
+  const [mrds] = ManagedResourceDefinition.useList();
 
   const compTypeRef = comp?.jsonData?.spec?.compositeTypeRef;
 
-  const matchingXrd = React.useMemo(() => {
+  const matchingXrd = useMemo(() => {
     if (!xrds || !compTypeRef) return null;
-    const group = (compTypeRef.apiVersion as string)?.split('/')[0] ?? '';
+    const group = getGroupVersion((compTypeRef.apiVersion as string) ?? '')[0];
     return xrds.find(
       x => x.jsonData?.spec?.names?.kind === compTypeRef.kind && x.jsonData?.spec?.group === group
     ) ?? null;
   }, [xrds, compTypeRef]);
 
+  const xrdSchema = useMemo(() => getServedSchema(matchingXrd?.jsonData), [matchingXrd]);
+  const xrdScope  = useMemo(() => matchingXrd ? getXRScope(matchingXrd) : undefined, [matchingXrd]);
+
+  const mrdSchemaMap = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const mrd of mrds ?? []) {
+      const group: string = mrd.jsonData?.spec?.group ?? '';
+      const kind: string  = mrd.jsonData?.spec?.names?.kind ?? '';
+      if (!group || !kind) continue;
+      const schema = getServedSchema(mrd.jsonData);
+      if (schema) map.set(`${group}/${kind}`, schema);
+    }
+    return map;
+  }, [mrds]);
+
+  let compositeLink: string | JSX.Element = '-';
+  if (compTypeRef) {
+    compositeLink = matchingXrd
+      ? <Link routeName={`crossplane-xr-kind-${matchingXrd.jsonData?.spec?.names?.plural}`}>{compTypeRef.kind}</Link>
+      : compTypeRef.kind;
+  }
+
   const extraInfo = comp
     ? [
         {
           name: 'Composite Resource',
-          value: compTypeRef
-            ? matchingXrd
-              ? <Link routeName={`crossplane-xr-kind-${matchingXrd.jsonData?.spec?.names?.plural}`}>{compTypeRef.kind}</Link>
-              : compTypeRef.kind
-            : '-',
+          value: compositeLink,
         },
         {
           name: 'Mode',
@@ -136,7 +172,8 @@ export function CompositionDetailPage() {
 
   const pipelineInputYaml = useMemo(
     () => new Map(pipeline.filter(s => s.input).map(s => [s.step, yamlStringify(s.input!, { blockQuote: true })])),
-    [pipeline]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [comp]
   );
 
   return (
@@ -166,7 +203,17 @@ export function CompositionDetailPage() {
               </AccordionSummary>
               <AccordionDetails>
                 <Box display="flex" flexDirection="column" gap={1.5}>
-                  {pipelineInputYaml.has(s.step) && (
+                  {s.input && isKroStep(s) ? (
+                    <KroStepGraph
+                      input={s.input}
+                      inputYaml={pipelineInputYaml.get(s.step)}
+                      compositionName={comp?.metadata?.name ?? ''}
+                      stepIndex={i}
+                      xrdSchema={xrdSchema}
+                      mrdSchemaMap={mrdSchemaMap}
+                      xrdScope={xrdScope}
+                    />
+                  ) : pipelineInputYaml.has(s.step) ? (
                     <Box>
                       <Typography variant="overline" display="block" gutterBottom>Input</Typography>
                       <DataField
@@ -176,7 +223,7 @@ export function CompositionDetailPage() {
                         onChange={() => {}}
                       />
                     </Box>
-                  )}
+                  ) : null}
                   {(s.requirements?.requiredResources?.length ?? 0) > 0 && (
                     <Box>
                       <Typography variant="overline" display="block" gutterBottom>Required Resources</Typography>

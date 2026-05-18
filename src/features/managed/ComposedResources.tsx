@@ -3,26 +3,9 @@ import { DateLabel, Link, Table } from '@kinvolk/headlamp-plugin/lib/components/
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useEffect, useRef, useState } from 'react';
 import { ReadyStatus, SyncedStatus } from '../../components/ConditionStatus';
+import { getGroupVersion, lookupPlural } from '../../components/map/apiPaths';
+import { ResourceRef } from '../../components/map/types';
 import { XRScope } from '../../resources';
-
-interface ResourceRef {
-  apiVersion: string;
-  kind: string;
-  name: string;
-  namespace?: string;
-}
-
-function getGroupVersion(apiVersion: string): [string, string] {
-  const parts = apiVersion.split('/');
-  return parts.length === 2 ? [parts[0], parts[1]] : ['', parts[0]];
-}
-
-function lookupPlural(apiVersion: string, kind: string, crds: KubeObject[]): string | undefined {
-  const [group] = getGroupVersion(apiVersion);
-  return crds.find(
-    crd => crd.jsonData?.spec?.names?.kind === kind && crd.jsonData?.spec?.group === group
-  )?.jsonData?.spec?.names?.plural as string | undefined;
-}
 
 function skeletonRow(ref: ResourceRef, resolvedNs: string | undefined, plural: string | undefined) {
   return {
