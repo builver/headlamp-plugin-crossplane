@@ -1152,14 +1152,16 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     let lastDist = 0;
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
-        const t0 = e.touches[0], t1 = e.touches[1];
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
         lastDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
       }
     };
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
       e.preventDefault();
-      const t0 = e.touches[0], t1 = e.touches[1];
+      const t0 = e.touches[0];
+      const t1 = e.touches[1];
       const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
       if (lastDist > 0) {
         const r = el.getBoundingClientRect();
@@ -1324,7 +1326,10 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     if (!el) return;
     const cW = el.clientWidth;
     const cH = el.clientHeight;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
     for (const n of nodes) {
       if (n.id === DRAFT_NODE_ID) continue;
       minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);

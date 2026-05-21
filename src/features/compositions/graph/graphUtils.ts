@@ -126,6 +126,10 @@ function findForEachUsages(
   return [...usages];
 }
 
+/** Returns true if a condition expression field has any value (non-empty array, or any non-null scalar). */
+// eslint-disable-next-line eqeqeq
+function hasCond(v: unknown): boolean { return Array.isArray(v) ? v.length > 0 : v != null; }
+
 /** AllRef: a CEL ref augmented with its graph context, used only inside buildGraph. */
 type AllRef = CelRef & { targetId: string; srcNodeId: string; isForEachVarRef?: boolean };
 
@@ -176,10 +180,11 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
       }
     }
     // Scan special fields (forEach/includeWhen/readyWhen) for layout deps and output ports
-    const hasIncludeWhen = Array.isArray(res.includeWhen) ? res.includeWhen.length > 0 : res.includeWhen != null;
-    const hasReadyWhen = Array.isArray(res.readyWhen) ? res.readyWhen.length > 0 : res.readyWhen != null;
+    const hasIncludeWhen = hasCond(res.includeWhen);
+    const hasReadyWhen = hasCond(res.readyWhen);
     if (varNames.length || hasIncludeWhen || hasReadyWhen) {
       const toCondExprs = (v: unknown): string[] =>
+        // eslint-disable-next-line eqeqeq
         Array.isArray(v) ? v.map(String).filter(Boolean) : (v != null ? [String(v)] : []);
       const specialVals: string[] = [
         ...toCondExprs(res.includeWhen),
@@ -280,8 +285,8 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
       rows = postProcessEachRefs(rows, id, new Set(['each', ...varNames]));
     }
     // Append forEach / includeWhen / readyWhen section rows for resource nodes that have them.
-    const resHasIncludeWhen = res && (Array.isArray(res.includeWhen) ? res.includeWhen.length > 0 : res.includeWhen != null);
-    const resHasReadyWhen = res && (Array.isArray(res.readyWhen) ? res.readyWhen.length > 0 : res.readyWhen != null);
+    const resHasIncludeWhen = res && hasCond(res.includeWhen);
+    const resHasReadyWhen = res && hasCond(res.readyWhen);
     if (res && (res.forEach?.length || resHasIncludeWhen || resHasReadyWhen)) {
       const knownForSpec = buildKnownForRes(res, known);
       const selfRefs = new Set<string>(['each', ...varNames]);

@@ -682,6 +682,7 @@ export const NodeCard = memo(function NodeCard({
                     <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0, ...(isVirt && { color: userC }) }}>{row.key}:</Typography>
                     {row.value !== undefined
                       ? isEditing
+                        // eslint-disable-next-line jsx-a11y/no-autofocus
                         ? <input autoFocus value={editingValue}
                             style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
                             onChange={e => setEditingValue(e.target.value)}
@@ -707,6 +708,7 @@ export const NodeCard = memo(function NodeCard({
                     <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.5, flexShrink: 0 }}>{row.key}:</Typography>
                     {row.value !== undefined && (
                       isEditing
+                        // eslint-disable-next-line jsx-a11y/no-autofocus
                         ? <input autoFocus value={editingValue}
                             style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
                             onChange={e => setEditingValue(e.target.value)}

@@ -74,7 +74,6 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
     : def.inputs;
   const varPortIdx = isPredicate ? activePorts.findIndex(p => p.name === 'var') : -1;
   const varFields = isPredicate ? (node.varFields ?? []) : [];
-  const varFieldCount = varFields.length;
   const extraRows = isPredicate ? opNodeVarFieldExtraRows(varFields) : 0;
   const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(activePortCount) + extraRows * OP_NODE_PORT_H;
 
