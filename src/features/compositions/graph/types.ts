@@ -20,7 +20,7 @@ export interface TRow {
   /** Raw CEL expression that didn't match the simple ref.path pattern (multiline or contains operators). */
   celExpr?: string;
   fieldPath?: string;
-  inPort?: { ref: string; srcPath: string; srcShort: string };
+  inPort?: { ref: string; srcPath: string; srcShort: string; optional?: boolean; origRef?: string };
   outPort?: { path: string; short: string };
   /** Set when the value is a composed string with 2+ refs or mixed literal+CEL. */
   segments?: RowSegment[];
@@ -28,10 +28,18 @@ export interface TRow {
   isVirtual?: boolean;
   /** True for rows that are schema suggestions not yet present in the template. */
   isGhost?: boolean;
+  /** Visual section-header divider row (forEach / includeWhen / readyWhen label). No port dots. */
+  isSection?: boolean;
   /** For ghost leaf rows: the field type from the schema. */
   ghostType?: string;
   /** True for parent rows that represent an array container (e.g. spec.containers). */
   isArrayParent?: boolean;
+  /** Indented sub-row under a forEach KV row showing a template field that uses that variable. */
+  isForEachRef?: boolean;
+  /** Can this row receive an incoming connection (left drop target). Defaults to true for leaf rows. */
+  canImport?: boolean;
+  /** Can this row originate an outgoing connection (right port dot). Defaults to true for non-section rows. */
+  canExport?: boolean;
 }
 
 /** Identifies which CEL token is being hovered, for edge + node highlight. */
@@ -63,10 +71,27 @@ export interface ExtraEdge {
   tgtNodeId: string; tgtFieldPath: string;
 }
 
+export interface OpNode {
+  id: string;
+  category: string;
+  op: string;
+  x: number; y: number;
+  literals: Record<string, string>;
+  /** For variadic nodes (e.g. string-concat): number of active input ports. Min 2. */
+  portCount?: number;
+  /** For raw-template nodes: user-resized height in pixels. */
+  h?: number;
+  /** Taint IDs active on this node. 'forEach' = self-ref source; op node ID = predicate scope. */
+  taints?: string[];
+  /** For predicate ops (map, exists): sub-field paths on the lambda var exposed as output ports. */
+  varFields?: string[];
+}
+
 export interface Drawing {
   srcNodeId: string;
   srcFieldPath: string;
   canvasX: number; canvasY: number;
+  srcType?: string;
 }
 
 export interface HoverTarget {
@@ -88,30 +113,7 @@ export interface EditingRow {
   currentTemplate: string;  // initial template value; builder tokens are source of truth during editing
 }
 
-export interface BuilderToken {
-  id: string;
-  kind: 'ref' | 'literal' | 'conditional';
-  // ref-only
-  nodeRef?: string;    // CEL identifier (schema / env / resource-id)
-  nodeId?: string;     // graph node id (__schema__ / __env__ / resource-id)
-  fieldPath?: string;  // dot-separated path within the ref
-  fieldType?: string;  // type from schema (string, integer, boolean, …)
-  optional?: boolean;  // emit ${ref.?path} for optional chaining
-  // literal-only
-  text?: string;
-  isString?: boolean;  // if true: value is a CEL string literal — serialised with double-quotes
-  // conditional-only — each part is itself a token sequence
-  condTokens?: BuilderToken[];
-  thenTokens?: BuilderToken[];
-  elseTokens?: BuilderToken[];
-}
-
 export type TypeCompat = 'ok' | 'coerce' | 'incompatible';
-
-/** Where the picker will insert the next token. */
-export type PickerTarget =
-  | { kind: 'main'; slot: number }
-  | { kind: 'cond'; tokenIdx: number; part: 'cond' | 'then' | 'else'; slot: number };
 
 export interface OutPort { path: string; short: string }
 

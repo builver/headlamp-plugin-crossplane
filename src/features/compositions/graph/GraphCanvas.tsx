@@ -2,26 +2,28 @@ import { Icon } from '@iconify/react';
 import { ApiProxy } from '@kinvolk/headlamp-plugin/lib';
 import { Box, Button, IconButton, Paper, Tooltip, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
-import { Fragment, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getGroupVersion } from '../../../components/map/apiPaths';
+import { overlayRowWithTemplate } from './celUtils';
 import {
-condPartField, getCelClusters,   OP_DISPLAY, overlayRowWithTemplate,
-  tokensFromTemplate, tokensToCelInner, tokensToTemplate, typeCompatibility, validateCelInner,
-} from './celUtils';
-import {
-  CANVAS_SIZE, DRAFT_NODE_ID, ENV_NODE_ID, HEADER_H, HG, K8S_BASE_FIELDS, K8S_MAP_PATHS,
-  NODE_CFG,   nodeH, nodeIdToRef, NW, refAccent,
-ROW_H, SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT,
+  CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, HG, K8S_BASE_FIELDS, K8S_MAP_PATHS,
+  NODE_CFG, nodeH, nodeIdToRef, NW,
+  OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
+  ROW_H, SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT, VAR_FIELD_PREFIX, varFieldLeafRow,
 } from './constants';
+import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
+import { ConnectedPortInfo, ExprOpNodeCard } from './ExprOpNodeCard';
 import { bezierPath, buildGraph, extraPortY, makeBezier, srcPortY, tgtPortY } from './graphUtils';
 import { DraftNodeCard, NodeCard } from './NodeCard';
 import { applyExtraEdgesToInput, applyFieldEditsToInput, buildTemplateRows, insertRowAtPath, removeRowAtPath } from './rowUtils';
 import { findArrayPaths, findMapPaths, flattenJsonSchema, getResApiVersion, getResKind, resolveSchemaRefs } from './schemaUtils';
+import { qualifiedPath, SECTION_DEFS, sectionOf, sectionRelPath } from './sectionDefs';
 import {
-  AddForm, BuilderToken, Drawing, EdgeType, EditingRow, ExtraEdge, FieldEdit,
-  FieldSuggestion, GEdge, GNode, HoverTarget, KindOption, NodeType, PendingResource,
-  PickerTarget, SaveState, TokenHover, TRow,
+  AddForm, Drawing, ExtraEdge, FieldEdit,
+  FieldSuggestion, GEdge, GNode, HoverTarget, KindOption, NodeType, OpNode, PendingResource,
+  SaveState, TokenHover, TRow,
 } from './types';
+import { typeCompat } from './typeUtils';
 
 // ── GraphCanvas ───────────────────────────────────────────────────────────────
 
@@ -37,43 +39,54 @@ export interface GraphCanvasProps {
   mrdSchemaMap?: Map<string, any>;
   /** CRD-backed kind options for the "Add resource" form, pre-filtered by scope. */
   kindOptions?: KindOption[];
+  /** Step-level requirements (requiredResources, requiredSchemas) from the pipeline step. */
+  requirements?: any;
 }
 
-export function GraphCanvas({ input, height = 480, compositionName, stepIndex, onDirtyChange, xrdSchema, mrdSchemaMap, kindOptions = [] }: GraphCanvasProps) {
+export function GraphCanvas({ input, height = 480, compositionName, stepIndex, onDirtyChange, xrdSchema, mrdSchemaMap, kindOptions = [], requirements }: GraphCanvasProps) {
   const theme        = useTheme();
   const dark         = theme.palette.mode === 'dark';
   const containerRef = useRef<HTMLDivElement>(null);
   const userC        = dark ? USER_C_DARK : USER_C_LIGHT;
 
-  const { nodes: initNodes, edges } = useMemo(() => buildGraph(input), [input]);
+  const { nodes: initNodes, edges, opNodes: initOpNodes, extraEdges: initExtraEdges } = useMemo(() => buildGraph(input, requirements), [input, requirements]);
 
   const [nodes,        setNodes]        = useState<GNode[]>(initNodes);
   const [selected,     setSelected]     = useState<string | null>(null);
-  const [pan,          setPan]          = useState({ x: 40, y: 40 });
-  const [scale,        setScale]        = useState(1.0);
-  const panRef   = useRef(pan);
-  const scaleRef = useRef(scale);
-  useEffect(() => { panRef.current = pan; });
-  useEffect(() => { scaleRef.current = scale; });
   const [active,       setActive]       = useState(false);
   const [drawing,           setDrawing]           = useState<Drawing | null>(null);
   const [hoverTarget,       setHoverTarget]       = useState<HoverTarget | null>(null);
   const [drawingHoverNodeId, setDrawingHoverNodeId] = useState<string | null>(null);
-  const [extraEdges,        setExtraEdges]        = useState<ExtraEdge[]>([]);
+  const [extraEdges,        setExtraEdges]        = useState<ExtraEdge[]>(initExtraEdges);
 
   const [saveState,     setSaveState]     = useState<SaveState>('idle');
   const [tokenHover,    setTokenHover]    = useState<TokenHover | null>(null);
   const [fieldEdits,    setFieldEdits]    = useState<FieldEdit[]>([]);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
-  const [editingRow,    setEditingRow]    = useState<EditingRow | null>(null);
-  const [builderTokens, setBuilderTokens] = useState<BuilderToken[]>([]);
-  const [pickerTarget, setPickerTarget] = useState<PickerTarget | null>(null);
-  const [pickerQuery,  setPickerQuery]  = useState('');
+  const [opNodes,         setOpNodes]         = useState<OpNode[]>(initOpNodes);
+  const [fetchedXrdSchema,  setFetchedXrdSchema]  = useState<any>(null);
+  const [xrdSchemaDone,     setXrdSchemaDone]     = useState(!!xrdSchema);
+  const [schemaKind,        setSchemaKind]        = useState<string | null>(null);
+  const [schemaApiVersion,  setSchemaApiVersion]  = useState<string | null>(null);
+  const [schemaAttemptedKeys, setSchemaAttemptedKeys] = useState<Set<string>>(new Set());
+  const [addOpForm,     setAddOpForm]     = useState<string | null>(null);
+  const opDragId     = useRef<string | null>(null);
+  const opDragOrigin = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
+  const opResizeId   = useRef<string | null>(null);
+  const opResizeOrigin = useRef({ my: 0, startH: 0 });
+  const [pan,  setPan]  = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const panOrigin     = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+  const isPanDragging = useRef(false);
+  const hasPanned     = useRef(false);
+  const [dirtyOps,      setDirtyOps]      = useState(false);
+  const [savedOpNodeIds, setSavedOpNodeIds] = useState<Set<string>>(new Set(initOpNodes.map(n => n.id)));
+  const [savedEdgeIds,   setSavedEdgeIds]   = useState<Set<string>>(new Set(initExtraEdges.map(e => e.id)));
   const [pendingResources,  setPendingResources]  = useState<PendingResource[]>([]);
   const [pendingRemovals,   setPendingRemovals]   = useState<string[]>([]);
   const [addForm,           setAddForm]           = useState<AddForm | null>(null);
   const [confirmDelete,     setConfirmDelete]     = useState<string | null>(null);
-  const isDirty = extraEdges.length > 0 || fieldEdits.length > 0 || pendingResources.length > 0 || pendingRemovals.length > 0;
+  const isDirty = dirtyOps || fieldEdits.length > 0 || pendingResources.length > 0 || pendingRemovals.length > 0;
 
   useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]);
 
@@ -101,7 +114,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           ],
         };
       }
-      newInput = applyExtraEdgesToInput(newInput, extraEdges);
+      newInput = applyExtraEdgesToInput(newInput, extraEdges, opNodes);
       newInput = applyFieldEditsToInput(newInput, fieldEdits);
       if (pendingRemovals.length > 0) {
         const removeSet = new Set(pendingRemovals);
@@ -116,7 +129,9 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         }
       );
       setSaveState('saved');
-      setExtraEdges([]); // cleared — now persisted in the cluster
+      setDirtyOps(false);
+      setSavedOpNodeIds(new Set(opNodes.map(n => n.id)));
+      setSavedEdgeIds(new Set(extraEdges.map(e => e.id)));
       setFieldEdits([]);
       setPendingResources([]);
       setPendingRemovals([]);
@@ -126,17 +141,59 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       setSaveState('error');
       setTimeout(() => setSaveState('idle'), 3500);
     }
-  }, [extraEdges, fieldEdits, pendingResources, input, compositionName, stepIndex]);
+  }, [extraEdges, fieldEdits, pendingResources, opNodes, input, compositionName, stepIndex]);
 
-  const didFit = useRef(false);
   useEffect(() => {
-    setNodes(initNodes); didFit.current = false;
-    setExtraEdges([]); setFieldEdits([]); setPendingResources([]); setPendingRemovals([]);
+    setNodes(initNodes);
+    setExtraEdges(initExtraEdges); setFieldEdits([]); setPendingResources([]); setPendingRemovals([]);
     setAddForm(null); setConfirmDelete(null);
-    setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); setEditingRow(null);
-  }, [initNodes]);
+    setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null);
+    setOpNodes(initOpNodes); setDirtyOps(false);
+    setSavedOpNodeIds(new Set(initOpNodes.map(n => n.id)));
+    setSavedEdgeIds(new Set(initExtraEdges.map(e => e.id)));
+    opDragId.current = null; opResizeId.current = null;
+  }, [initNodes]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Self-sufficient XRD schema fetch for schema-node autocomplete ─────────────
+  // Fetches spec.compositeTypeRef from the Composition, then finds the matching XRD
+  // to extract its openAPIV3Schema. The xrdSchema prop (from the parent) takes priority;
+  // this serves as a self-contained fallback so autocomplete works in any context.
+  useEffect(() => {
+    let mounted = true;
+    async function run() {
+      try {
+        const comp = await ApiProxy.request(`/apis/apiextensions.crossplane.io/v1/compositions/${compositionName}`);
+        const typeRef = comp?.spec?.compositeTypeRef as { apiVersion?: string; kind?: string } | undefined;
+        if (!typeRef?.apiVersion || !typeRef?.kind || !mounted) return;
+        const { apiVersion, kind } = typeRef;
+        if (mounted) { setSchemaKind(kind); setSchemaApiVersion(apiVersion); }
+        const group = getGroupVersion(apiVersion)[0];
+        const xrdList = await ApiProxy.request('/apis/apiextensions.crossplane.io/v1/compositeresourcedefinitions');
+        const xrd = (xrdList?.items ?? []).find(
+          (x: any) => x.spec?.names?.kind === kind && x.spec?.group === group
+        );
+        if (!xrd || !mounted) return;
+        const versions: any[] = xrd.spec?.versions ?? [];
+        const served = versions.find((v: any) => v.served !== false) ?? versions[0];
+        const schema = served?.schema?.openAPIV3Schema ?? null;
+        if (schema && mounted) setFetchedXrdSchema(schema);
+      } catch (err) {
+        console.warn('[crossplane] Failed to fetch XRD schema for autocomplete:', err);
+      } finally {
+        if (mounted) setXrdSchemaDone(true);
+      }
+    }
+    run();
+    return () => { mounted = false; };
+  }, [compositionName]);
+
+  const effectiveXrdSchema = xrdSchema ?? fetchedXrdSchema;
+  // If the parent provides xrdSchema directly, mark as done immediately.
+  // (The fetch effect only sets xrdSchemaDone after its async run completes.)
+  if (xrdSchema && !xrdSchemaDone) setXrdSchemaDone(true);
 
   const nodeMap = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes]);
+  const opNodesById = useMemo(() => new Map(opNodes.map(n => [n.id, n])), [opNodes]);
 
   // ── Native K8s schema fetch ────────────────────────────────────────────────
   // Fetches OpenAPI v3 schemas for native K8s resources (Deployment, Service, …) that aren't
@@ -145,15 +202,15 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   const [nativeSchemaMap, setNativeSchemaMap] = useState<Map<string, any>>(new Map());
 
-  const resourceGvKinds = useMemo(
-    () => [...(input?.resources ?? []), ...pendingResources]
-      .map((r: any) => `${getResApiVersion(r)}::${getResKind(r)}`)
-      .filter((s: string) => s !== '::')
-      .sort()
-      .join('|'),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [input?.resources, pendingResources]
-  );
+  const resourceGvKinds = useMemo(() => {
+    const envReqs: any[] = (requirements ?? input?.requirements)?.requiredResources ?? [];
+    return [
+      ...(input?.resources ?? []).map((r: any) => `${getResApiVersion(r)}::${getResKind(r)}`),
+      ...pendingResources.map((r: any) => `${getResApiVersion(r)}::${getResKind(r)}`),
+      ...envReqs.map((r: any) => `${r.apiVersion ?? ''}::${r.kind ?? ''}`),
+    ].filter(s => s !== '::').sort().join('|');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input?.resources, pendingResources, requirements]);
 
   const mrdSchemaMapRef = useRef(mrdSchemaMap);
   useEffect(() => { mrdSchemaMapRef.current = mrdSchemaMap; });
@@ -165,6 +222,18 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     for (const res of allRes) {
       const apiVersion = getResApiVersion(res);
       const kind = getResKind(res);
+      if (!apiVersion || !kind) continue;
+      const [group, version] = getGroupVersion(apiVersion);
+      const mapKey = `${group}/${kind}`;
+      if (mrdSchemaMapRef.current?.has(mapKey) || seenMapKeys.has(mapKey)) continue;
+      seenMapKeys.add(mapKey);
+      const gvPath = group ? `apis/${group}/${version}` : `api/${version}`;
+      if (!gvToKinds.has(gvPath)) gvToKinds.set(gvPath, []);
+      gvToKinds.get(gvPath)!.push({ mapKey, kind });
+    }
+    for (const req of ((requirements ?? input?.requirements)?.requiredResources ?? []) as any[]) {
+      const apiVersion = req.apiVersion as string | undefined;
+      const kind = req.kind as string | undefined;
       if (!apiVersion || !kind) continue;
       const [group, version] = getGroupVersion(apiVersion);
       const mapKey = `${group}/${kind}`;
@@ -203,7 +272,18 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       })
     ).then(() => {
       console.log('[crossplane] schema fetch done, result keys:', [...result.keys()]);
-      if (!mounted || !result.size) return;
+      if (!mounted) return;
+      setSchemaAttemptedKeys(prev => {
+        const next = new Set(prev);
+        let changed = false;
+        for (const entries of gvToKinds.values()) {
+          for (const { mapKey } of entries) {
+            if (!next.has(mapKey)) { next.add(mapKey); changed = true; }
+          }
+        }
+        return changed ? next : prev;
+      });
+      if (!result.size) return;
       setNativeSchemaMap(prev => {
         const merged = new Map(prev);
         let changed = false;
@@ -226,7 +306,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   }, [mrdSchemaMap, nativeSchemaMap]);
 
   // Memoize flattened schema fields so flattenJsonSchema isn't called on every render/mouse event.
-  const xrdAllFields  = useMemo(() => flattenJsonSchema(xrdSchema), [xrdSchema]);
+  const xrdAllFields  = useMemo(() => flattenJsonSchema(effectiveXrdSchema), [effectiveXrdSchema]);
   const xrdLeafFields = useMemo(
     () => xrdAllFields.filter(s => s.path.startsWith('spec.') && s.type !== 'object' && s.type !== 'array'),
     [xrdAllFields]
@@ -297,7 +377,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     let allSugg: FieldSuggestion[];
     if (nodeId === SCHEMA_NODE_ID) {
       allSugg = xrdLeafFields;
-    } else if (nodeId === ENV_NODE_ID) {
+    } else if (nodeMap.get(nodeId)?.type === 'env') {
       return [];
     } else {
       const res = (input?.resources ?? []).find((r: any) => r.id === nodeId)
@@ -367,34 +447,29 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     [nodes]
   );
 
-  /** Stable ref to knownIds — lets the token-init effect read the latest value without re-running. */
-  const knownIdsRef = useRef(knownIds);
-  useEffect(() => { knownIdsRef.current = knownIds; });
-
-  /** Re-initialise builder tokens whenever the edited row identity changes. */
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!editingRow) {
-      setBuilderTokens([]); setPickerTarget(null); setPickerQuery('');
-      return;
-    }
-    const raw = tokensFromTemplate(editingRow.currentTemplate, knownIdsRef.current);
-    setBuilderTokens(raw.map((t, i) => ({ ...t, id: `t${i}${Math.random().toString(36).slice(2, 5)}` })));
-    setPickerTarget(null); setPickerQuery('');
-  }, [editingRow?.nodeId, editingRow?.fieldPath]);
 
   /** Type of any field in any node — looks up the cached schema fields, bypassing the used-path filter.
    *  Array item sub-paths like containers.0.name are translated to containers[].name for lookup. */
   const getFieldType = useCallback((nodeId: string, fieldPath: string): string | undefined => {
+    const secType = SECTION_DEFS[sectionOf(fieldPath)].fieldType(sectionRelPath(fieldPath));
+    if (secType !== undefined) return secType;
     if (nodeId === SCHEMA_NODE_ID) {
       return xrdAllFields.find(s => s.path === fieldPath)?.type;
     }
-    if (nodeId === ENV_NODE_ID) return undefined;
-    const res = (input?.resources ?? []).find((r: any) => r.id === nodeId)
-      ?? pendingResources.find(r => r.id === nodeId);
-    const apiVersion = getResApiVersion(res);
-    const kind = getResKind(res);
-    const fields = mrdFieldsCache.get(`${getGroupVersion(apiVersion)[0]}/${kind}`);
+    let apiVersion: string | undefined;
+    let kind: string | undefined;
+    if (nodeMap.get(nodeId)?.type === 'env') {
+      const req = ((requirements ?? input?.requirements)?.requiredResources ?? [] as any[])
+        .find((r: any) => r.requirementName === nodeId);
+      apiVersion = req?.apiVersion;
+      kind = req?.kind;
+    } else {
+      const res = (input?.resources ?? []).find((r: any) => r.id === nodeId)
+        ?? pendingResources.find(r => r.id === nodeId);
+      apiVersion = getResApiVersion(res);
+      kind = getResKind(res);
+    }
+    const fields = mrdFieldsCache.get(`${getGroupVersion(apiVersion ?? '')[0]}/${kind ?? ''}`);
     if (!fields) return undefined;
     // Direct match first
     const direct = fields.find(s => s.path === fieldPath);
@@ -402,67 +477,50 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     // Translate array item paths: containers.0.name → containers[].name
     const schemaPath = fieldPath.replace(/\.(\d+)\./g, '[].').replace(/\.(\d+)$/, '[]');
     return fields.find(s => s.path === schemaPath)?.type;
-  }, [input, pendingResources, xrdAllFields, mrdFieldsCache]);
+  }, [input, requirements, pendingResources, xrdAllFields, mrdFieldsCache, nodeMap]);
 
-  /** All source fields across all nodes, pre-built for the picker.
-   *  Schema: all XRD spec leaf fields (getSuggestions would wrongly filter out already-used ones).
-   *  Resource nodes: fields with an outPort from the saved composition OR from newly drawn extraEdges. */
-  const pickerSuggestions = useMemo(() => {
-    type PickerEntry = { nodeId: string; nodeRef: string; nodeLabel: string; fieldPath: string; fieldType: string | undefined; nodeType: NodeType };
-    const result: PickerEntry[] = [];
-    const seen = new Set<string>();
-    const add = (e: PickerEntry) => { const k = `${e.nodeId}::${e.fieldPath}`; if (!seen.has(k)) { seen.add(k); result.push(e); } };
-
-    for (const n of nodes) {
-      const nRef = nodeIdToRef(n.id);
-      // For schema: supplement outPort rows with all XRD spec fields (if xrdSchema available).
-      // xrdSchema fields are added first so they carry type info; outPort rows add any
-      // pre-existing references that fall outside xrdSchema (or when xrdSchema is null).
-      if (n.id === SCHEMA_NODE_ID && xrdSchema) {
-        for (const f of xrdLeafFields)
-          add({ nodeId: n.id, nodeRef: nRef, nodeLabel: n.label, fieldPath: f.path, fieldType: f.type, nodeType: n.type });
+  /** Pre-built ConnectedPortInfo maps for every op node — avoids O(N×M) inline work in the render loop. */
+  const connectedPortInfoByOpId = useMemo(() => {
+    const result = new Map<string, Map<string, ConnectedPortInfo>>();
+    for (const e of extraEdges) {
+      if (!opNodesById.has(e.tgtNodeId)) continue;
+      if (!result.has(e.tgtNodeId)) result.set(e.tgtNodeId, new Map());
+      const srcOp = opNodesById.get(e.srcNodeId);
+      let label: string; let type: string | undefined; let displayPath: string | undefined;
+      if (srcOp && e.srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
+        const varSubField = e.srcFieldPath.slice(VAR_FIELD_PREFIX.length);
+        label = varSubField.split('.').pop() ?? varSubField;
+        const varName = srcOp.literals['var'] ?? 'x';
+        displayPath = `${varName}.${varSubField}`;
+      } else if (srcOp) {
+        label = EXPR_NODE_DEFS[srcOp.category]?.label ?? srcOp.category;
+        type  = EXPR_NODE_DEFS[srcOp.category]?.outputType;
+      } else {
+        label = e.srcFieldPath.replace(/\?/g, '').split('.').pop() ?? e.srcFieldPath.replace(/\?/g, '');
+        type  = getFieldType(e.srcNodeId, e.srcFieldPath);
       }
-      // All nodes: outPort rows = confirmed edges going out from this node in the saved composition
-      for (const r of n.rows.filter(r => r.outPort && r.fieldPath))
-        add({ nodeId: n.id, nodeRef: nRef, nodeLabel: n.label, fieldPath: r.outPort!.path,
-          fieldType: getSuggestions(n.id).find(s => s.path === r.outPort!.path)?.type, nodeType: n.type });
+      const optional = srcOp ? undefined : e.srcFieldPath.includes('?');
+      const srcNode = nodeMap.get(e.srcNodeId);
+      const info: ConnectedPortInfo = { label, srcNodeId: e.srcNodeId, srcFieldPath: e.srcFieldPath, type, optional, displayPath, srcNodeType: srcNode?.type ?? 'kro-resource' };
+      result.get(e.tgtNodeId)!.set(e.tgtFieldPath, info);
     }
-
-    // Also include source fields from newly drawn extraEdges (not yet in nodes state)
-    for (const ee of extraEdges) {
-      const srcNode = nodes.find(n => n.id === ee.srcNodeId);
-      if (!srcNode) continue;
-      const nRef = nodeIdToRef(srcNode.id);
-      add({ nodeId: srcNode.id, nodeRef: nRef, nodeLabel: srcNode.label, fieldPath: ee.srcFieldPath,
-        fieldType: getSuggestions(srcNode.id).find(s => s.path === ee.srcFieldPath)?.type, nodeType: srcNode.type });
-    }
-
     return result;
-  },
-    [nodes, extraEdges, xrdSchema, xrdLeafFields, getSuggestions]
-  );
+  }, [extraEdges, opNodesById, getFieldType, nodeMap]);
 
-  const onRowClick = useCallback((nodeId: string, fieldPath: string, currentTemplate: string) => {
-    if (drawing) return;
-    if (nodeMap.get(nodeId)?.type === 'kro-ref' && !fieldPath.startsWith('metadata.')) return;
-    setEditingRow({ nodeId, fieldPath, currentTemplate });
-  }, [drawing, nodeMap]);
-
-  const saveEditingRow = useCallback(() => {
-    if (!editingRow) return;
-    const tmpl = tokensToTemplate(builderTokens).trim();
-    if (!tmpl) {
-      setFieldEdits(prev => prev.filter(e => !(e.nodeId === editingRow.nodeId && e.fieldPath === editingRow.fieldPath)));
-    } else {
-      setFieldEdits(prev => [
-        ...prev.filter(e => !(e.nodeId === editingRow.nodeId && e.fieldPath === editingRow.fieldPath)),
-        { nodeId: editingRow.nodeId, fieldPath: editingRow.fieldPath, template: tmpl },
-      ]);
+  /** For each regular (non-op) node: maps fieldPath → op-node label/type for op-output connections. Used to render VarPills on celExpr rows. */
+  const opConnectedFieldsByNode = useMemo(() => {
+    const result = new Map<string, Map<string, { label: string; type?: string; srcNodeId: string }>>();
+    for (const e of extraEdges) {
+      if (opNodesById.has(e.tgtNodeId)) continue;
+      if (!opNodesById.has(e.srcNodeId) || e.srcFieldPath !== 'output') continue;
+      const srcOp = opNodesById.get(e.srcNodeId)!;
+      const label = EXPR_NODE_DEFS[srcOp.category]?.label ?? srcOp.category;
+      const type = EXPR_NODE_DEFS[srcOp.category]?.outputType;
+      if (!result.has(e.tgtNodeId)) result.set(e.tgtNodeId, new Map());
+      result.get(e.tgtNodeId)!.set(e.tgtFieldPath, { label, type: type ?? undefined, srcNodeId: e.srcNodeId });
     }
-    setEditingRow(null);
-    setBuilderTokens([]);
-    setPickerTarget(null);
-  }, [editingRow, builderTokens]);
+    return result;
+  }, [extraEdges, opNodesById]);
 
   const editedPaths = useMemo(
     () => new Set(fieldEdits.map(e => `${e.nodeId}::${e.fieldPath}`)),
@@ -494,21 +552,78 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   /** Nodes with field-edit templates applied to their rows — used only for rendering. Excludes the draft node. */
   const nodesForDisplay = useMemo(() => {
-    const base = nodes.filter(n => n.id !== DRAFT_NODE_ID);
-    if (fieldEdits.length === 0) return base;
-    return base.map(node => {
-      const nodeEditMap = new Map(
-        fieldEdits.filter(e => e.nodeId === node.id).map(e => [e.fieldPath, e.template])
-      );
-      if (nodeEditMap.size === 0) return node;
-      const overlaidRows = node.rows.map((row: TRow) =>
-        row.fieldPath && nodeEditMap.has(row.fieldPath)
-          ? overlayRowWithTemplate(row, nodeEditMap.get(row.fieldPath)!, knownIds)
-          : row
-      );
-      return { ...node, rows: overlaidRows };
-    });
-  }, [nodes, fieldEdits, knownIds]);
+    let result = nodes.filter(n => n.id !== DRAFT_NODE_ID);
+    if (fieldEdits.length > 0) {
+      result = result.map(node => {
+        const nodeEditMap = new Map(
+          fieldEdits.filter(e => e.nodeId === node.id).map(e => [e.fieldPath, e.template])
+        );
+        if (nodeEditMap.size === 0) return node;
+        const overlaidRows = node.rows.map((row: TRow) =>
+          row.fieldPath && nodeEditMap.has(row.fieldPath)
+            ? overlayRowWithTemplate(row, nodeEditMap.get(row.fieldPath)!, knownIds)
+            : row
+        );
+        return { ...node, rows: overlaidRows };
+      });
+    }
+    if (schemaApiVersion || schemaKind) {
+      result = result.map(n => {
+        if (n.id !== SCHEMA_NODE_ID) return n;
+        const infoRows: TRow[] = [
+          ...(schemaApiVersion ? [{ depth: 0, key: 'apiVersion', isParent: false as const, value: schemaApiVersion }] : []),
+          ...(schemaKind       ? [{ depth: 0, key: 'kind',       isParent: false as const, value: schemaKind }]       : []),
+        ];
+        const newRows = [...infoRows, ...n.rows];
+        return { ...n, rows: newRows, h: nodeH(newRows) };
+      });
+    }
+    return result;
+  }, [nodes, fieldEdits, knownIds, schemaApiVersion, schemaKind]);
+
+  /** Node map keyed on display rows (includes injected info rows) — used for SVG edge Y calculations. */
+  const displayNodeMap = useMemo(() => new Map(nodesForDisplay.map(n => [n.id, n])), [nodesForDisplay]);
+
+  /**
+   * For each regular (non-op) node: maps fieldPath → source accent color for ExtraEdges that
+   * target that field but are not yet saved (so not reflected in row.inPort).
+   * Inlines the color lookup (does not use nodeColor callback) to avoid TDZ ordering issues.
+   */
+  const activeInPathsByNode = useMemo(() => {
+    const map = new Map<string, Map<string, { color: string; label: string; srcNodeId: string; srcFieldPath: string }>>();
+    for (const e of extraEdges) {
+      if (opNodes.some(n => n.id === e.tgtNodeId)) continue; // op-node inputs tracked separately
+      let inner = map.get(e.tgtNodeId);
+      if (!inner) { inner = new Map(); map.set(e.tgtNodeId, inner); }
+      const srcIsOp = opNodes.some(n => n.id === e.srcNodeId);
+      let color = userC;
+      if (!srcIsOp) {
+        const srcNode = displayNodeMap.get(e.srcNodeId);
+        if (srcNode) {
+          const cfg = NODE_CFG[srcNode.type];
+          color = cfg ? (dark ? cfg.accentDark : cfg.accent) : userC;
+        }
+      }
+      const label = e.srcFieldPath.replace(/\?/g, '').split('.').pop() ?? e.srcFieldPath.replace(/\?/g, '');
+      inner.set(e.tgtFieldPath, { color, label, srcNodeId: e.srcNodeId, srcFieldPath: e.srcFieldPath });
+    }
+    return map;
+  }, [extraEdges, opNodes, userC, displayNodeMap, dark]);
+
+  /**
+   * For each regular (non-op) node: set of fieldPaths that have outgoing ExtraEdges
+   * (not yet reflected in row.outPort).
+   */
+  const activeOutPathsByNode = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const e of extraEdges) {
+      if (opNodes.some(n => n.id === e.srcNodeId)) continue; // op-node outputs tracked separately
+      let set = map.get(e.srcNodeId);
+      if (!set) { set = new Set(); map.set(e.srcNodeId, set); }
+      set.add(e.srcFieldPath);
+    }
+    return map;
+  }, [extraEdges, opNodes]);
 
   /** Pre-computed suggestions per node — stable references so NodeCard.memo can short-circuit. */
   const allSuggestionsMap = useMemo(() => {
@@ -516,6 +631,85 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     for (const n of nodesForDisplay) map.set(n.id, getSuggestions(n.id));
     return map;
   }, [nodesForDisplay, getSuggestions]);
+
+  /** Node IDs where schema was attempted but could not be loaded. */
+  const noSchemaNodeIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (xrdSchemaDone && !effectiveXrdSchema) ids.add(SCHEMA_NODE_ID);
+    const envReqsList: any[] = (requirements ?? input?.requirements)?.requiredResources ?? [];
+    for (const n of nodesForDisplay) {
+      let apiVersion: string | undefined;
+      let kind: string | undefined;
+      if (n.type === 'env') {
+        const req = envReqsList.find((r: any) => r.requirementName === n.id);
+        apiVersion = req?.apiVersion; kind = req?.kind;
+      } else if (n.type === 'kro-resource' || n.type === 'kro-ref') {
+        const res = (input?.resources ?? []).find((r: any) => r.id === n.id)
+          ?? pendingResources.find(r => r.id === n.id);
+        apiVersion = getResApiVersion(res); kind = getResKind(res);
+      } else { continue; }
+      if (!apiVersion || !kind) continue;
+      const key = `${getGroupVersion(apiVersion)[0]}/${kind}`;
+      if (schemaAttemptedKeys.has(key) && !mrdFieldsCache.has(key)) ids.add(n.id);
+    }
+    return ids;
+  }, [xrdSchemaDone, effectiveXrdSchema, nodesForDisplay, input, requirements, pendingResources, schemaAttemptedKeys, mrdFieldsCache]);
+
+  /** Field paths that are not present in the node's CRD/XRD schema. Only populated when schema is loaded. */
+  const allUnknownPathsMap = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    const envReqsList: any[] = (requirements ?? input?.requirements)?.requiredResources ?? [];
+    for (const n of nodesForDisplay) {
+      if (n.type === 'draft') continue;
+      // Determine whether the schema is loaded for this node
+      let schemaLoaded = false;
+      if (n.id === SCHEMA_NODE_ID) {
+        schemaLoaded = xrdAllFields.length > 0;
+      } else if (n.type === 'env') {
+        const req = envReqsList.find((r: any) => r.requirementName === n.id);
+        const apiVersion = req?.apiVersion as string | undefined;
+        const kind = req?.kind as string | undefined;
+        if (!apiVersion || !kind) continue;
+        schemaLoaded = mrdFieldsCache.has(`${getGroupVersion(apiVersion)[0]}/${kind}`);
+      } else {
+        const res = (input?.resources ?? []).find((r: any) => r.id === n.id)
+          ?? pendingResources.find(r => r.id === n.id);
+        const apiVersion = getResApiVersion(res);
+        const kind = getResKind(res);
+        const group = getGroupVersion(apiVersion)[0];
+        schemaLoaded = mrdFieldsCache.has(`${group}/${kind}`);
+      }
+      if (!schemaLoaded) continue;
+      // Compute map paths for this node so children of map fields are never flagged.
+      let mapPaths: Set<string>;
+      if (n.id === SCHEMA_NODE_ID) {
+        mapPaths = new Set();
+      } else {
+        let apiv: string | undefined; let knd: string | undefined;
+        if (n.type === 'env') {
+          const req = envReqsList.find((r: any) => r.requirementName === n.id);
+          apiv = req?.apiVersion; knd = req?.kind;
+        } else {
+          const res = (input?.resources ?? []).find((r: any) => r.id === n.id)
+            ?? pendingResources.find(r => r.id === n.id);
+          apiv = getResApiVersion(res); knd = getResKind(res);
+        }
+        const schemaMaps = mrdMapPathsCache.get(`${getGroupVersion(apiv ?? '')[0]}/${knd ?? ''}`) ?? new Set<string>();
+        mapPaths = new Set([...K8S_MAP_PATHS, ...schemaMaps]);
+      }
+      const isUnderMap = (fp: string) => fp.split('.').some(
+        (_, i, parts) => i > 0 && mapPaths.has(parts.slice(0, i).join('.'))
+      );
+      const unknown = new Set<string>();
+      for (const row of n.rows) {
+        if (row.isParent || row.isGhost || row.isSection || !row.fieldPath) continue;
+        if (isUnderMap(row.fieldPath)) continue;
+        if (getFieldType(n.id, row.fieldPath) === undefined) unknown.add(row.fieldPath);
+      }
+      if (unknown.size > 0) map.set(n.id, unknown);
+    }
+    return map;
+  }, [nodesForDisplay, xrdAllFields, input, requirements, pendingResources, mrdFieldsCache, mrdMapPathsCache, getFieldType]);
 
   /** Maps CEL ref identifier → NodeType for all nodes, for correct source-node pill colouring. */
   const nodeTypeByRef = useMemo(
@@ -530,8 +724,6 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   const onTokenLeave = useCallback(() => setTokenHover(null), []);
 
-  const isPanning   = useRef(false);
-  const panOrigin   = useRef({ x: 0, y: 0 });
   const bgWasClean  = useRef(false); // true if bg mousedown had no subsequent mouse movement
   const dragId      = useRef<string | null>(null);
   const dragOrigin  = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
@@ -540,14 +732,15 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const screenToCanvas = useCallback((sx: number, sy: number) => {
     const r = containerRef.current?.getBoundingClientRect();
     if (!r) return { x: 0, y: 0 };
-    return { x: (sx - r.left - panRef.current.x) / scaleRef.current, y: (sy - r.top - panRef.current.y) / scaleRef.current };
-  }, []);
+    return { x: (sx - r.left - pan.x) / zoom, y: (sy - r.top - pan.y) / zoom };
+  }, [pan, zoom]);
 
   // ── Add virtual field row to a node ─────────────────────────────────────────
 
   const addFieldToNode = useCallback((nodeId: string, fieldPath: string): boolean => {
     const path = fieldPath.trim();
     if (!path) return false;
+    if (path.startsWith('_')) return false;
     const isMapParent   = allMapPathsMap.get(nodeId)?.has(path) ?? false;
     const isArrayParent = allArrayPathsMap.get(nodeId)?.has(path) ?? false;
     const fieldType = getFieldType(nodeId, path);
@@ -579,9 +772,142 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     }));
   }, []);
 
+  /** Add a new virtual entry to a forEach / includeWhen / readyWhen section on a node. */
+  const onAddSectionItem = useCallback((nodeId: string, section: string, varName?: string) => {
+    setNodes(prev => prev.map(n => {
+      if (n.id !== nodeId) return n;
+      const sec = section as 'forEach' | 'includeWhen' | 'readyWhen';
+      const prefix = SECTION_DEFS[sec].prefix;
+
+      // Find the index after the last row that belongs to this section.
+      let insertAt = n.rows.length;
+      for (let i = n.rows.length - 1; i >= 0; i--) {
+        const r = n.rows[i];
+        if (r.fieldPath?.startsWith(prefix) || (r.isSection && r.key === sec)) {
+          insertAt = i + 1; break;
+        }
+      }
+
+      let newRow: TRow;
+      if (sec === 'forEach') {
+        if (!varName) return n;
+        const fp = qualifiedPath('forEach', varName);
+        if (n.rows.some(r => r.fieldPath === fp)) return n;
+        newRow = { depth: 1, key: varName, isParent: false, fieldPath: fp, isVirtual: true,
+          canImport: true, canExport: true, outPort: { path: fp, short: varName } };
+      } else {
+        // Single optional value — only one row allowed.
+        const fp = qualifiedPath(sec, 'value');
+        if (n.rows.some(r => r.fieldPath === fp)) return n;
+        newRow = { depth: 1, key: 'value', isParent: false, fieldPath: fp, isVirtual: true,
+          canImport: true, canExport: false };
+      }
+
+      const newRows = [...n.rows];
+      newRows.splice(insertAt, 0, newRow);
+      return { ...n, rows: newRows, h: nodeH(newRows) };
+    }));
+    setDirtyOps(true);
+  }, []);
+
+  // ── Op node handlers ──────────────────────────────────────────────────────────
+
+  const onOpNodeDown = useCallback((e: MouseEvent, id: string) => {
+    const node = opNodes.find(n => n.id === id); if (!node) return;
+    opDragId.current = id;
+    opDragOrigin.current = { mx: e.clientX, my: e.clientY, nx: node.x, ny: node.y };
+  }, [opNodes]);
+
+  const onOpNodeInputPortUp = useCallback((e: MouseEvent, id: string, portName: string) => {
+    if (!drawing) return;
+    const tgtOpNode = opNodes.find(n => n.id === id);
+    const tgtDef = tgtOpNode ? EXPR_NODE_DEFS[tgtOpNode.category] : undefined;
+    const portDef = tgtDef?.inputs.find(p => p.name === portName);
+    if (typeCompat(drawing.srcType, portDef?.type) === 'incompatible') return;
+    setExtraEdges(prev => [
+      ...prev.filter(ee => !(ee.tgtNodeId === id && ee.tgtFieldPath === portName)),
+      { id: `extra-${Date.now()}`, srcNodeId: drawing.srcNodeId, srcFieldPath: drawing.srcFieldPath,
+        tgtNodeId: id, tgtFieldPath: portName },
+    ]);
+    setDirtyOps(true);
+    // Canvas onMouseUp (via bubbling) clears drawing state
+  }, [drawing, opNodes]);
+
+  const onOpChange = useCallback((id: string, op: string) => {
+    setOpNodes(prev => prev.map(n => n.id === id ? { ...n, op } : n));
+    setDirtyOps(true);
+  }, []);
+
+  const onOpLiteralChange = useCallback((id: string, portName: string, value: string) => {
+    setOpNodes(prev => prev.map(n => n.id === id ? { ...n, literals: { ...n.literals, [portName]: value } } : n));
+    setDirtyOps(true);
+  }, []);
+
+  const onDeleteOpNode = useCallback((id: string) => {
+    setOpNodes(prev => prev.filter(n => n.id !== id));
+    setExtraEdges(prev => prev.filter(e => e.srcNodeId !== id && e.tgtNodeId !== id));
+    setDirtyOps(true);
+  }, []);
+
+  const onOpResizeStart = useCallback((e: MouseEvent, id: string) => {
+    const node = opNodes.find(n => n.id === id); if (!node) return;
+    opResizeId.current = id;
+    opResizeOrigin.current = { my: e.clientY, startH: node.h ?? RAW_TEMPLATE_NODE_H };
+  }, [opNodes]);
+
+  const onAddVarField = useCallback((opId: string, fieldPath: string) => {
+    setOpNodes(prev => prev.map(n => n.id === opId
+      ? { ...n, varFields: [...(n.varFields ?? []).filter(f => f !== fieldPath), fieldPath] }
+      : n));
+    setDirtyOps(true);
+  }, []);
+
+  const onRemoveVarField = useCallback((opId: string, fieldPath: string) => {
+    setOpNodes(prev => prev.map(n => n.id === opId
+      ? { ...n, varFields: (n.varFields ?? []).filter(f => f !== fieldPath) }
+      : n));
+    setExtraEdges(prev => prev.filter(e => !(e.srcNodeId === opId && e.srcFieldPath === `var:${fieldPath}`)));
+    setDirtyOps(true);
+  }, []);
+
+  // ── Variadic port auto-adjustment ────────────────────────────────────────────
+  // For variadic op nodes (e.g. string-concat): always keep exactly one trailing
+  // empty port. Add a port when all ports are filled; remove the last port when
+  // more than one port is empty (and portCount > 2).
+  useEffect(() => {
+    setOpNodes(prev => {
+      let changed = false;
+      const next = prev.map(node => {
+        const def = EXPR_NODE_DEFS[node.category];
+        if (!def?.variadic) return node;
+        const count = node.portCount ?? def.inputs.length;
+        const portNames = Array.from({ length: count }, (_, i) => String.fromCharCode(65 + i));
+        const emptyPorts = portNames.filter(name =>
+          !extraEdges.some(e => e.tgtNodeId === node.id && e.tgtFieldPath === name) &&
+          (node.literals[name] ?? '').trim() === ''
+        );
+        if (emptyPorts.length === 0) {
+          changed = true;
+          return { ...node, portCount: count + 1 };
+        }
+        if (emptyPorts.length > 1 && count > 2) {
+          const lastPort = String.fromCharCode(65 + count - 1);
+          if (emptyPorts.includes(lastPort)) {
+            changed = true;
+            const newLiterals = { ...node.literals };
+            delete newLiterals[lastPort];
+            return { ...node, portCount: count - 1, literals: newLiterals };
+          }
+        }
+        return node;
+      });
+      return changed ? next : prev;
+    });
+  }, [opNodes, extraEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Hover target computation ─────────────────────────────────────────────────
 
-  const computeHoverTarget = useCallback((cp: { x: number; y: number }, srcNodeId: string): HoverTarget | null => {
+  const computeHoverTarget = useCallback((cp: { x: number; y: number }, srcNodeId: string, srcType?: string): HoverTarget | null => {
     for (const n of nodes) {
       if (n.id === srcNodeId) continue;
       if (n.type === 'kro-ref') continue; // external refs are read-only, cannot be drop targets
@@ -589,24 +915,27 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const displayBottom = n.y + HEADER_H + n.rows.length * ROW_H + 8;
       if (cp.y < n.y || cp.y >= displayBottom) continue;
       const rowIdx = Math.floor((cp.y - n.y - HEADER_H) / ROW_H);
-      if (rowIdx >= 0 && rowIdx < n.rows.length && !n.rows[rowIdx].isParent) {
-        return { nodeId: n.id, rowIdx, fieldPath: n.rows[rowIdx].fieldPath };
+      if (rowIdx >= 0 && rowIdx < n.rows.length && !n.rows[rowIdx].isParent && !n.rows[rowIdx].isSection && n.rows[rowIdx].canImport !== false) {
+        const row = n.rows[rowIdx];
+        const tgtType = row.ghostType ?? getFieldType(n.id, row.fieldPath ?? '');
+        if (typeCompat(srcType, tgtType) === 'incompatible') return null;
+        return { nodeId: n.id, rowIdx, fieldPath: row.fieldPath };
       }
     }
     return null;
-  }, [nodes]);
+  }, [nodes, getFieldType]);
 
   // ── Mouse handlers ────────────────────────────────────────────────────────────
 
   const onBgDown = useCallback((e: MouseEvent) => {
     if (e.button !== 0) return;
-    if (editingRow) { setEditingRow(null); setBuilderTokens([]); setPickerTarget(null); return; }
     if (drawing) { setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); return; }
-    isPanning.current = true;
     bgWasClean.current = true;
-    panOrigin.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+    hasPanned.current = false;
+    panOrigin.current = { mx: e.clientX, my: e.clientY, px: pan.x, py: pan.y };
+    isPanDragging.current = true;
     setActive(true); e.preventDefault();
-  }, [pan, drawing, editingRow]);
+  }, [drawing, pan]);
 
   const onNodeDown = useCallback((e: MouseEvent, id: string) => {
     if (drawing) return;
@@ -619,42 +948,76 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     // Snap the drag origin to those clamped canvas coords so drag starts from where the card is
     // displayed, eliminating the dead zone caused by the raw canvas position being off-screen.
     if (id === DRAFT_NODE_ID && containerRef.current) {
-      const s = scaleRef.current;
-      const p = panRef.current;
       const cW = containerRef.current.clientWidth;
       const cH = containerRef.current.clientHeight;
-      nx = (Math.max(8,  Math.min(n.x * s + p.x, cW - NW - 8))  - p.x) / s;
-      ny = (Math.max(48, Math.min(n.y * s + p.y, cH - 240))      - p.y) / s;
+      // Clamp to screen bounds then convert back to canvas coords
+      const screenLeft = Math.max(8,  Math.min(n.x * zoom + pan.x, cW - NW - 8));
+      const screenTop  = Math.max(48, Math.min(n.y * zoom + pan.y, cH - 240));
+      nx = (screenLeft - pan.x) / zoom;
+      ny = (screenTop  - pan.y) / zoom;
       setNodes(prev => prev.map(nd => nd.id === DRAFT_NODE_ID ? { ...nd, x: nx, y: ny } : nd));
     }
     dragOrigin.current = { mx: e.clientX, my: e.clientY, nx, ny };
     setActive(true);
-  }, [nodes, drawing]);
+  }, [nodes, drawing, zoom, pan]);
+
+  const hasDraggedPort = useRef(false);
 
   const onPortDown = useCallback((e: MouseEvent, nodeId: string, fieldPath: string) => {
     e.stopPropagation();
+    hasDraggedPort.current = false;
     const cp = screenToCanvas(e.clientX, e.clientY);
-    setDrawing({ srcNodeId: nodeId, srcFieldPath: fieldPath, canvasX: cp.x, canvasY: cp.y });
+    const opNode = opNodes.find(n => n.id === nodeId);
+    const srcType = opNode
+      ? (fieldPath.startsWith('var:') ? 'any' : EXPR_NODE_DEFS[opNode.category]?.outputType)
+      : getFieldType(nodeId, fieldPath);
+    setDrawing({ srcNodeId: nodeId, srcFieldPath: fieldPath, canvasX: cp.x, canvasY: cp.y, srcType });
     setHoverTarget(null); setActive(true);
-  }, [screenToCanvas]);
+  }, [screenToCanvas, opNodes, getFieldType]);
+
+  const onOpNodeOutputPortDown = useCallback((e: MouseEvent, id: string) => {
+    onPortDown(e, id, 'output');
+  }, [onPortDown]);
+
+  const onVarFieldPortDown = useCallback((e: MouseEvent, opId: string, varFieldPath: string) => {
+    onPortDown(e, opId, `${VAR_FIELD_PREFIX}${varFieldPath}`);
+  }, [onPortDown]);
 
   const onPotentialFieldClick = useCallback((nodeId: string, fieldPath: string) => {
     addFieldToNode(nodeId, fieldPath);
   }, [addFieldToNode]);
 
   const onMouseMove = useCallback((e: MouseEvent) => {
-    if (isPanning.current) { bgWasClean.current = false; setPan({ x: e.clientX - panOrigin.current.x, y: e.clientY - panOrigin.current.y }); }
     if (dragId.current) {
       hasDragged.current = true;
-      const dx = (e.clientX - dragOrigin.current.mx) / scale;
-      const dy = (e.clientY - dragOrigin.current.my) / scale;
+      const dx = (e.clientX - dragOrigin.current.mx) / zoom;
+      const dy = (e.clientY - dragOrigin.current.my) / zoom;
       setNodes(prev => prev.map(n => n.id === dragId.current
         ? { ...n, x: dragOrigin.current.nx + dx, y: dragOrigin.current.ny + dy } : n));
     }
+    if (opDragId.current) {
+      const dx = (e.clientX - opDragOrigin.current.mx) / zoom;
+      const dy = (e.clientY - opDragOrigin.current.my) / zoom;
+      setOpNodes(prev => prev.map(n => n.id === opDragId.current
+        ? { ...n, x: opDragOrigin.current.nx + dx, y: opDragOrigin.current.ny + dy }
+        : n));
+    }
+    if (opResizeId.current) {
+      const dy = (e.clientY - opResizeOrigin.current.my) / zoom;
+      const newH = Math.max(OP_NODE_HDR_H + 32, opResizeOrigin.current.startH + dy);
+      setOpNodes(prev => prev.map(n => n.id === opResizeId.current ? { ...n, h: newH } : n));
+    }
+    if (isPanDragging.current && !dragId.current && !opDragId.current && !opResizeId.current && !drawing) {
+      const dx = e.clientX - panOrigin.current.mx;
+      const dy = e.clientY - panOrigin.current.my;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) hasPanned.current = true;
+      setPan({ x: panOrigin.current.px + dx, y: panOrigin.current.py + dy });
+    }
     if (drawing) {
+      hasDraggedPort.current = true;
       const cp = screenToCanvas(e.clientX, e.clientY);
       setDrawing(d => d ? { ...d, canvasX: cp.x, canvasY: cp.y } : null);
-      setHoverTarget(computeHoverTarget(cp, drawing.srcNodeId));
+      setHoverTarget(computeHoverTarget(cp, drawing.srcNodeId, drawing.srcType));
       // Track which node the cursor is over, independent of valid drop row
       const overNode = nodes.find(n => {
         if (n.id === drawing.srcNodeId) return false;
@@ -666,87 +1029,79 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       });
       setDrawingHoverNodeId(overNode?.id ?? null);
     }
-  }, [scale, drawing, screenToCanvas, computeHoverTarget, nodes]);
+  }, [drawing, screenToCanvas, computeHoverTarget, nodes, zoom]);
+
+  const onInPortClick = useCallback((nodeId: string, fieldPath: string) => {
+    for (const ge of edges) {
+      if (ge.target === nodeId && getEdgeTargetFieldPath(ge) === fieldPath) removeExistingEdge(ge);
+    }
+    setExtraEdges(prev => prev.filter(e => !(e.tgtNodeId === nodeId && e.tgtFieldPath === fieldPath)));
+  }, [edges, getEdgeTargetFieldPath, removeExistingEdge]);
+
+  const onOpInputPortClick = useCallback((id: string, portName: string) => {
+    setExtraEdges(prev => prev.filter(e => !(e.tgtNodeId === id && e.tgtFieldPath === portName)));
+    setDirtyOps(true);
+  }, []);
 
   const onMouseUp = useCallback(() => {
-    if (bgWasClean.current) setSelected(null);
+    if (bgWasClean.current && !hasPanned.current) { setSelected(null); }
     bgWasClean.current = false;
-    isPanning.current = false; dragId.current = null; setActive(false);
+    isPanDragging.current = false;
+    dragId.current = null; opDragId.current = null; opResizeId.current = null; setActive(false);
     if (drawing) {
       if (hoverTarget?.fieldPath) {
+        // Block connecting tainted op nodes directly to resource fields
+        const srcOpNode = opNodes.find(n => n.id === drawing.srcNodeId);
+        if (srcOpNode?.taints?.length) {
+          setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null);
+          return;
+        }
         const tgtNode = nodeMap.get(hoverTarget.nodeId);
         if (tgtNode && !tgtNode.rows.some(r => r.fieldPath === hoverTarget.fieldPath)) {
           // Dropped on a ghost (potential) field row — materialise it first
           addFieldToNode(hoverTarget.nodeId, hoverTarget.fieldPath);
         }
-        setExtraEdges(prev => [...prev, {
-          id: `extra-${Date.now()}`,
-          srcNodeId: drawing.srcNodeId, srcFieldPath: drawing.srcFieldPath,
-          tgtNodeId: hoverTarget.nodeId, tgtFieldPath: hoverTarget.fieldPath,
-        }]);
+        // Input connectors accept exactly one connection — replace any existing edge to this field.
+        setExtraEdges(prev => [
+          ...prev.filter(ee => !(ee.tgtNodeId === hoverTarget.nodeId && ee.tgtFieldPath === hoverTarget.fieldPath)),
+          { id: `extra-${Date.now()}`, srcNodeId: drawing.srcNodeId, srcFieldPath: drawing.srcFieldPath,
+            tgtNodeId: hoverTarget.nodeId, tgtFieldPath: hoverTarget.fieldPath },
+        ]);
+        // Mark any committed GEdge to the same field as deleted so it renders faded until save.
+        for (const ge of edges) {
+          if (ge.target === hoverTarget.nodeId && getEdgeTargetFieldPath(ge) === hoverTarget.fieldPath) {
+            removeExistingEdge(ge);
+          }
+        }
+        setDirtyOps(true);
+      } else if (!hasDraggedPort.current) {
+        // Click without drag on output port — delete all edges from this port.
+        for (const ge of edges) {
+          if (ge.source === drawing.srcNodeId && ge.srcPortPath === drawing.srcFieldPath) removeExistingEdge(ge);
+        }
+        setExtraEdges(prev => prev.filter(e => !(e.srcNodeId === drawing.srcNodeId && e.srcFieldPath === drawing.srcFieldPath)));
+        if (opNodes.some(n => n.id === drawing.srcNodeId)) setDirtyOps(true);
       }
       setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null);
     }
-  }, [drawing, hoverTarget, nodeMap, addFieldToNode]);
+  }, [drawing, hoverTarget, nodeMap, addFieldToNode, edges, getEdgeTargetFieldPath, removeExistingEdge, opNodes]);
 
-  // ── Zoom ─────────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const el = containerRef.current; if (!el) return;
-    const h = (e: WheelEvent) => {
-      e.preventDefault();
-      const r = el.getBoundingClientRect();
-      const px = e.clientX - r.left;
-      const py = e.clientY - r.top;
-      const prev = scaleRef.current;
-      // Proportional zoom: small trackpad nudges → tiny zoom, large scroll → larger zoom.
-      // deltaMode 1 = line units (some mouse wheels) → convert to ~pixels.
-      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-      const next = Math.max(0.15, Math.min(4, prev * Math.pow(0.999, dy)));
-      const ratio = next / prev;
-      // Update synchronously so rapid successive wheel events compound correctly
-      // rather than all starting from the same stale render-cycle value.
-      scaleRef.current = next;
-      setScale(next);
-      setPan(p => ({ x: px - (px - p.x) * ratio, y: py - (py - p.y) * ratio }));
-    };
-    el.addEventListener('wheel', h, { passive: false });
-    return () => el.removeEventListener('wheel', h);
-  }, []);
+  /** Returns the accent color for a given graph-node id (source of an edge). */
+  const nodeColor = useCallback((nodeId: string): string => {
+    const node = displayNodeMap.get(nodeId);
+    if (!node) return userC;
+    const cfg = NODE_CFG[node.type];
+    return cfg ? (dark ? cfg.accentDark : cfg.accent) : userC;
+  }, [displayNodeMap, dark, userC]);
 
-  /** Zoom by `factor` keeping the canvas point at container position `(px, py)` fixed. */
-  const zoomAround = useCallback((factor: number, px: number, py: number) => {
-    const prev = scaleRef.current;
-    const next = Math.max(0.15, Math.min(4, prev * factor));
-    const ratio = next / prev;
-    scaleRef.current = next;
-    setScale(next);
-    setPan(p => ({ x: px - (px - p.x) * ratio, y: py - (py - p.y) * ratio }));
-  }, []);
-
-  const fitView = useCallback(() => {
-    if (!containerRef.current || !nodes.length) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const minX = Math.min(...nodes.map(n => n.x));
-    const minY = Math.min(...nodes.map(n => n.y));
-    const maxX = Math.max(...nodes.map(n => n.x + n.w));
-    const maxY = Math.max(...nodes.map(n => n.y + n.h));
-    const pad  = 56;
-    const ns   = Math.min((rect.width - pad * 2) / Math.max(maxX - minX, 1), (rect.height - pad * 2) / Math.max(maxY - minY, 1), 1.5);
-    setScale(ns);
-    setPan({ x: (rect.width - (maxX - minX) * ns) / 2 - minX * ns, y: (rect.height - (maxY - minY) * ns) / 2 - minY * ns });
-  }, [nodes]);
-
-  useEffect(() => {
-    if (!didFit.current && nodes.length) { didFit.current = true; requestAnimationFrame(fitView); }
-  }, [nodes, fitView]);
-
-  const edgeColors: Record<EdgeType, string> = useMemo(() => ({
-    'kro-schema': dark ? '#90caf9' : '#1565c0',
-    'kro-env':    dark ? '#fcd34d' : '#92660a',
-    'kro-dep':    dark ? '#a5d6a7' : '#2e7d32',
-    'user':       userC,
-  }), [dark, userC]);
+  /** One marker per node type + 'user' (op nodes). Used for arrowheads. */
+  const markerDefs = useMemo(() => ([
+    ...(['schema', 'env', 'kro-resource', 'kro-ref'] as const).map(t => ({
+      key: t, color: dark ? NODE_CFG[t].accentDark : NODE_CFG[t].accent,
+    })),
+    { key: 'user' as const, color: userC },
+  ]), [dark, userC]);
 
   const eid = useRef(`cne-${Math.random().toString(36).slice(2, 7)}`).current;
 
@@ -756,6 +1111,78 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  // Non-passive wheel: two-finger scroll = pan, pinch (ctrlKey) = zoom.
+  // Browsers set ctrlKey=true for trackpad pinch even without the physical key.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: globalThis.WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey) {
+        // Pinch-to-zoom or ctrl+wheel — zoom centered on cursor
+        const r = el.getBoundingClientRect();
+        const mx = e.clientX - r.left;
+        const my = e.clientY - r.top;
+        // Trackpad pinch fires many small deltaY; mouse wheel fires large discrete ones.
+        // Math.exp gives smooth continuous zoom for both.
+        const factor = Math.exp(-e.deltaY / 200);
+        setZoom(z => {
+          const newZoom = Math.min(3, Math.max(0.15, z * factor));
+          setPan(p => ({
+            x: mx - (mx - p.x) * (newZoom / z),
+            y: my - (my - p.y) * (newZoom / z),
+          }));
+          return newZoom;
+        });
+      } else {
+        // Two-finger scroll = pan
+        setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Pinch-to-zoom (touch)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let lastDist = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const t0 = e.touches[0], t1 = e.touches[1];
+        lastDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
+      const t0 = e.touches[0], t1 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      if (lastDist > 0) {
+        const r = el.getBoundingClientRect();
+        const mx = (t0.clientX + t1.clientX) / 2 - r.left;
+        const my = (t0.clientY + t1.clientY) / 2 - r.top;
+        const factor = dist / lastDist;
+        setZoom(z => {
+          const newZoom = Math.min(3, Math.max(0.15, z * factor));
+          setPan(p => ({
+            x: mx - (mx - p.x) * (newZoom / z),
+            y: my - (my - p.y) * (newZoom / z),
+          }));
+          return newZoom;
+        });
+      }
+      lastDist = dist;
+    };
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+    };
   }, []);
 
   const toggleFullscreen = useCallback(() => {
@@ -781,6 +1208,50 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     setSelected(s => s === id ? null : s);
     setConfirmDelete(null);
   }, [confirmDelete, pendingResources]);
+
+  /** Toggle the optional-chaining `?` marker on an inPort field's CEL template. */
+  const toggleInPortOptional = useCallback((nodeId: string, fieldPath: string) => {
+    const displayNode = nodesForDisplay.find(n => n.id === nodeId);
+    if (!displayNode) return;
+    const row = displayNode.rows.find(r => r.fieldPath === fieldPath);
+    if (!row?.inPort) return;
+    const { ref, srcPath } = row.inPort;
+    let newSrcPath: string;
+    if (srcPath.includes('?')) {
+      newSrcPath = srcPath.replace(/\?/g, '');
+    } else {
+      const lastDot = srcPath.lastIndexOf('.');
+      newSrcPath = lastDot === -1 ? `?${srcPath}` : `${srcPath.slice(0, lastDot + 1)}?${srcPath.slice(lastDot + 1)}`;
+    }
+    const newTemplate = `\${${ref}.${newSrcPath}}`;
+    setFieldEdits(prev => [
+      ...prev.filter(e => !(e.nodeId === nodeId && e.fieldPath === fieldPath)),
+      { nodeId, fieldPath, template: newTemplate },
+    ]);
+  }, [nodesForDisplay]);
+
+  const onValueEdit = useCallback((nodeId: string, fieldPath: string, value: string) => {
+    setFieldEdits(prev => [
+      ...prev.filter(e => !(e.nodeId === nodeId && e.fieldPath === fieldPath)),
+      { nodeId, fieldPath, template: value },
+    ]);
+  }, []);
+
+  const toggleOpPortOptional = useCallback((opNodeId: string, portName: string) => {
+    const edge = extraEdges.find(e => e.tgtNodeId === opNodeId && e.tgtFieldPath === portName);
+    if (!edge) return;
+    const srcPath = edge.srcFieldPath;
+    let newSrcPath: string;
+    if (srcPath.includes('?')) {
+      newSrcPath = srcPath.replace(/\?/g, '');
+    } else {
+      const lastDot = srcPath.lastIndexOf('.');
+      newSrcPath = lastDot === -1 ? `?${srcPath}` : `${srcPath.slice(0, lastDot + 1)}?${srcPath.slice(lastDot + 1)}`;
+    }
+    setExtraEdges(prev => prev.map(e =>
+      e.id === edge.id ? { ...e, srcFieldPath: newSrcPath } : e
+    ));
+  }, [extraEdges]);
 
   /** Remove a field row from a node and mark it for deletion at save time. */
   const onDeleteRow = useCallback((nodeId: string, fieldPath: string) => {
@@ -848,6 +1319,44 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     setAddForm(null);
   }, [addForm, nodes]);
 
+  const fitView = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const cW = el.clientWidth;
+    const cH = el.clientHeight;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      if (n.id === DRAFT_NODE_ID) continue;
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.w); maxY = Math.max(maxY, n.y + n.h);
+    }
+    for (const n of opNodes) {
+      const def = EXPR_NODE_DEFS[n.category];
+      const portCount = (n.portCount ?? def?.inputs.length ?? 2) + opNodeVarFieldExtraRows(n.varFields ?? []);
+      const h = n.h ?? opNodeH(portCount);
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + OP_NODE_W); maxY = Math.max(maxY, n.y + h);
+    }
+    if (!isFinite(minX)) return;
+    const PAD = 40;
+    const newZoom = Math.min(3, Math.max(0.15, Math.min(
+      cW / (maxX - minX + PAD * 2),
+      cH / (maxY - minY + PAD * 2),
+    )));
+    setPan({
+      x: cW / 2 - ((minX + maxX) / 2) * newZoom,
+      y: cH / 2 - ((minY + maxY) / 2) * newZoom,
+    });
+    setZoom(newZoom);
+  }, [nodes, opNodes]);
+
+  const hasFitOnMount = useRef(false);
+  useEffect(() => {
+    if (hasFitOnMount.current) return;
+    hasFitOnMount.current = true;
+    fitView();
+  }, [fitView]);
+
   if (!nodes.length) return null;
 
   return (
@@ -863,19 +1372,18 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     >
       {/* Toolbar */}
       <Box sx={{ position: 'absolute', top: 8, right: 8, zIndex: 10, display: 'flex', gap: 0.5 }}>
-        {([
-          { title: 'Fit view',                          icon: 'mdi:fit-to-screen-outline',  action: fitView },
-          { title: 'Zoom in',  icon: 'mdi:magnify-plus-outline',  action: () => { const r = containerRef.current?.getBoundingClientRect(); if (r) zoomAround(1.2, r.width / 2, r.height / 2); } },
-          { title: 'Zoom out', icon: 'mdi:magnify-minus-outline', action: () => { const r = containerRef.current?.getBoundingClientRect(); if (r) zoomAround(1 / 1.2, r.width / 2, r.height / 2); } },
-          { title: isFullscreen ? 'Exit fullscreen' : 'Fullscreen', icon: isFullscreen ? 'mdi:fullscreen-exit' : 'mdi:fullscreen', action: toggleFullscreen },
-        ] as const).map(({ title, icon, action }) => (
-          <Tooltip key={title} title={title}>
-            <IconButton size="small" onClick={action}
-              sx={{ bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'action.hover' } }}>
-              <Icon icon={icon} width={17} height={17} />
-            </IconButton>
-          </Tooltip>
-        ))}
+        <Tooltip title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+          <IconButton size="small" onClick={toggleFullscreen}
+            sx={{ bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'action.hover' } }}>
+            <Icon icon={isFullscreen ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'} width={17} height={17} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Fit nodes to view">
+          <IconButton size="small" onClick={fitView}
+            sx={{ bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'action.hover' } }}>
+            <Icon icon="mdi:fit-to-screen-outline" width={17} height={17} />
+          </IconButton>
+        </Tooltip>
         <Tooltip title="Add resource">
           <IconButton size="small"
             onClick={() => {
@@ -888,6 +1396,47 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             <Icon icon="mdi:plus" width={17} height={17} />
           </IconButton>
         </Tooltip>
+        <Tooltip title="Add op node">
+          <IconButton size="small"
+            onClick={() => setAddOpForm(f => f ? null : Object.keys(EXPR_NODE_DEFS)[0])}
+            sx={{ bgcolor: addOpForm ? alpha(userC, 0.12) : 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'action.hover' } }}>
+            <Icon icon="mdi:function-variant" width={17} height={17} style={{ color: addOpForm ? userC : undefined }} />
+          </IconButton>
+        </Tooltip>
+        {addOpForm !== null && (
+          <Paper elevation={4} onMouseDown={e => e.stopPropagation()} sx={{
+            position: 'absolute', top: 40, right: 8, zIndex: 20,
+            p: 0.75, display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 120,
+            border: `1px solid ${alpha(userC, 0.3)}`,
+          }}>
+            {Object.values(EXPR_NODE_DEFS).map(def => (
+              <Box key={def.category} component="button"
+                onClick={() => {
+                  const cW = containerRef.current?.clientWidth ?? 800;
+                  const cH = containerRef.current?.clientHeight ?? 480;
+                  const nx = (cW * 0.6 - pan.x) / zoom;
+                  const ny = (cH * 0.5 - pan.y) / zoom;
+                  setOpNodes(prev => [...prev, {
+                    id: `op-${Date.now()}`,
+                    category: def.category,
+                    op: def.defaultOp,
+                    x: nx, y: ny,
+                    literals: {},
+                  }]);
+                  setDirtyOps(true);
+                  setAddOpForm(null);
+                }}
+                sx={{
+                  fontFamily: 'monospace', fontSize: '0.65rem', px: 0.75, py: 0.35,
+                  borderRadius: 0.5, border: `1px solid ${alpha(userC, 0.3)}`,
+                  bgcolor: 'transparent', color: userC, cursor: 'pointer', textAlign: 'left',
+                  '&:hover': { bgcolor: alpha(userC, 0.1) },
+                }}>
+                {def.label}
+              </Box>
+            ))}
+          </Paper>
+        )}
         {isDirty && (
           <Tooltip title={
             saveState === 'saving' ? 'Saving…'
@@ -922,7 +1471,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         )}
         {isDirty && (
           <Tooltip title="Discard all changes">
-            <IconButton size="small" onClick={() => { setExtraEdges([]); setFieldEdits([]); setPendingResources([]); setPendingRemovals([]); setAddForm(null); setConfirmDelete(null); setNodes(initNodes); }}
+            <IconButton size="small" onClick={() => { setExtraEdges(initExtraEdges); setOpNodes(initOpNodes); setDirtyOps(false); setSavedOpNodeIds(new Set(initOpNodes.map(n => n.id))); setSavedEdgeIds(new Set(initExtraEdges.map(e => e.id))); setFieldEdits([]); setPendingResources([]); setPendingRemovals([]); setAddForm(null); setConfirmDelete(null); setNodes(initNodes); }}
               sx={{ bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'action.hover' } }}>
               <Icon icon="mdi:undo" width={17} height={17} />
             </IconButton>
@@ -962,8 +1511,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         const existingIds = new Set(nodes.filter(n => n.id !== DRAFT_NODE_ID).map(n => n.id));
         const cW = containerRef.current?.clientWidth  ?? 800;
         const cH = containerRef.current?.clientHeight ?? 480;
-        const screenLeft = Math.max(8,  Math.min(draftNode.x * scale + pan.x, cW - NW - 8));
-        const screenTop  = Math.max(48, Math.min(draftNode.y * scale + pan.y, cH - 240));
+        const screenLeft = Math.max(8,  Math.min(draftNode.x * zoom + pan.x, cW - NW - 8));
+        const screenTop  = Math.max(48, Math.min(draftNode.y * zoom + pan.y, cH - 240));
         return (
           <DraftNodeCard
             node={draftNode}
@@ -981,11 +1530,6 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         );
       })()}
 
-      {/* Scale badge */}
-      <Box sx={{ position: 'absolute', bottom: 8, right: 8, zIndex: 10, px: 1, py: 0.3, bgcolor: 'background.paper', borderRadius: 1, boxShadow: 1 }}>
-        <Typography variant="caption" sx={{ opacity: 0.55, fontSize: '0.7rem' }}>{Math.round(scale * 100)}%</Typography>
-      </Box>
-
       {/* Legend */}
       <Box sx={{ position: 'absolute', bottom: 8, left: 8, zIndex: 10, display: 'flex', gap: 1, alignItems: 'center', bgcolor: 'background.paper', borderRadius: 1, px: 1.25, py: 0.6, boxShadow: 1 }}>
         {(Object.entries(NODE_CFG) as [NodeType, typeof NODE_CFG[NodeType]][]).filter(([type]) => type !== 'draft').map(([type, cfg]) => (
@@ -998,18 +1542,18 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       </Box>
 
       {/* Canvas */}
-      <div style={{ position: 'absolute', transform: `translate(${pan.x}px,${pan.y}px) scale(${scale})`, transformOrigin: '0 0', width: CANVAS_SIZE, height: CANVAS_SIZE }}>
+      <div style={{ position: 'absolute', width: CANVAS_SIZE, height: CANVAS_SIZE, transformOrigin: '0 0', transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}>
         <svg style={{ position: 'absolute', top: 0, left: 0, width: CANVAS_SIZE, height: CANVAS_SIZE, pointerEvents: 'none', overflow: 'visible', zIndex: 1 }}>
           <defs>
-            {(Object.keys(edgeColors) as EdgeType[]).map(type => (
-              <marker key={type} id={`${eid}-${type}`} markerWidth={8} markerHeight={6} refX={7} refY={3} orient="auto">
-                <polygon points="0 0,8 3,0 6" fill={edgeColors[type]} opacity={0.9} />
+            {markerDefs.map(({ key, color }) => (
+              <marker key={key} id={`${eid}-${key}`} markerWidth={8} markerHeight={6} refX={7} refY={3} orient="auto">
+                <polygon points="0 0,8 3,0 6" fill={color} opacity={0.9} />
               </marker>
             ))}
           </defs>
 
           {edges.map(e => {
-            const src = nodeMap.get(e.source); const tgt = nodeMap.get(e.target);
+            const src = displayNodeMap.get(e.source); const tgt = displayNodeMap.get(e.target);
             if (!src || !tgt) return null;
             const isHov = hoveredEdgeId === e.id;
             const isLit = !!tokenHover
@@ -1019,36 +1563,28 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             const edgeTargetFp = getEdgeTargetFieldPath(e);
             const isDeleted = !!edgeTargetFp &&
               fieldEdits.some(fe => fe.nodeId === e.target && fe.fieldPath === edgeTargetFp && fe.template === '');
-            const d = bezierPath(src, tgt, e);
-            const mx = (src.x + src.w + tgt.x) / 2;
             const sy = srcPortY(src, e.srcPortPath);
             const ty = tgtPortY(tgt, e.tgtPortKey);
+            const isSelfLoop = e.source === e.target;
+            const d = isSelfLoop
+              ? makeBezier(src.x + src.w, sy, src.x, ty)
+              : bezierPath(src, tgt, e);
+            const mx = isSelfLoop ? src.x + src.w + 24 : (src.x + src.w + tgt.x) / 2;
             const my = (sy + ty) / 2;
-            const col = edgeColors[e.type];
+            const col = nodeColor(e.source);
             return (
               <g key={e.id}>
                 <path d={d} fill="none" stroke={col}
                   strokeWidth={isLit ? 3 : 1.75}
                   strokeOpacity={isDeleted ? 0.2 : isLit ? 1 : tokenHover ? 0.25 : isHov ? 0.9 : 0.75}
                   strokeDasharray={isDeleted ? '4 4' : undefined}
-                  markerEnd={isDeleted ? undefined : `url(#${eid}-${e.type})`}
+                  markerEnd={isDeleted ? undefined : `url(#${eid}-${src.type})`}
                   style={{ transition: 'stroke-opacity 0.15s, stroke-width 0.15s' }} />
                 {/* Wide transparent hit path */}
                 <path d={d} fill="none" stroke="transparent" strokeWidth={12}
                   style={{ pointerEvents: 'all', cursor: 'pointer' }}
                   onMouseEnter={() => setHoveredEdgeId(e.id)}
                   onMouseLeave={() => setHoveredEdgeId(null)} />
-                {isHov && !isDeleted && (
-                  <g transform={`translate(${mx},${my})`}
-                    style={{ pointerEvents: 'all', cursor: 'pointer' }}
-                    onMouseEnter={() => setHoveredEdgeId(e.id)}
-                    onMouseLeave={() => setHoveredEdgeId(null)}
-                    onClick={ev => { ev.stopPropagation(); removeExistingEdge(e); setHoveredEdgeId(null); }}>
-                    <circle r={8} fill={dark ? '#333' : '#fff'} stroke={col} strokeWidth={1.5} />
-                    <line x1={-3} y1={-3} x2={3} y2={3} stroke={col} strokeWidth={1.5} strokeLinecap="round" />
-                    <line x1={3} y1={-3} x2={-3} y2={3} stroke={col} strokeWidth={1.5} strokeLinecap="round" />
-                  </g>
-                )}
                 {isHov && isDeleted && (
                   <g transform={`translate(${mx},${my})`}
                     style={{ pointerEvents: 'all', cursor: 'pointer' }}
@@ -1068,48 +1604,98 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           })}
 
           {extraEdges.map(e => {
-            const src = nodeMap.get(e.srcNodeId); const tgt = nodeMap.get(e.tgtNodeId);
-            if (!src || !tgt) return null;
+            const srcOp = opNodes.find(n => n.id === e.srcNodeId);
+            const tgtOp = opNodes.find(n => n.id === e.tgtNodeId);
+            const src = srcOp ? null : displayNodeMap.get(e.srcNodeId);
+            const tgt = tgtOp ? null : displayNodeMap.get(e.tgtNodeId);
+            if (!srcOp && !src) return null;
+            if (!tgtOp && !tgt) return null;
             const isHov = hoveredEdgeId === e.id;
             const isLit = !!tokenHover
               && e.srcNodeId === tokenHover.srcNodeId
               && e.srcFieldPath === tokenHover.srcPath
               && e.tgtNodeId === tokenHover.tgtNodeId;
-            const sx2 = src.x + src.w; const sy2 = extraPortY(src, e.srcFieldPath);
-            const tx2 = tgt.x;         const ty2 = extraPortY(tgt, e.tgtFieldPath);
+            let sx2: number;
+            let sy2: number;
+            if (srcOp) {
+              sx2 = srcOp.x + OP_NODE_W;
+              if (e.srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
+                const varFieldPath = e.srcFieldPath.slice(VAR_FIELD_PREFIX.length);
+                const srcDef = EXPR_NODE_DEFS[srcOp.category];
+                const vpi = srcDef?.inputs.findIndex(p => p.name === 'var') ?? 0;
+                const srcVarFields = srcOp.varFields ?? [];
+                const vfi = Math.max(0, srcVarFields.indexOf(varFieldPath));
+                sy2 = srcOp.y + OP_NODE_HDR_H + varFieldLeafRow(srcVarFields, vpi, vfi) * OP_NODE_PORT_H + OP_NODE_PORT_H / 2;
+              } else {
+                const srcDef = EXPR_NODE_DEFS[srcOp.category];
+                const portCount = srcDef?.variadic ? (srcOp.portCount ?? srcDef.inputs.length) : (srcDef?.inputs.length ?? 1);
+                sy2 = opNodeOutputPortY(srcOp, portCount);
+              }
+            } else {
+              sx2 = src!.x + src!.w;
+              sy2 = extraPortY(src!, e.srcFieldPath);
+            }
+            let tx2: number;
+            let ty2: number;
+            if (tgtOp) {
+              const def = EXPR_NODE_DEFS[tgtOp.category];
+              // For variadic nodes, port index is letter ordinal (A=0, B=1, C=2, ...)
+              const portIdx = def?.variadic
+                ? (e.tgtFieldPath.charCodeAt(0) - 65)
+                : (def?.inputs.findIndex(p => p.name === e.tgtFieldPath) ?? 0);
+              tx2 = tgtOp.x;
+              const tgtVarPortIdx = def?.hasPredicate ? def.inputs.findIndex(p => p.name === 'var') : -1;
+              const tgtOffset = tgtVarPortIdx >= 0 && portIdx > tgtVarPortIdx
+                ? opNodeVarFieldExtraRows(tgtOp.varFields ?? []) * OP_NODE_PORT_H
+                : 0;
+              ty2 = opNodeInputPortY(tgtOp, portIdx) + tgtOffset;
+            } else {
+              tx2 = tgt!.x;
+              ty2 = extraPortY(tgt!, e.tgtFieldPath);
+            }
+            const col2 = srcOp ? userC : nodeColor(e.srcNodeId);
+            const markerKey = srcOp ? 'user' : (src?.type ?? 'kro-resource');
             const d = makeBezier(sx2, sy2, tx2, ty2);
-            const mx = (sx2 + tx2) / 2; const my = (sy2 + ty2) / 2;
             return (
               <g key={e.id}>
-                <path d={d} fill="none" stroke={edgeColors.user}
+                <path d={d} fill="none" stroke={col2}
                   strokeWidth={isLit ? 3 : 1.75}
                   strokeOpacity={isLit ? 1 : tokenHover ? 0.25 : isHov ? 0.9 : 0.75}
-                  strokeDasharray="6 3" markerEnd={`url(#${eid}-user)`}
+                  strokeDasharray={savedEdgeIds.has(e.id) ? undefined : '6 3'} markerEnd={`url(#${eid}-${markerKey})`}
                   style={{ transition: 'stroke-opacity 0.15s, stroke-width 0.15s' }} />
                 {/* Wide transparent hit path */}
                 <path d={d} fill="none" stroke="transparent" strokeWidth={12}
                   style={{ pointerEvents: 'all', cursor: 'pointer' }}
                   onMouseEnter={() => setHoveredEdgeId(e.id)}
                   onMouseLeave={() => setHoveredEdgeId(null)} />
-                {isHov && (
-                  <g transform={`translate(${mx},${my})`}
-                    style={{ pointerEvents: 'all', cursor: 'pointer' }}
-                    onMouseEnter={() => setHoveredEdgeId(e.id)}
-                    onMouseLeave={() => setHoveredEdgeId(null)}
-                    onClick={ev => { ev.stopPropagation(); setExtraEdges(prev => prev.filter(ee => ee.id !== e.id)); setHoveredEdgeId(null); }}>
-                    <circle r={8} fill={dark ? '#333' : '#fff'} stroke={edgeColors.user} strokeWidth={1.5} />
-                    <line x1={-3} y1={-3} x2={3} y2={3} stroke={edgeColors.user} strokeWidth={1.5} strokeLinecap="round" />
-                    <line x1={3} y1={-3} x2={-3} y2={3} stroke={edgeColors.user} strokeWidth={1.5} strokeLinecap="round" />
-                  </g>
-                )}
               </g>
             );
           })}
 
           {drawing && (() => {
-            const src = nodeMap.get(drawing.srcNodeId); if (!src) return null;
+            const opSrc = opNodes.find(n => n.id === drawing.srcNodeId);
+            if (opSrc) {
+              const sx = opSrc.x + OP_NODE_W;
+              let sy: number;
+              if (drawing.srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
+                const varFieldPath = drawing.srcFieldPath.slice(VAR_FIELD_PREFIX.length);
+                const opSrcDef = EXPR_NODE_DEFS[opSrc.category];
+                const vpi = opSrcDef?.inputs.findIndex(p => p.name === 'var') ?? 0;
+                const drawVarFields = opSrc.varFields ?? [];
+                const vfi = Math.max(0, drawVarFields.indexOf(varFieldPath));
+                sy = opSrc.y + OP_NODE_HDR_H + varFieldLeafRow(drawVarFields, vpi, vfi) * OP_NODE_PORT_H + OP_NODE_PORT_H / 2;
+              } else {
+                const opSrcDef = EXPR_NODE_DEFS[opSrc.category];
+                const portCount = opSrcDef?.variadic ? (opSrc.portCount ?? opSrcDef.inputs.length) : (opSrcDef?.inputs.length ?? 1);
+                sy = opNodeOutputPortY(opSrc, portCount);
+              }
+              return <path d={makeBezier(sx, sy, drawing.canvasX, drawing.canvasY)}
+                fill="none" stroke={userC} strokeWidth={1.5} strokeOpacity={0.55} strokeDasharray="5 4" />;
+            }
+            const src = displayNodeMap.get(drawing.srcNodeId); if (!src) return null;
+            const drawCol = nodeColor(drawing.srcNodeId);
             return <path d={makeBezier(src.x + src.w, extraPortY(src, drawing.srcFieldPath), drawing.canvasX, drawing.canvasY)}
-              fill="none" stroke={userC} strokeWidth={1.5} strokeOpacity={0.55} strokeDasharray="5 4" />;
+              fill="none" stroke={drawCol} strokeWidth={1.5} strokeOpacity={0.55} strokeDasharray="5 4" />;
           })()}
         </svg>
 
@@ -1117,7 +1703,6 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           <NodeCard key={n.id} node={n} selected={selected === n.id} dark={dark}
             isDrawing={!!drawing}
             hoverRowIdx={hoverTarget?.nodeId === n.id ? hoverTarget.rowIdx : undefined}
-            tokenHover={tokenHover}
             onMouseDown={onNodeDown}
             onClick={onNodeClick}
             onPortDown={onPortDown}
@@ -1126,481 +1711,56 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onPotentialFieldClick={onPotentialFieldClick}
             onTokenHover={setTokenHover}
             onTokenLeave={onTokenLeave}
-            onRowClick={onRowClick}
             editedPaths={editedPaths}
             onDelete={setConfirmDelete}
             onDeleteRow={onDeleteRow}
             mapParentPaths={allMapPathsMap.get(n.id)}
             arrayParentPaths={allArrayPathsMap.get(n.id)}
             onAddArrayItem={addArrayItemToNode}
+            onAddSectionItem={onAddSectionItem}
             nodeTypeByRef={nodeTypeByRef}
+            unknownFieldPaths={allUnknownPathsMap.get(n.id)}
+            noSchemaWarning={noSchemaNodeIds.has(n.id)}
+            onToggleInPortOptional={toggleInPortOptional}
+            onPortClick={onInPortClick}
+            activeInPaths={activeInPathsByNode.get(n.id)}
+            activeOutPaths={activeOutPathsByNode.get(n.id)}
+            opConnectedFields={opConnectedFieldsByNode.get(n.id)}
+            onValueEdit={onValueEdit}
           />
         ))}
 
-
-        {/* ── Inline row-template editor: visual token builder ─────────────── */}
-        {editingRow && (() => {
-          const editNode = nodeMap.get(editingRow.nodeId); if (!editNode) return null;
-          const rowIdx = editNode.rows.findIndex(r => r.fieldPath === editingRow.fieldPath);
-          const panelX = editNode.x;
-          const panelY = editNode.y + HEADER_H + (rowIdx >= 0 ? rowIdx * ROW_H + ROW_H : 0) + 4;
-          const targetType = getFieldType(editingRow.nodeId, editingRow.fieldPath);
-
-          // Enrich tokens with live type info
-          const richTokens = builderTokens.map(tok =>
-            tok.kind === 'ref' && !tok.fieldType
-              ? { ...tok, fieldType: getFieldType(tok.nodeId ?? '', tok.fieldPath ?? '') }
-              : tok
-          );
-
-          // Type warnings across all ref tokens
-          const compatList = richTokens.filter(t => t.kind === 'ref').map(t => typeCompatibility(t.fieldType, targetType));
-          const hasCoerce    = compatList.some(c => c === 'coerce');
-          const hasIncompat  = compatList.some(c => c === 'incompatible');
-
-          const insertToken = (tok: Omit<BuilderToken, 'id'>) => {
-            if (!pickerTarget) return;
-            const id = `t${Date.now()}${Math.random().toString(36).slice(2, 4)}`;
-            if (pickerTarget.kind === 'main') {
-              const slot = pickerTarget.slot;
-              setBuilderTokens(prev => { const n = [...prev]; n.splice(slot, 0, { ...tok, id }); return n; });
-            } else {
-              const { tokenIdx, part, slot } = pickerTarget;
-              const field = condPartField(part);
-              setBuilderTokens(prev => prev.map((t, i) => {
-                if (i !== tokenIdx || t.kind !== 'conditional') return t;
-                const arr = [...((t[field] as BuilderToken[] | undefined) ?? [])];
-                arr.splice(slot, 0, { ...tok, id });
-                return { ...t, [field]: arr };
-              }));
-            }
-            setPickerTarget(null); setPickerQuery('');
-          };
-          const deleteToken = (idx: number) => setBuilderTokens(prev => prev.filter((_, i) => i !== idx));
-          const updateLiteral = (idx: number, text: string) =>
-            setBuilderTokens(prev => prev.map((t, i) => i === idx ? { ...t, text } : t));
-          const deleteCondToken = (tokenIdx: number, part: 'cond'|'then'|'else', partIdx: number) => {
-            const field = condPartField(part);
-            setBuilderTokens(prev => prev.map((t, i) => {
-              if (i !== tokenIdx || t.kind !== 'conditional') return t;
-              return { ...t, [field]: ((t[field] as BuilderToken[]|undefined) ?? []).filter((_, j) => j !== partIdx) };
-            }));
-          };
-          const updateCondLiteral = (tokenIdx: number, part: 'cond'|'then'|'else', partIdx: number, text: string) => {
-            const field = condPartField(part);
-            setBuilderTokens(prev => prev.map((t, i) => {
-              if (i !== tokenIdx || t.kind !== 'conditional') return t;
-              return { ...t, [field]: ((t[field] as BuilderToken[]|undefined) ?? []).map((pt, j) => j === partIdx ? { ...pt, text } : pt) };
-            }));
-          };
-
-          const isMainActive = (slot: number) => pickerTarget?.kind === 'main' && pickerTarget.slot === slot;
-          const isCondActive = (tokenIdx: number, part: 'cond'|'then'|'else', slot: number) =>
-            pickerTarget?.kind === 'cond' && pickerTarget.tokenIdx === tokenIdx && pickerTarget.part === part && pickerTarget.slot === slot;
-
-          const slotDotSx = (active: boolean) => ({
-            width: 14, height: 14, borderRadius: '50%', p: 0, flexShrink: 0,
-            border: `1px dashed ${alpha(userC, active ? 0.9 : 0.35)}`,
-            bgcolor: active ? alpha(userC, 0.1) : 'transparent',
-            color: userC, cursor: 'pointer', lineHeight: 1, fontSize: '0.65rem',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            opacity: active ? 1 : 0.45,
-            transition: 'opacity 0.1s',
-            '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.08) },
-          } as const);
-
-          const slotBtn = (slot: number) => (
-            <Box key={`s${slot}`} component="button"
-              onClick={() => { setPickerTarget({ kind: 'main', slot }); setPickerQuery(''); }}
-              sx={slotDotSx(isMainActive(slot))}>+</Box>
-          );
-          const condSlotBtn = (tokenIdx: number, part: 'cond'|'then'|'else', slot: number) => (
-            <Box key={`cs${tokenIdx}${part}${slot}`} component="button"
-              onClick={() => { setPickerTarget({ kind: 'cond', tokenIdx, part, slot }); setPickerQuery(''); }}
-              sx={{ ...slotDotSx(isCondActive(tokenIdx, part, slot)), width: 10, height: 10, fontSize: '0.55rem' }}>+</Box>
-          );
-
-          return (
-            <Box sx={{
-              position: 'absolute', left: panelX, top: panelY, width: NW + 60, zIndex: 20,
-              bgcolor: 'background.paper', border: `1.5px solid ${userC}`,
-              borderRadius: 1.5, boxShadow: 4, p: 1,
-              display: 'flex', flexDirection: 'column', gap: 0.6,
-            }}
-            onMouseDown={e => e.stopPropagation()}
-            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') { if (pickerTarget !== null) { setPickerTarget(null); } else { setEditingRow(null); setBuilderTokens([]); } } }}>
-
-              {/* Header: target field path + type badge */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" noWrap sx={{ color: userC, fontSize: '0.64rem', fontWeight: 600, flex: 1, minWidth: 0 }}>
-                  {editingRow.fieldPath}
-                </Typography>
-                {targetType && (
-                  <Box component="span" sx={{
-                    fontFamily: 'monospace', fontSize: '0.54rem', px: 0.45, py: 0.1, borderRadius: 0.5, flexShrink: 0,
-                    bgcolor: alpha(userC, 0.08), color: userC, border: `1px solid ${alpha(userC, 0.2)}`,
-                  }}>{targetType}</Box>
-                )}
-              </Box>
-
-              {/* Token builder area */}
-              <Box sx={{
-                border: `1px solid ${alpha(userC, 0.22)}`, borderRadius: 0.75,
-                p: 0.5, minHeight: 30, position: 'relative',
-                display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.3,
-                bgcolor: dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.015)',
-              }}>
-                {slotBtn(0)}
-
-                {richTokens.length === 0 && (
-                  <Typography variant="caption" sx={{ opacity: 0.28, fontSize: '0.6rem', fontFamily: 'monospace', mx: 0.5, userSelect: 'none' }}>
-                    click + to add a source field or text
-                  </Typography>
-                )}
-
-                {richTokens.map((tok, i) => {
-                  if (tok.kind === 'ref') {
-                    const segColor = refAccent(tok.nodeRef!, dark, nodeMap.get(tok.nodeId ?? '')?.type);
-                    const compat   = typeCompatibility(tok.fieldType, targetType);
-                    return (
-                      <Fragment key={tok.id}>
-                        <Box sx={{
-                          display: 'inline-flex', alignItems: 'center', gap: 0.3, flexShrink: 0,
-                          px: 0.5, py: 0.12, borderRadius: 0.5,
-                          bgcolor: alpha(segColor, 0.12), color: segColor,
-                          border: `1px solid ${alpha(segColor, 0.3)}`,
-                          outline: compat === 'incompatible' ? `1.5px solid #ef4444` : compat === 'coerce' ? `1.5px solid #f59e0b` : 'none',
-                          outlineOffset: 1,
-                        }}>
-                          <Icon icon={NODE_CFG[editNode.type].icon}
-                            width={8} style={{ color: segColor, opacity: 0.6, flexShrink: 0 }} />
-                          <Typography sx={{ fontFamily: 'monospace', fontSize: '0.57rem', lineHeight: 1 }}>
-                            {tok.fieldPath?.split('.').pop()}
-                          </Typography>
-                          {tok.fieldType && (
-                            <Typography sx={{ fontFamily: 'monospace', fontSize: '0.5rem', opacity: 0.5, lineHeight: 1 }}>
-                              {tok.fieldType}
-                            </Typography>
-                          )}
-                          <Tooltip title={tok.optional ? 'Optional chaining on (?.path)' : 'Optional chaining off (.path)'}>
-                            <Box component="span"
-                              onClick={() => setBuilderTokens(prev => prev.map((t, j) => j === i ? { ...t, optional: !t.optional } : t))}
-                              sx={{ cursor: 'pointer', opacity: tok.optional ? 1 : 0.25, '&:hover': { opacity: 1 }, fontSize: '0.6rem', lineHeight: 1, color: tok.optional ? segColor : 'inherit', fontFamily: 'monospace' }}>?</Box>
-                          </Tooltip>
-                          <Box component="span" onClick={() => deleteToken(i)}
-                            sx={{ cursor: 'pointer', opacity: 0.45, '&:hover': { opacity: 1 }, fontSize: '0.65rem', lineHeight: 1 }}>×</Box>
-                        </Box>
-                        {slotBtn(i + 1)}
-                      </Fragment>
-                    );
-                  }
-                  // conditional token — each part is a mini token builder
-                  if (tok.kind === 'conditional') {
-                    const renderCondPart = (partTokens: BuilderToken[], part: 'cond'|'then'|'else', placeholder: string) => (
-                      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.2, flexWrap: 'wrap',
-                        border: `1px solid ${alpha(userC, 0.18)}`, borderRadius: 0.5, px: 0.3, py: 0.1, minWidth: 28 }}>
-                        {condSlotBtn(i, part, 0)}
-                        {partTokens.length === 0 && (
-                          <Typography sx={{ fontFamily: 'monospace', fontSize: '0.5rem', opacity: 0.3, px: 0.2 }}>{placeholder}</Typography>
-                        )}
-                        {partTokens.map((pt, pi) => {
-                          const enriched = pt.kind === 'ref' && !pt.fieldType
-                            ? { ...pt, fieldType: getFieldType(pt.nodeId ?? '', pt.fieldPath ?? '') }
-                            : pt;
-                          if (enriched.kind === 'ref') {
-                            const pc = refAccent(enriched.nodeRef!, dark);
-                            return (
-                              <Fragment key={enriched.id}>
-                                <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.2, px: 0.3, py: 0.05,
-                                  borderRadius: 0.4, bgcolor: alpha(pc, 0.12), border: `1px solid ${alpha(pc, 0.3)}`, color: pc }}>
-                                  <Typography sx={{ fontFamily: 'monospace', fontSize: '0.5rem', lineHeight: 1 }}>
-                                    {enriched.nodeRef}.{enriched.fieldPath?.split('.').pop()}
-                                  </Typography>
-                                  <Box component="span" onClick={() => deleteCondToken(i, part, pi)}
-                                    sx={{ cursor: 'pointer', opacity: 0.4, '&:hover': { opacity: 1 }, fontSize: '0.6rem', lineHeight: 1 }}>×</Box>
-                                </Box>
-                                {condSlotBtn(i, part, pi + 1)}
-                              </Fragment>
-                            );
-                          }
-                          if (enriched.kind === 'literal') {
-                            const condOpLabel = !enriched.isString ? OP_DISPLAY[enriched.text ?? ''] : undefined;
-                            if (condOpLabel !== undefined) {
-                              return (
-                                <Fragment key={enriched.id}>
-                                  <Box sx={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 0.2, flexShrink: 0,
-                                    px: 0.4, py: 0.05, borderRadius: 0.4,
-                                    bgcolor: alpha(userC, 0.1), color: userC,
-                                    border: `1px solid ${alpha(userC, 0.3)}`,
-                                    fontFamily: 'monospace', fontSize: '0.5rem', lineHeight: 1, fontWeight: 600,
-                                  }}>
-                                    {condOpLabel}
-                                    <Box component="span" onClick={() => deleteCondToken(i, part, pi)}
-                                      sx={{ cursor: 'pointer', opacity: 0.35, '&:hover': { opacity: 1 }, fontSize: '0.55rem' }}>×</Box>
-                                  </Box>
-                                  {condSlotBtn(i, part, pi + 1)}
-                                </Fragment>
-                              );
-                            }
-                            return (
-                              <Fragment key={enriched.id}>
-                                <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
-                                  <input value={enriched.text ?? ''} onChange={e => updateCondLiteral(i, part, pi, e.target.value)}
-                                    onMouseDown={e => e.stopPropagation()} placeholder="text"
-                                    style={{ background: 'transparent', border: 'none', outline: 'none',
-                                      fontFamily: 'monospace', fontSize: '0.5rem', color: 'inherit', opacity: 0.8,
-                                      width: Math.max(24, Math.min(80, (enriched.text?.length ?? 0) * 6 + 14)) }} />
-                                  <Box component="span" onClick={() => deleteCondToken(i, part, pi)}
-                                    sx={{ cursor: 'pointer', opacity: 0.3, '&:hover': { opacity: 0.8 }, fontSize: '0.6rem', lineHeight: 1 }}>×</Box>
-                                </Box>
-                                {condSlotBtn(i, part, pi + 1)}
-                              </Fragment>
-                            );
-                          }
-                          return null;
-                        })}
-                      </Box>
-                    );
-                    return (
-                      <Fragment key={tok.id}>
-                        <Box sx={{
-                          display: 'inline-flex', alignItems: 'center', gap: 0.3, flexShrink: 0, flexWrap: 'wrap',
-                          px: 0.5, py: 0.2, borderRadius: 0.5,
-                          border: `1px dashed ${alpha(userC, 0.35)}`,
-                          bgcolor: alpha(userC, 0.04),
-                        }}>
-                          <Typography sx={{ fontFamily: 'monospace', fontSize: '0.5rem', opacity: 0.45, flexShrink: 0 }}>if</Typography>
-                          {renderCondPart(tok.condTokens ?? [], 'cond', 'condition')}
-                          <Typography sx={{ fontFamily: 'monospace', fontSize: '0.5rem', opacity: 0.45, flexShrink: 0 }}>then</Typography>
-                          {renderCondPart(tok.thenTokens ?? [], 'then', 'value')}
-                          <Typography sx={{ fontFamily: 'monospace', fontSize: '0.5rem', opacity: 0.45, flexShrink: 0 }}>else</Typography>
-                          {renderCondPart(tok.elseTokens ?? [], 'else', 'value')}
-                          <Box component="span" onClick={() => deleteToken(i)}
-                            sx={{ cursor: 'pointer', opacity: 0.35, '&:hover': { opacity: 0.8 }, fontSize: '0.65rem', lineHeight: 1 }}>×</Box>
-                        </Box>
-                        {slotBtn(i + 1)}
-                      </Fragment>
-                    );
-                  }
-                  // literal token — operator chip or editable text
-                  const opLabel = !tok.isString ? OP_DISPLAY[tok.text ?? ''] : undefined;
-                  if (opLabel !== undefined) {
-                    return (
-                      <Fragment key={tok.id}>
-                        <Box sx={{
-                          display: 'inline-flex', alignItems: 'center', gap: 0.25, flexShrink: 0,
-                          px: 0.55, py: 0.12, borderRadius: 0.5,
-                          bgcolor: alpha(userC, 0.1), color: userC,
-                          border: `1px solid ${alpha(userC, 0.3)}`,
-                          fontFamily: 'monospace', fontSize: '0.6rem', lineHeight: 1, fontWeight: 600,
-                        }}>
-                          {opLabel}
-                          <Box component="span" onClick={() => deleteToken(i)}
-                            sx={{ cursor: 'pointer', opacity: 0.4, '&:hover': { opacity: 1 }, fontSize: '0.65rem', ml: 0.15 }}>×</Box>
-                        </Box>
-                        {slotBtn(i + 1)}
-                      </Fragment>
-                    );
-                  }
-                  const isNumeric = !tok.isString && (targetType === 'integer' || targetType === 'number');
-                  return (
-                    <Fragment key={tok.id}>
-                      <Box sx={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
-                        {tok.isString && <Typography sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.4, lineHeight: 1 }}>"</Typography>}
-                        <input
-                          value={tok.text ?? ''}
-                          onChange={e => updateLiteral(i, e.target.value)}
-                          onMouseDown={e => e.stopPropagation()}
-                          type={isNumeric ? 'number' : 'text'}
-                          placeholder={isNumeric ? '0' : tok.isString ? 'value' : 'text'}
-                          // eslint-disable-next-line jsx-a11y/no-autofocus
-                          autoFocus={tok.text === ''}
-                          style={{
-                            background: 'transparent', border: 'none', outline: 'none',
-                            fontFamily: 'monospace', fontSize: '0.6rem', color: 'inherit',
-                            width: Math.max(32, Math.min(96, (tok.text?.length ?? 0) * 6.5 + 18)),
-                            opacity: 0.75,
-                          }}
-                        />
-                        {tok.isString && <Typography sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.4, lineHeight: 1 }}>"</Typography>}
-                        <Box component="span" onClick={() => deleteToken(i)}
-                          sx={{ cursor: 'pointer', opacity: 0.35, '&:hover': { opacity: 0.8 }, fontSize: '0.65rem', lineHeight: 1 }}>×</Box>
-                      </Box>
-                      {slotBtn(i + 1)}
-                    </Fragment>
-                  );
-                })}
-
-                {/* Picker: flat list of concrete field references from source nodes */}
-                {pickerTarget !== null && (() => {
-                  const incomingSrcIds = new Set([
-                    ...edges.filter(e => e.target === editingRow.nodeId).map(e => e.source),
-                    ...extraEdges.filter(ee => ee.tgtNodeId === editingRow.nodeId).map(ee => ee.srcNodeId),
-                  ]);
-                  const allRefs = pickerSuggestions.filter(s =>
-                    s.nodeId !== editingRow.nodeId &&
-                    incomingSrcIds.has(s.nodeId) &&
-                    (!pickerQuery ||
-                      `${s.nodeRef}.${s.fieldPath}`.toLowerCase().includes(pickerQuery.toLowerCase()))
-                  );
-                  return (
-                    <Box sx={{
-                      position: 'absolute', top: 'calc(100% + 3px)', left: 0, width: '100%', zIndex: 30,
-                      bgcolor: 'background.paper', border: `1px solid ${alpha(userC, 0.28)}`,
-                      borderRadius: 0.75, boxShadow: 4,
-                      display: 'flex', flexDirection: 'column', maxHeight: 220, overflow: 'hidden',
-                    }}>
-                      {/* Search input only */}
-                      <Box sx={{ px: 0.75, py: 0.4, borderBottom: `1px solid ${alpha(userC, 0.1)}` }}>
-                        <input
-                          // eslint-disable-next-line jsx-a11y/no-autofocus
-                          autoFocus
-                          value={pickerQuery}
-                          onChange={e => setPickerQuery(e.target.value)}
-                          placeholder="filter…"
-                          onMouseDown={e => e.stopPropagation()}
-                          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') setPickerTarget(null); }}
-                          style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', fontFamily: 'monospace', fontSize: '0.62rem', color: 'inherit' }}
-                        />
-                      </Box>
-                      {/* Flat field list + literal/conditional items at the bottom */}
-                      <Box sx={{ overflowY: 'auto', flex: 1 }}>
-                        {allRefs.slice(0, 40).map(s => {
-                          const sColor = refAccent(s.nodeRef, dark);
-                          const compat = typeCompatibility(s.fieldType, targetType);
-                          return (
-                            <Box key={`${s.nodeId}::${s.fieldPath}`}
-                              onMouseDown={e => { e.preventDefault(); insertToken({ kind: 'ref', nodeId: s.nodeId, nodeRef: s.nodeRef, fieldPath: s.fieldPath, fieldType: s.fieldType }); }}
-                              sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.75, py: 0.28, cursor: 'pointer', '&:hover': { bgcolor: alpha(sColor, 0.07) } }}>
-                              <Icon icon={NODE_CFG[s.nodeType as NodeType].icon} width={9} style={{ color: sColor, flexShrink: 0 }} />
-                              <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.61rem', flex: 1 }}>
-                                <Box component="span" sx={{ color: sColor, fontWeight: 600 }}>{s.nodeRef}</Box>
-                                <Box component="span" sx={{ opacity: 0.5 }}>.</Box>
-                                <Box component="span" sx={{ color: 'text.primary' }}>{s.fieldPath}</Box>
-                              </Typography>
-                              {s.fieldType && <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.54rem', opacity: 0.4, flexShrink: 0 }}>{s.fieldType}</Typography>}
-                              {compat === 'ok' && targetType && s.fieldType && <Icon icon="mdi:check-circle-outline" width={9} style={{ color: '#22c55e', flexShrink: 0 }} />}
-                              {compat === 'coerce' && <Tooltip title="Type coercion may be needed (e.g. string())"><span><Icon icon="mdi:alert-outline" width={9} style={{ color: '#f59e0b', flexShrink: 0 }} /></span></Tooltip>}
-                              {compat === 'incompatible' && <Tooltip title="Incompatible types — expression may fail"><span><Icon icon="mdi:alert-circle-outline" width={9} style={{ color: '#ef4444', flexShrink: 0 }} /></span></Tooltip>}
-                            </Box>
-                          );
-                        })}
-                        {allRefs.length === 0 && (
-                          <Typography variant="caption" sx={{ display: 'block', px: 1, py: 0.75, opacity: 0.35, fontSize: '0.6rem' }}>
-                            no matching fields
-                          </Typography>
-                        )}
-                        {/* Operators */}
-                        <Box sx={{ borderTop: `1px solid ${alpha(userC, 0.08)}`, px: 0.75, pt: 0.35, pb: 0.3 }}>
-                          <Typography variant="caption" sx={{ display: 'block', opacity: 0.35, fontSize: '0.52rem', fontFamily: 'monospace', mb: 0.25 }}>operators</Typography>
-                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.3 }}>
-                            {(Object.entries(OP_DISPLAY) as [string, string][]).map(([raw, label]) => (
-                              <Box key={raw} component="span"
-                                onMouseDown={e => { e.preventDefault(); insertToken({ kind: 'literal', text: raw }); }}
-                                sx={{ fontFamily: 'monospace', fontSize: '0.6rem', fontWeight: 600, px: 0.5, py: 0.1, borderRadius: 0.5,
-                                  border: `1px solid ${alpha(userC, 0.25)}`, cursor: 'pointer', color: userC,
-                                  '&:hover': { bgcolor: alpha(userC, 0.08) } }}>
-                                {label}
-                              </Box>
-                            ))}
-                          </Box>
-                        </Box>
-                        {/* Literal / conditional options as list items */}
-                        <Box sx={{ borderTop: `1px solid ${alpha(userC, 0.08)}`, mt: 0 }}>
-                          {targetType === 'boolean' ? (
-                            (['true', 'false'] as const).map(bv => (
-                              <Box key={bv} onMouseDown={e => { e.preventDefault(); insertToken({ kind: 'literal', text: bv }); }}
-                                sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.75, py: 0.28, cursor: 'pointer', '&:hover': { bgcolor: alpha(userC, 0.06) } }}>
-                                <Icon icon="mdi:alpha-b-box-outline" width={9} style={{ color: userC, opacity: 0.5, flexShrink: 0 }} />
-                                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.61rem', color: 'text.primary' }}>{bv}</Typography>
-                              </Box>
-                            ))
-                          ) : (targetType === 'integer' || targetType === 'number') ? (
-                            <Box onMouseDown={e => { e.preventDefault(); insertToken({ kind: 'literal', text: '' }); }}
-                              sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.75, py: 0.28, cursor: 'pointer', '&:hover': { bgcolor: alpha(userC, 0.06) } }}>
-                              <Icon icon="mdi:numeric" width={9} style={{ color: userC, opacity: 0.5, flexShrink: 0 }} />
-                              <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.61rem', color: 'text.primary' }}>number literal</Typography>
-                            </Box>
-                          ) : (
-                            <Box onMouseDown={e => { e.preventDefault(); insertToken({ kind: 'literal', text: '', isString: true }); }}
-                              sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.75, py: 0.28, cursor: 'pointer', '&:hover': { bgcolor: alpha(userC, 0.06) } }}>
-                              <Icon icon="mdi:format-text" width={9} style={{ color: userC, opacity: 0.5, flexShrink: 0 }} />
-                              <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.61rem', color: 'text.primary' }}>text literal</Typography>
-                            </Box>
-                          )}
-                          <Box onMouseDown={e => { e.preventDefault(); insertToken({ kind: 'conditional', condTokens: [], thenTokens: [], elseTokens: [] }); }}
-                            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.75, py: 0.28, cursor: 'pointer', '&:hover': { bgcolor: alpha(userC, 0.06) } }}>
-                            <Icon icon="mdi:source-branch" width={9} style={{ color: userC, opacity: 0.5, flexShrink: 0 }} />
-                            <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.61rem', color: 'text.primary' }}>if / else</Typography>
-                          </Box>
-                        </Box>
-                      </Box>
-                    </Box>
-                  );
-                })()}
-              </Box>
-
-              {/* Type warning */}
-              {(hasCoerce || hasIncompat) && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
-                  <Icon icon={hasIncompat ? 'mdi:alert-circle-outline' : 'mdi:alert-outline'} width={10}
-                    style={{ color: hasIncompat ? '#ef4444' : '#f59e0b', flexShrink: 0 }} />
-                  <Typography variant="caption" sx={{ fontSize: '0.57rem', color: hasIncompat ? '#ef4444' : '#f59e0b' }}>
-                    {hasIncompat
-                      ? 'type mismatch — expression may fail at runtime'
-                      : `types differ — coercion may be needed (e.g. string(…))`}
-                  </Typography>
-                </Box>
-              )}
-
-              {/* Raw CEL preview + validation */}
-              {builderTokens.length > 0 && (() => {
-                const preview = tokensToTemplate(builderTokens);
-                const clusters = getCelClusters(builderTokens);
-                const celErr = clusters.length
-                  ? clusters.map(c => validateCelInner(tokensToCelInner(c))).find(e => e !== null) ?? null
-                  : null;
-                return (
-                  <>
-                    <Box sx={{ display: 'flex', gap: 0.3, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <Typography variant="caption" sx={{ fontSize: '0.55rem', opacity: 0.4, flexShrink: 0 }}>CEL:</Typography>
-                      <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.57rem', opacity: 0.5, wordBreak: 'break-all' }}>
-                        {preview}
-                      </Typography>
-                    </Box>
-                    {clusters.length > 0 && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
-                        <Icon
-                          icon={celErr ? 'mdi:alert-circle-outline' : 'mdi:check-circle-outline'}
-                          width={10}
-                          style={{ color: celErr ? '#ef4444' : '#22c55e', flexShrink: 0 }}
-                        />
-                        <Typography variant="caption" sx={{ fontSize: '0.57rem', color: celErr ? '#ef4444' : '#22c55e' }}>
-                          {celErr ?? 'valid CEL expression'}
-                        </Typography>
-                      </Box>
-                    )}
-                  </>
-                );
-              })()}
-
-              {/* Actions */}
-              <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                <Box component="button" onClick={saveEditingRow}
-                  sx={{ border: `1px solid ${alpha(userC, 0.4)}`, borderRadius: 0.75, bgcolor: alpha(userC, 0.08), color: userC, fontSize: '0.64rem', px: 0.75, py: 0.25, cursor: 'pointer', '&:hover': { bgcolor: alpha(userC, 0.18) } }}>
-                  ✓ Save
-                </Box>
-                <Box component="button" onClick={() => { setEditingRow(null); setBuilderTokens([]); setPickerTarget(null); }}
-                  sx={{ border: `1px solid ${alpha(dark ? '#666' : '#ccc', 0.5)}`, borderRadius: 0.75, bgcolor: 'transparent', color: dark ? '#888' : '#555', fontSize: '0.64rem', px: 0.75, py: 0.25, cursor: 'pointer', '&:hover': { bgcolor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' } }}>
-                  ✕ Cancel
-                </Box>
-                <Typography variant="caption" sx={{ opacity: 0.35, fontSize: '0.56rem', ml: 0.25 }}>Esc</Typography>
-              </Box>
-            </Box>
-          );
-        })()}
+        {/* ── Op nodes (first-class persistent canvas nodes) ──────────── */}
+        {opNodes.map(opNode => (
+          <ExprOpNodeCard
+            key={opNode.id}
+            node={opNode}
+            dark={dark}
+            userC={userC}
+            isDrawing={!!drawing}
+            connectedPortInfo={connectedPortInfoByOpId.get(opNode.id) ?? new Map()}
+            onNodeDown={onOpNodeDown}
+            onOutputPortDown={onOpNodeOutputPortDown}
+            onInputPortUp={onOpNodeInputPortUp}
+            onInputPortClick={onOpInputPortClick}
+            hasOutputConnection={extraEdges.some(e => e.srcNodeId === opNode.id && e.srcFieldPath === 'output')}
+            onOpChange={onOpChange}
+            onLiteralChange={onOpLiteralChange}
+            onResizeStart={onOpResizeStart}
+            dirty={!savedOpNodeIds.has(opNode.id)}
+            onDelete={onDeleteOpNode}
+            onTogglePortOptional={toggleOpPortOptional}
+            onTokenHover={setTokenHover}
+            onTokenLeave={onTokenLeave}
+            onAddVarField={onAddVarField}
+            onRemoveVarField={onRemoveVarField}
+            onVarFieldPortDown={onVarFieldPortDown}
+            hasVarFieldConnection={(vf) => extraEdges.some(e => e.srcNodeId === opNode.id && e.srcFieldPath === `${VAR_FIELD_PREFIX}${vf}`)}
+            opNodesById={opNodesById}
+          />
+        ))}
       </div>
+
     </Box>
   );
 }

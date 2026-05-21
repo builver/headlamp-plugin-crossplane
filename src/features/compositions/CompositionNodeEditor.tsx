@@ -2,7 +2,7 @@ import { Icon } from '@iconify/react';
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
 import { DataField } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { Box, IconButton, Tooltip } from '@mui/material';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { GraphCanvas } from './graph/GraphCanvas';
 import { KindOption } from './graph/types';
 
@@ -19,9 +19,11 @@ interface KroStepGraphProps {
   mrdSchemaMap?: Map<string, any>;
   /** 'Namespaced' | 'Cluster' | 'LegacyCluster' — limits kind options to matching CRD scope. */
   xrdScope?: string;
+  /** Step-level requirements from the pipeline step (requiredResources, requiredSchemas). */
+  requirements?: any;
 }
 
-export function KroStepGraph({ input, inputYaml, compositionName, stepIndex, xrdSchema, mrdSchemaMap, xrdScope }: KroStepGraphProps) {
+export function KroStepGraph({ input, inputYaml, compositionName, stepIndex, xrdSchema, mrdSchemaMap, xrdScope, requirements }: KroStepGraphProps) {
   const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList() as [any[] | null, any];
 
   const kindOptions = useMemo((): KindOption[] => {
@@ -56,15 +58,6 @@ export function KroStepGraph({ input, inputYaml, compositionName, stepIndex, xrd
   }, [crds, xrdScope]);
 
   const [mode, setMode] = useState<'graph' | 'yaml'>('graph');
-  const [isDirty, setIsDirty] = useState(false);
-
-  // Block browser close / refresh when dirty.
-  useEffect(() => {
-    if (!isDirty) return;
-    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [isDirty]);
 
   const btnSx = (active: boolean) => ({
     border: '1px solid', borderColor: 'divider', borderRadius: 1,
@@ -90,8 +83,8 @@ export function KroStepGraph({ input, inputYaml, compositionName, stepIndex, xrd
       {mode === 'graph'
         ? <GraphCanvas input={input} height={480}
             compositionName={compositionName} stepIndex={stepIndex}
-            onDirtyChange={setIsDirty} xrdSchema={xrdSchema} mrdSchemaMap={mrdSchemaMap}
-            kindOptions={kindOptions} />
+            xrdSchema={xrdSchema} mrdSchemaMap={mrdSchemaMap}
+            kindOptions={kindOptions} requirements={requirements} />
         : inputYaml ? <DataField label="input.yaml" disableLabel value={inputYaml} onChange={() => {}} /> : null
       }
     </Box>

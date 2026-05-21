@@ -212,6 +212,7 @@ export function CompositionDetailPage() {
                       xrdSchema={xrdSchema}
                       mrdSchemaMap={mrdSchemaMap}
                       xrdScope={xrdScope}
+                      requirements={s.requirements}
                     />
                   ) : pipelineInputYaml.has(s.step) ? (
                     <Box>
