@@ -11,9 +11,9 @@ import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
 import { Box, Link as MuiLink, Tooltip } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
-import React from 'react';
+import { Fragment } from 'react';
 import { makeCompositeTypeColumn } from '../../components/columns';
-import { CompositeResourceDefinition, Composition } from '../../resources';
+import { CompositeResourceDefinition, Composition, CrossplaneFunction } from '../../resources';
 import { CompositionDetailPage } from './CompositionDetailPage';
 
 const MAX_VISIBLE_STEPS = 7;
@@ -23,7 +23,7 @@ interface PipelineStep {
   functionRef: { name: string };
 }
 
-function PipelineSteps({ item }: { item: KubeObject }) {
+function PipelineSteps({ item, knownFunctions }: { item: KubeObject; knownFunctions: Set<string> }) {
   const theme = useTheme();
   const steps: PipelineStep[] = item.jsonData?.spec?.pipeline ?? [];
 
@@ -34,37 +34,49 @@ function PipelineSteps({ item }: { item: KubeObject }) {
 
   return (
     <Box display="flex" alignItems="center" flexWrap="nowrap">
-      {visible.map((s, i) => (
-        <React.Fragment key={s.step}>
-          {i > 0 && (
-            <Box sx={{ width: 14, height: 2, flexShrink: 0, bgcolor: 'primary.main', opacity: 0.4 }} />
-          )}
-          <Tooltip
-            title={
-              <Box>
-                <div><strong>{s.step}</strong></div>
-                {s.functionRef?.name && (
-                  <Link routeName={`crossplane-function-detail-${s.functionRef.name}`}>
-                    <Box display="flex" alignItems="center" gap={0.5} component="span">
-                      <Icon icon="mdi:function" width="1em" height="1em" />
-                      {s.functionRef.name}
+      {visible.map((s, i) => {
+        const fnName = s.functionRef?.name;
+        const missing = !!fnName && knownFunctions.size > 0 && !knownFunctions.has(fnName);
+        const dotColor = missing ? theme.palette.error.main : theme.palette.primary.main;
+        const connectorColor = missing ? 'error.main' : 'primary.main';
+        return (
+          <Fragment key={s.step}>
+            {i > 0 && (
+              <Box sx={{ width: 14, height: 2, flexShrink: 0, bgcolor: connectorColor, opacity: 0.4 }} />
+            )}
+            <Tooltip
+              title={
+                <Box>
+                  <div><strong>{s.step}</strong></div>
+                  {fnName && (
+                    <Link routeName={`crossplane-function-detail-${fnName}`}>
+                      <Box display="flex" alignItems="center" gap={0.5} component="span">
+                        <Icon icon="mdi:function" width="1em" height="1em" />
+                        {fnName}
+                      </Box>
+                    </Link>
+                  )}
+                  {missing && (
+                    <Box display="flex" alignItems="center" gap={0.5} mt={0.5} color="error.light">
+                      <Icon icon="mdi:alert-circle-outline" width="1em" height="1em" />
+                      Function not found
                     </Box>
-                  </Link>
-                )}
+                  )}
+                </Box>
+              }
+            >
+              <Box component="span" sx={{ cursor: 'default', lineHeight: 0, flexShrink: 0 }}>
+                <Icon
+                  icon="mdi:circle"
+                  width="0.875rem"
+                  height="0.875rem"
+                  style={{ color: dotColor }}
+                />
               </Box>
-            }
-          >
-            <Box component="span" sx={{ cursor: 'default', lineHeight: 0, flexShrink: 0 }}>
-              <Icon
-                icon="mdi:circle"
-                width="0.875rem"
-                height="0.875rem"
-                style={{ color: theme.palette.primary.main }}
-              />
-            </Box>
-          </Tooltip>
-        </React.Fragment>
-      ))}
+            </Tooltip>
+          </Fragment>
+        );
+      })}
       {overflow.length > 0 && (
         <>
           <Box sx={{ width: 14, height: 2, flexShrink: 0, bgcolor: 'primary.main', opacity: 0.4 }} />
@@ -111,6 +123,8 @@ export function CompositionListPage() {
   const filterFunction = useFilterFunc();
   const [compositions, error] = Composition.useList();
   const [xrds] = CompositeResourceDefinition.useList();
+  const [functions] = CrossplaneFunction.useList();
+  const knownFunctions = new Set((functions ?? []).map((f: { metadata: { name: string } }) => f.metadata.name));
 
   if (error?.status === 404) {
     return (
@@ -144,7 +158,7 @@ export function CompositionListPage() {
             label: 'Pipeline',
             getValue: item =>
               (item.jsonData?.spec?.pipeline ?? []).map((s: PipelineStep) => s.step).join(', '),
-            render: item => <PipelineSteps item={item} />,
+            render: item => <PipelineSteps item={item} knownFunctions={knownFunctions} />,
           },
           'age',
         ]}
