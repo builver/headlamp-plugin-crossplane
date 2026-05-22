@@ -17,7 +17,7 @@ addIcon('crossplane:mono', {
 });
 import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
 import { registerCrossplaneMapSource } from './components/mapSource';
-import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceActivationPolicy, ManagedResourceDefinition, Provider } from './resources';
+import { CompositeResourceDefinition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceActivationPolicy, ManagedResourceDefinition, Provider } from './resources';
 
 // ── Sidebar state — updated by CrossplaneWatcher on every render cycle ────────
 // registerSidebarEntryFilter is reactive (re-evaluated when sidebar re-renders),
@@ -30,7 +30,6 @@ const registeredXRKinds = new Set<string>();
 const registeredProviders = new Set<string>();
 const registeredConfigurations = new Set<string>();
 const registeredFunctions = new Set<string>();
-const registeredCompositions = new Set<string>();
 const registeredMRDs = new Set<string>();
 const registeredMRAPs = new Set<string>();
 
@@ -47,7 +46,6 @@ function CrossplaneWatcher() {
   const [providers] = Provider.useList();
   const [configurations] = Configuration.useList();
   const [functions] = CrossplaneFunction.useList();
-  const [compositions] = Composition.useList();
   const [mrds] = ManagedResourceDefinition.useList();
   const [mraps] = ManagedResourceActivationPolicy.useList();
 
@@ -164,30 +162,6 @@ function CrossplaneWatcher() {
           name: `crossplane-function-detail-${fnName}`,
           exact: true,
           component: () => <FunctionDetailPage />,
-        });
-      }
-    }
-  }
-
-  if (compositions) {
-    for (const composition of compositions) {
-      const compositionName = composition.metadata.name;
-      if (!compositionName) continue;
-      const entryName = `crossplane-composition-${compositionName}`;
-      if (!registeredCompositions.has(entryName)) {
-        registeredCompositions.add(entryName);
-        registerSidebarEntry({
-          parent: 'crossplane-compositions',
-          name: entryName,
-          label: compositionName,
-          url: `/crossplane/compositions/${compositionName}`,
-        });
-        registerRoute({
-          path: `/crossplane/compositions/${compositionName}`,
-          sidebar: entryName,
-          name: `crossplane-composition-detail-${compositionName}`,
-          exact: true,
-          component: () => <CompositionDetailPage />,
         });
       }
     }
@@ -374,6 +348,14 @@ registerRoute({
   name: 'crossplane-compositions',
   exact: true,
   component: () => <CompositionListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/compositions/:name',
+  sidebar: 'crossplane-compositions',
+  name: 'crossplane-composition-detail',
+  exact: true,
+  component: () => <CompositionDetailPage />,
 });
 
 

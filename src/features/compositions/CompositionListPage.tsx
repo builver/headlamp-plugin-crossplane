@@ -1,4 +1,5 @@
 import { Icon } from '@iconify/react';
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   CreateResourceButton,
   Link,
@@ -12,7 +13,8 @@ import { Box, Tooltip } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import React from 'react';
 import { makeCompositeTypeColumn } from '../../components/columns';
-import { CompositeResourceDefinition,Composition } from '../../resources';
+import { CompositeResourceDefinition, Composition } from '../../resources';
+import { CompositionDetailPage } from './CompositionDetailPage';
 
 const MAX_VISIBLE_STEPS = 7;
 
@@ -117,9 +119,24 @@ export function CompositionListPage() {
             label: 'Name',
             getValue: item => item.metadata.name,
             render: item => (
-              <Link routeName={`crossplane-composition-detail-${item.metadata.name}`}>
+              <span
+                role="button"
+                tabIndex={-1}
+                style={{ cursor: 'pointer', color: 'inherit', textDecoration: 'underline' }}
+                onClick={() =>
+                  Activity.launch({
+                    id: `crossplane-composition-${item.metadata.name}`,
+                    title: `Composition ${item.metadata.name}`,
+                    hideTitleInHeader: true,
+                    location: 'full',
+                    cluster: item.cluster,
+                    icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
+                    content: <CompositionDetailPage name={item.metadata.name} />,
+                  })
+                }
+              >
                 {item.metadata.name}
-              </Link>
+              </span>
             ),
           },
           makeCompositeTypeColumn(xrds),

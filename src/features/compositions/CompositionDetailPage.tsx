@@ -112,9 +112,9 @@ function ComposedXRs({ xrd, compositionName }: ComposedXRsProps) {
   );
 }
 
-export function CompositionDetailPage() {
+export function CompositionDetailPage({ name: nameProp }: { name?: string } = {}) {
   const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  const name = nameProp ?? location.pathname.split('/').filter(Boolean).pop() ?? '';
   const [comp] = Composition.useGet(name);
   const [xrds] = CompositeResourceDefinition.useList();
   const [mrds] = ManagedResourceDefinition.useList();
