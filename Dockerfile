@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY src/ ./src/
-RUN npm run build
+RUN npm run build && cp package.json dist/package.json
 
 # Stage 2: minimal init-container image
 # On pod startup, copies plugin files into the shared plugins volume:
