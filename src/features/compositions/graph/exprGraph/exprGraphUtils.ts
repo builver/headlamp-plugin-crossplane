@@ -49,7 +49,7 @@ function autoLayout(nodes: ExprNode[], outputId: string): void {
 
 const OP_TO_CATEGORY: Record<string, string> = {
   '==': 'compare', '!=': 'compare', '>': 'compare', '<': 'compare', '>=': 'compare', '<=': 'compare',
-  '&&': 'logic', '||': 'logic',
+  '&&': 'and', '||': 'or',
   '*': 'math', '/': 'math', '%': 'math',
 };
 

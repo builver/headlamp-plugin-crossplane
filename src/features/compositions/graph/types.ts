@@ -34,8 +34,8 @@ export interface TRow {
   ghostType?: string;
   /** True for parent rows that represent an array container (e.g. spec.containers). */
   isArrayParent?: boolean;
-  /** Indented sub-row under a forEach KV row showing a template field that uses that variable. */
-  isForEachRef?: boolean;
+  /** Indented sub-field row under a forEach variable row (e.g. role.name output port). */
+  isForEachSubField?: boolean;
   /** Can this row receive an incoming connection (left drop target). Defaults to true for leaf rows. */
   canImport?: boolean;
   /** Can this row originate an outgoing connection (right port dot). Defaults to true for non-section rows. */

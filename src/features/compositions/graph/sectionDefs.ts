@@ -1,4 +1,5 @@
 import { nodeIdToRef } from './constants';
+import { setDeepPath } from './pathUtils';
 
 // ── Section definitions ────────────────────────────────────────────────────────
 
@@ -18,17 +19,6 @@ export interface SectionDef {
   celRef(srcNodeId: string, relPath: string): string;
 }
 
-// Minimal inline setDeepPath to avoid circular import with rowUtils.ts.
-function _setDeepPath(obj: any, dotPath: string, value: any): void {
-  const parts = dotPath.split('.');
-  let cur = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const nextIsIndex = /^\d+$/.test(parts[i + 1]);
-    if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') cur[parts[i]] = nextIsIndex ? [] : {};
-    cur = cur[parts[i]];
-  }
-  cur[parts[parts.length - 1]] = value;
-}
 
 export const SECTION_DEFS: Record<SectionName, SectionDef> = {
   template: {
@@ -39,7 +29,7 @@ export const SECTION_DEFS: Record<SectionName, SectionDef> = {
     fieldType: () => undefined,
     applyEdge(tgtRes, relPath, celExpr) {
       if (!tgtRes.template) tgtRes.template = {};
-      _setDeepPath(tgtRes.template, relPath, celExpr);
+      setDeepPath(tgtRes.template, relPath, celExpr);
     },
     celRef(srcNodeId, relPath) {
       const ref = nodeIdToRef(srcNodeId);
@@ -69,7 +59,13 @@ export const SECTION_DEFS: Record<SectionName, SectionDef> = {
     defaultCanImport: true,
     defaultCanExport: false,
     fieldType: () => 'any',  // CEL expressions — any source type is valid input
-    applyEdge(tgtRes, _relPath, celExpr) { tgtRes.includeWhen = celExpr; },
+    applyEdge(tgtRes, relPath, celExpr) {
+      if (!Array.isArray(tgtRes.includeWhen)) {
+        tgtRes.includeWhen = tgtRes.includeWhen ? [tgtRes.includeWhen] : [];
+      }
+      const idx = relPath === 'value' ? 0 : (parseInt(relPath, 10) || 0);
+      tgtRes.includeWhen[idx] = celExpr;
+    },
     celRef() { return ''; },
   },
   readyWhen: {
@@ -78,7 +74,13 @@ export const SECTION_DEFS: Record<SectionName, SectionDef> = {
     defaultCanImport: true,
     defaultCanExport: false,
     fieldType: () => 'any',  // CEL expressions — any source type is valid input
-    applyEdge(tgtRes, _relPath, celExpr) { tgtRes.readyWhen = celExpr; },
+    applyEdge(tgtRes, relPath, celExpr) {
+      if (!Array.isArray(tgtRes.readyWhen)) {
+        tgtRes.readyWhen = tgtRes.readyWhen ? [tgtRes.readyWhen] : [];
+      }
+      const idx = relPath === 'value' ? 0 : (parseInt(relPath, 10) || 0);
+      tgtRes.readyWhen[idx] = celExpr;
+    },
     celRef() { return ''; },
   },
 };

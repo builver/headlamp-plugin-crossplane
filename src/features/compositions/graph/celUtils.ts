@@ -190,6 +190,7 @@ export function overlayRowWithTemplate(row: TRow, template: string, knownIds: Se
     return { ...base, inPort: { ref: matches[0][1], srcPath, srcShort, optional } };
   }
   if (matches.length > 0) return { ...base, segments: parseSegments(template, knownIds) };
+  if (/^\$\{(true|false|null|-?\d+(?:\.\d+)?|"[^"]*"|'[^']*')\}$/.test(template)) return { ...base, value: template };
   if (/\$\{/.test(template)) return { ...base, celExpr: template };
   return { ...base, value: template };
 }

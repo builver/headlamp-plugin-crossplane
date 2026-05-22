@@ -44,6 +44,7 @@ export interface PortDef {
 export interface NodeDef {
   category: string;
   label: string;
+  group: 'Logic' | 'String' | 'Collection' | 'Type / Math' | 'Advanced';
   defaultOp: string;
   ops: Array<{ op: string; label: string }>;
   inputs: PortDef[];

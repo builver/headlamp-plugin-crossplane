@@ -6,17 +6,18 @@ import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'r
 import { getGroupVersion } from '../../../components/map/apiPaths';
 import { overlayRowWithTemplate } from './celUtils';
 import {
-  CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, HG, K8S_BASE_FIELDS, K8S_MAP_PATHS,
+  CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, K8S_BASE_FIELDS, K8S_MAP_PATHS,
   NODE_CFG, nodeH, nodeIdToRef, NW,
   OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
   ROW_H, SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT, VAR_FIELD_PREFIX, varFieldLeafRow,
 } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { ConnectedPortInfo, ExprOpNodeCard } from './ExprOpNodeCard';
-import { bezierPath, buildGraph, extraPortY, makeBezier, srcPortY, tgtPortY } from './graphUtils';
+import { bezierPath, buildGraph, extraPortY, makeBezier, sectionAddBarOffset, srcPortY, tgtPortY } from './graphUtils';
 import { DraftNodeCard, NodeCard } from './NodeCard';
-import { applyExtraEdgesToInput, applyFieldEditsToInput, buildTemplateRows, insertRowAtPath, removeRowAtPath } from './rowUtils';
-import { findArrayPaths, findMapPaths, flattenJsonSchema, getResApiVersion, getResKind, resolveSchemaRefs } from './schemaUtils';
+import { OpNodePalette } from './OpNodePalette';
+import { applyExtraEdgesToInput, applyFieldEditsToInput, buildTemplateRows, insertRowAtPath, makeLeafRow, reindexPathAfterDelete, removeRowAtPath } from './rowUtils';
+import { getResApiVersion, getResKind } from './schemaUtils';
 import { qualifiedPath, SECTION_DEFS, sectionOf, sectionRelPath } from './sectionDefs';
 import {
   AddForm, Drawing, ExtraEdge, FieldEdit,
@@ -24,6 +25,7 @@ import {
   SaveState, TokenHover, TRow,
 } from './types';
 import { typeCompat } from './typeUtils';
+import { useCompositionSchemas } from './useCompositionSchemas';
 
 // ── GraphCanvas ───────────────────────────────────────────────────────────────
 
@@ -64,14 +66,10 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const [fieldEdits,    setFieldEdits]    = useState<FieldEdit[]>([]);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [opNodes,         setOpNodes]         = useState<OpNode[]>(initOpNodes);
-  const [fetchedXrdSchema,  setFetchedXrdSchema]  = useState<any>(null);
-  const [xrdSchemaDone,     setXrdSchemaDone]     = useState(!!xrdSchema);
-  const [schemaKind,        setSchemaKind]        = useState<string | null>(null);
-  const [schemaApiVersion,  setSchemaApiVersion]  = useState<string | null>(null);
-  const [schemaAttemptedKeys, setSchemaAttemptedKeys] = useState<Set<string>>(new Set());
   const [addOpForm,     setAddOpForm]     = useState<string | null>(null);
-  const opDragId     = useRef<string | null>(null);
-  const opDragOrigin = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
+  const opDragId       = useRef<string | null>(null);
+  const opDragOrigin   = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
+  const opHasDragged   = useRef(false);
   const opResizeId   = useRef<string | null>(null);
   const opResizeOrigin = useRef({ my: 0, startH: 0 });
   const [pan,  setPan]  = useState({ x: 0, y: 0 });
@@ -154,183 +152,22 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     opDragId.current = null; opResizeId.current = null;
   }, [initNodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Self-sufficient XRD schema fetch for schema-node autocomplete ─────────────
-  // Fetches spec.compositeTypeRef from the Composition, then finds the matching XRD
-  // to extract its openAPIV3Schema. The xrdSchema prop (from the parent) takes priority;
-  // this serves as a self-contained fallback so autocomplete works in any context.
-  useEffect(() => {
-    let mounted = true;
-    async function run() {
-      try {
-        const comp = await ApiProxy.request(`/apis/apiextensions.crossplane.io/v1/compositions/${compositionName}`);
-        const typeRef = comp?.spec?.compositeTypeRef as { apiVersion?: string; kind?: string } | undefined;
-        if (!typeRef?.apiVersion || !typeRef?.kind || !mounted) return;
-        const { apiVersion, kind } = typeRef;
-        if (mounted) { setSchemaKind(kind); setSchemaApiVersion(apiVersion); }
-        const group = getGroupVersion(apiVersion)[0];
-        const xrdList = await ApiProxy.request('/apis/apiextensions.crossplane.io/v1/compositeresourcedefinitions');
-        const xrd = (xrdList?.items ?? []).find(
-          (x: any) => x.spec?.names?.kind === kind && x.spec?.group === group
-        );
-        if (!xrd || !mounted) return;
-        const versions: any[] = xrd.spec?.versions ?? [];
-        const served = versions.find((v: any) => v.served !== false) ?? versions[0];
-        const schema = served?.schema?.openAPIV3Schema ?? null;
-        if (schema && mounted) setFetchedXrdSchema(schema);
-      } catch (err) {
-        console.warn('[crossplane] Failed to fetch XRD schema for autocomplete:', err);
-      } finally {
-        if (mounted) setXrdSchemaDone(true);
-      }
-    }
-    run();
-    return () => { mounted = false; };
-  }, [compositionName]);
-
-  const effectiveXrdSchema = xrdSchema ?? fetchedXrdSchema;
-  // If the parent provides xrdSchema directly, mark as done immediately.
-  // (The fetch effect only sets xrdSchemaDone after its async run completes.)
-  if (xrdSchema && !xrdSchemaDone) setXrdSchemaDone(true);
+  const {
+    effectiveXrdSchema,
+    xrdSchemaDone,
+    schemaKind,
+    schemaApiVersion,
+    schemaAttemptedKeys,
+    xrdAllFields,
+    xrdLeafFields,
+    mrdFieldsCache,
+    mrdMapPathsCache,
+    mrdArrayPathsCache,
+    mrdPreserveUnknownPathsCache,
+  } = useCompositionSchemas({ compositionName, xrdSchema, mrdSchemaMap, input, pendingResources, requirements });
 
   const nodeMap = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes]);
   const opNodesById = useMemo(() => new Map(opNodes.map(n => [n.id, n])), [opNodes]);
-
-  // ── Native K8s schema fetch ────────────────────────────────────────────────
-  // Fetches OpenAPI v3 schemas for native K8s resources (Deployment, Service, …) that aren't
-  // covered by the MRD schema map. Triggered whenever the set of group/version/kind triples
-  // changes — including pending resources added in this session (before they are saved).
-
-  const [nativeSchemaMap, setNativeSchemaMap] = useState<Map<string, any>>(new Map());
-
-  const resourceGvKinds = useMemo(() => {
-    const envReqs: any[] = (requirements ?? input?.requirements)?.requiredResources ?? [];
-    return [
-      ...(input?.resources ?? []).map((r: any) => `${getResApiVersion(r)}::${getResKind(r)}`),
-      ...pendingResources.map((r: any) => `${getResApiVersion(r)}::${getResKind(r)}`),
-      ...envReqs.map((r: any) => `${r.apiVersion ?? ''}::${r.kind ?? ''}`),
-    ].filter(s => s !== '::').sort().join('|');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input?.resources, pendingResources, requirements]);
-
-  const mrdSchemaMapRef = useRef(mrdSchemaMap);
-  useEffect(() => { mrdSchemaMapRef.current = mrdSchemaMap; });
-
-  useEffect(() => {
-    const allRes: any[] = [...(input?.resources ?? []), ...pendingResources];
-    const gvToKinds = new Map<string, Array<{ mapKey: string; kind: string }>>();
-    const seenMapKeys = new Set<string>();
-    for (const res of allRes) {
-      const apiVersion = getResApiVersion(res);
-      const kind = getResKind(res);
-      if (!apiVersion || !kind) continue;
-      const [group, version] = getGroupVersion(apiVersion);
-      const mapKey = `${group}/${kind}`;
-      if (mrdSchemaMapRef.current?.has(mapKey) || seenMapKeys.has(mapKey)) continue;
-      seenMapKeys.add(mapKey);
-      const gvPath = group ? `apis/${group}/${version}` : `api/${version}`;
-      if (!gvToKinds.has(gvPath)) gvToKinds.set(gvPath, []);
-      gvToKinds.get(gvPath)!.push({ mapKey, kind });
-    }
-    for (const req of ((requirements ?? input?.requirements)?.requiredResources ?? []) as any[]) {
-      const apiVersion = req.apiVersion as string | undefined;
-      const kind = req.kind as string | undefined;
-      if (!apiVersion || !kind) continue;
-      const [group, version] = getGroupVersion(apiVersion);
-      const mapKey = `${group}/${kind}`;
-      if (mrdSchemaMapRef.current?.has(mapKey) || seenMapKeys.has(mapKey)) continue;
-      seenMapKeys.add(mapKey);
-      const gvPath = group ? `apis/${group}/${version}` : `api/${version}`;
-      if (!gvToKinds.has(gvPath)) gvToKinds.set(gvPath, []);
-      gvToKinds.get(gvPath)!.push({ mapKey, kind });
-    }
-    if (!gvToKinds.size) return;
-
-    let mounted = true;
-    const result = new Map<string, any>();
-    Promise.allSettled(
-      [...gvToKinds.entries()].map(async ([gvPath, entries]) => {
-        let doc: any;
-        try {
-          doc = await ApiProxy.request(`/openapi/v3/${gvPath}`);
-        } catch (err) {
-          console.warn('[crossplane] schema fetch failed for', gvPath, err);
-          return;
-        }
-        const schemas: Record<string, any> = doc?.components?.schemas ?? {};
-        console.log('[crossplane] schema fetch', gvPath, 'schemas:', Object.keys(schemas).length, 'looking for:', entries.map(e => e.kind));
-        for (const { mapKey, kind } of entries) {
-          const schema = Object.values(schemas).find((s: any) =>
-            (s['x-kubernetes-group-version-kind'] ?? []).some((gvk: any) => gvk.kind === kind)
-          );
-          console.log('[crossplane] schema for', mapKey, schema ? 'found, top-level keys:' : 'NOT FOUND', schema ? Object.keys(schema).join(',') : '');
-          if (schema) {
-            const resolved = resolveSchemaRefs(schema, schemas, 12);
-            console.log('[crossplane] resolved', mapKey, 'properties:', Object.keys(resolved?.properties ?? {}));
-            result.set(mapKey, resolved);
-          }
-        }
-      })
-    ).then(() => {
-      console.log('[crossplane] schema fetch done, result keys:', [...result.keys()]);
-      if (!mounted) return;
-      setSchemaAttemptedKeys(prev => {
-        const next = new Set(prev);
-        let changed = false;
-        for (const entries of gvToKinds.values()) {
-          for (const { mapKey } of entries) {
-            if (!next.has(mapKey)) { next.add(mapKey); changed = true; }
-          }
-        }
-        return changed ? next : prev;
-      });
-      if (!result.size) return;
-      setNativeSchemaMap(prev => {
-        const merged = new Map(prev);
-        let changed = false;
-        for (const [k, v] of result) { if (!merged.has(k)) { merged.set(k, v); changed = true; } }
-        return changed ? merged : prev;
-      });
-    });
-
-    return () => { mounted = false; };
-  // pendingResources intentionally excluded — resourceGvKinds is the stable dep
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resourceGvKinds]);
-
-  // Merge MRD schemas (from parent) with fetched native K8s schemas
-  const combinedSchemaMap = useMemo(() => {
-    if (!nativeSchemaMap.size) return mrdSchemaMap;
-    const merged = new Map(mrdSchemaMap ?? []);
-    for (const [k, v] of nativeSchemaMap) merged.set(k, v);
-    return merged;
-  }, [mrdSchemaMap, nativeSchemaMap]);
-
-  // Memoize flattened schema fields so flattenJsonSchema isn't called on every render/mouse event.
-  const xrdAllFields  = useMemo(() => flattenJsonSchema(effectiveXrdSchema), [effectiveXrdSchema]);
-  const xrdLeafFields = useMemo(
-    () => xrdAllFields.filter(s => s.path.startsWith('spec.') && s.type !== 'object' && s.type !== 'array'),
-    [xrdAllFields]
-  );
-  const mrdFieldsCache = useMemo(() => {
-    const cache = new Map<string, FieldSuggestion[]>();
-    if (!combinedSchemaMap) return cache;
-    for (const [key, schema] of combinedSchemaMap) cache.set(key, flattenJsonSchema(schema, '', 12));
-    return cache;
-  }, [combinedSchemaMap]);
-
-  const mrdMapPathsCache = useMemo(() => {
-    const cache = new Map<string, Set<string>>();
-    if (!combinedSchemaMap) return cache;
-    for (const [key, schema] of combinedSchemaMap) cache.set(key, findMapPaths(schema));
-    return cache;
-  }, [combinedSchemaMap]);
-
-  const mrdArrayPathsCache = useMemo(() => {
-    const cache = new Map<string, Set<string>>();
-    if (!combinedSchemaMap) return cache;
-    for (const [key, schema] of combinedSchemaMap) cache.set(key, findArrayPaths(schema));
-    return cache;
-  }, [combinedSchemaMap]);
 
   const allMapPathsMap = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -364,6 +201,20 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     }
     return map;
   }, [nodes, input, pendingResources, mrdArrayPathsCache]);
+
+  const allPreserveUnknownPathsMap = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const n of nodes) {
+      if (n.type !== 'kro-resource' && n.type !== 'kro-ref') continue;
+      const res = (input?.resources ?? []).find((r: any) => r.id === n.id)
+        ?? pendingResources.find(r => r.id === n.id);
+      const apiVersion = getResApiVersion(res);
+      const kind = getResKind(res);
+      const group = getGroupVersion(apiVersion)[0];
+      map.set(n.id, mrdPreserveUnknownPathsCache.get(`${group}/${kind}`) ?? new Set<string>());
+    }
+    return map;
+  }, [nodes, input, pendingResources, mrdPreserveUnknownPathsCache]);
 
   /** Returns field path suggestions for the given node: schema from XRD/MRD, minus already-used paths.
    *  Leaf fields plus array container fields are returned. Array sub-fields (containers[].name) are
@@ -454,7 +305,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     const secType = SECTION_DEFS[sectionOf(fieldPath)].fieldType(sectionRelPath(fieldPath));
     if (secType !== undefined) return secType;
     if (nodeId === SCHEMA_NODE_ID) {
-      return xrdAllFields.find(s => s.path === fieldPath)?.type;
+      const normalizedPath = fieldPath.replace(/\?/g, '');
+      return xrdAllFields.find(s => s.path === normalizedPath)?.type;
     }
     let apiVersion: string | undefined;
     let kind: string | undefined;
@@ -571,8 +423,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       result = result.map(n => {
         if (n.id !== SCHEMA_NODE_ID) return n;
         const infoRows: TRow[] = [
-          ...(schemaApiVersion ? [{ depth: 0, key: 'apiVersion', isParent: false as const, value: schemaApiVersion }] : []),
-          ...(schemaKind       ? [{ depth: 0, key: 'kind',       isParent: false as const, value: schemaKind }]       : []),
+          ...(schemaApiVersion ? [makeLeafRow(0, 'apiVersion', 'apiVersion', schemaApiVersion, new Set())] : []),
+          ...(schemaKind       ? [makeLeafRow(0, 'kind',       'kind',       schemaKind,       new Set())] : []),
         ];
         const newRows = [...infoRows, ...n.rows];
         return { ...n, rows: newRows, h: nodeH(newRows) };
@@ -631,6 +483,36 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     for (const n of nodesForDisplay) map.set(n.id, getSuggestions(n.id));
     return map;
   }, [nodesForDisplay, getSuggestions]);
+
+  /**
+   * All schema fields per node (including object-type fields), minus already-used paths.
+   * Used exclusively by the inline field picker so it can show object containers like
+   * spec.selector or spec.template as selectable options.
+   */
+  const allSchemaFieldsMap = useMemo(() => {
+    const map = new Map<string, FieldSuggestion[]>();
+    for (const n of nodesForDisplay) {
+      if (n.type === 'draft') continue;
+      const usedPaths = new Set(n.rows.map((r: TRow) => r.fieldPath).filter(Boolean) as string[]);
+      let fields: FieldSuggestion[];
+      if (n.id === SCHEMA_NODE_ID) {
+        fields = xrdAllFields.filter(s => !usedPaths.has(s.path));
+      } else if (n.type === 'env' || n.type === 'kro-ref') {
+        continue;
+      } else {
+        const res = (input?.resources ?? []).find((r: any) => r.id === n.id)
+          ?? pendingResources.find(r => r.id === n.id);
+        const apiVersion = getResApiVersion(res);
+        const kind = getResKind(res);
+        const group = getGroupVersion(apiVersion)[0];
+        const schemaFields = mrdFieldsCache.get(`${group}/${kind}`);
+        if (!schemaFields) continue;
+        fields = schemaFields.filter(s => !usedPaths.has(s.path) && !s.path.includes('[]'));
+      }
+      map.set(n.id, fields);
+    }
+    return map;
+  }, [nodesForDisplay, xrdAllFields, input, pendingResources, mrdFieldsCache]);
 
   /** Node IDs where schema was attempted but could not be loaded. */
   const noSchemaNodeIds = useMemo(() => {
@@ -724,6 +606,45 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   const onTokenLeave = useCallback(() => setTokenHover(null), []);
 
+  /**
+   * Two strict one-direction BFS passes from the selected node:
+   *   upstream   — follow input  edges only (target→source), never switching direction
+   *   downstream — follow output edges only (source→target), never switching direction
+   * Nodes found via the upstream pass never contribute their output edges, and vice versa.
+   */
+  const relatedNodeIds = useMemo((): Set<string> | null => {
+    if (!selected) return null;
+    const related = new Set<string>([selected]);
+
+    // upstream: follow edges backward (target → source)
+    const upQueue = [selected];
+    const upVisited = new Set<string>([selected]);
+    while (upQueue.length > 0) {
+      const id = upQueue.shift()!;
+      for (const e of edges) {
+        if (e.target === id && !upVisited.has(e.source)) { upVisited.add(e.source); upQueue.push(e.source); related.add(e.source); }
+      }
+      for (const e of extraEdges) {
+        if (e.tgtNodeId === id && !upVisited.has(e.srcNodeId)) { upVisited.add(e.srcNodeId); upQueue.push(e.srcNodeId); related.add(e.srcNodeId); }
+      }
+    }
+
+    // downstream: follow edges forward (source → target)
+    const downQueue = [selected];
+    const downVisited = new Set<string>([selected]);
+    while (downQueue.length > 0) {
+      const id = downQueue.shift()!;
+      for (const e of edges) {
+        if (e.source === id && !downVisited.has(e.target)) { downVisited.add(e.target); downQueue.push(e.target); related.add(e.target); }
+      }
+      for (const e of extraEdges) {
+        if (e.srcNodeId === id && !downVisited.has(e.tgtNodeId)) { downVisited.add(e.tgtNodeId); downQueue.push(e.tgtNodeId); related.add(e.tgtNodeId); }
+      }
+    }
+
+    return related;
+  }, [selected, edges, extraEdges]);
+
   const bgWasClean  = useRef(false); // true if bg mousedown had no subsequent mouse movement
   const dragId      = useRef<string | null>(null);
   const dragOrigin  = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
@@ -748,6 +669,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       if (n.id !== nodeId) return n;
       const leafExtra: Partial<TRow> = (isMapParent || isArrayParent)
         ? { isVirtual: true, isParent: true, ...(isArrayParent && { isArrayParent: true }) }
+        : fieldType === 'object'
+        ? { isVirtual: true, isParent: true }
         : { isVirtual: true, ...(fieldType !== undefined && { ghostType: fieldType }) };
       const newRows = insertRowAtPath(n.rows, path, leafExtra);
       return { ...n, rows: newRows, h: nodeH(newRows) };
@@ -767,10 +690,15 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       // Count only direct item rows (exact one more segment)
       }).filter(r => r.fieldPath?.slice(arrayPrefix.length).split('.').length === 1).length;
       const itemPath = `${arrayPath}.${nextIdx}`;
-      const newRows = insertRowAtPath(n.rows, itemPath, { isParent: true, isVirtual: true });
+      const isObjectArray = [...(allArrayPathsMap.get(nodeId) ?? new Set<string>())].some(
+        p => p.startsWith(`${arrayPath}[].`)
+      );
+      const newRows = insertRowAtPath(n.rows, itemPath,
+        isObjectArray ? { isParent: true as const, isVirtual: true } : { isVirtual: true }
+      );
       return { ...n, rows: newRows, h: nodeH(newRows) };
     }));
-  }, []);
+  }, [allArrayPathsMap]);
 
   /** Add a new virtual entry to a forEach / includeWhen / readyWhen section on a node. */
   const onAddSectionItem = useCallback((nodeId: string, section: string, varName?: string) => {
@@ -793,18 +721,44 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         if (!varName) return n;
         const fp = qualifiedPath('forEach', varName);
         if (n.rows.some(r => r.fieldPath === fp)) return n;
-        newRow = { depth: 1, key: varName, isParent: false, fieldPath: fp, isVirtual: true,
-          canImport: true, canExport: true, outPort: { path: fp, short: varName } };
+        const parts = varName.split('.');
+        const key = parts[parts.length - 1];
+        const depth = parts.length; // depth=1 for top-level var, depth=2 for sub-field
+        const isSubField = parts.length > 1;
+        newRow = makeLeafRow(depth, key, fp, undefined, new Set(), isSubField
+          ? { isVirtual: true, canImport: false, canExport: true, outPort: { path: fp, short: key } }
+          : { isVirtual: true, canImport: true,  canExport: true, outPort: { path: fp, short: key } });
+
+        // For sub-fields, insert after the parent variable row and its existing children.
+        if (isSubField) {
+          const parentFp = qualifiedPath('forEach', parts.slice(0, -1).join('.'));
+          insertAt = n.rows.length;
+          for (let i = 0; i < n.rows.length; i++) {
+            if (n.rows[i].fieldPath === parentFp || n.rows[i].fieldPath?.startsWith(parentFp + '.')) {
+              insertAt = i + 1;
+            }
+          }
+          const newRows = [...n.rows];
+          newRows.splice(insertAt, 0, newRow);
+          return { ...n, rows: newRows, h: nodeH(newRows) };
+        }
       } else {
-        // Single optional value — only one row allowed.
-        const fp = qualifiedPath(sec, 'value');
-        if (n.rows.some(r => r.fieldPath === fp)) return n;
-        newRow = { depth: 1, key: 'value', isParent: false, fieldPath: fp, isVirtual: true,
-          canImport: true, canExport: false };
+        // includeWhen / readyWhen — append next indexed entry.
+        const prefix = SECTION_DEFS[sec].prefix;
+        const existingCount = n.rows.filter(r => r.fieldPath?.startsWith(prefix) && !r.isSection).length;
+        const key = String(existingCount);
+        const fp = qualifiedPath(sec, key);
+        newRow = makeLeafRow(1, key, fp, undefined, new Set(), { isVirtual: true, canImport: true, canExport: false });
       }
 
       const newRows = [...n.rows];
-      newRows.splice(insertAt, 0, newRow);
+      const hasHeader = n.rows.some(r => r.isSection && r.key === sec);
+      if (!hasHeader) {
+        const headerRow: TRow = { depth: 0, key: sec, isParent: false, isSection: true, canImport: false, canExport: false };
+        newRows.splice(insertAt, 0, headerRow, newRow);
+      } else {
+        newRows.splice(insertAt, 0, newRow);
+      }
       return { ...n, rows: newRows, h: nodeH(newRows) };
     }));
     setDirtyOps(true);
@@ -815,6 +769,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const onOpNodeDown = useCallback((e: MouseEvent, id: string) => {
     const node = opNodes.find(n => n.id === id); if (!node) return;
     opDragId.current = id;
+    opHasDragged.current = false;
     opDragOrigin.current = { mx: e.clientX, my: e.clientY, nx: node.x, ny: node.y };
   }, [opNodes]);
 
@@ -856,9 +811,14 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   }, [opNodes]);
 
   const onAddVarField = useCallback((opId: string, fieldPath: string) => {
-    setOpNodes(prev => prev.map(n => n.id === opId
-      ? { ...n, varFields: [...(n.varFields ?? []).filter(f => f !== fieldPath), fieldPath] }
-      : n));
+    const segs = fieldPath.split('.');
+    const toAdd = segs.map((_, i) => segs.slice(0, i + 1).join('.'));
+    setOpNodes(prev => prev.map(n => {
+      if (n.id !== opId) return n;
+      const existing = new Set(n.varFields ?? []);
+      const merged = [...existing, ...toAdd.filter(p => !existing.has(p))];
+      return { ...n, varFields: merged };
+    }));
     setDirtyOps(true);
   }, []);
 
@@ -907,9 +867,12 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   // ── Hover target computation ─────────────────────────────────────────────────
 
-  const computeHoverTarget = useCallback((cp: { x: number; y: number }, srcNodeId: string, srcType?: string): HoverTarget | null => {
+  const computeHoverTarget = useCallback((cp: { x: number; y: number }, srcNodeId: string, srcType?: string, srcFieldPath?: string): HoverTarget | null => {
+    const srcIsForEach = !!srcFieldPath && sectionOf(srcFieldPath) === 'forEach';
     for (const n of nodes) {
-      if (n.id === srcNodeId) continue;
+      const isSelf = n.id === srcNodeId;
+      // Allow self-loop only when source is a forEach row — the forEach variable feeds template fields on the same node
+      if (isSelf && !srcIsForEach) continue;
       if (n.type === 'kro-ref') continue; // external refs are read-only, cannot be drop targets
       if (cp.x < n.x || cp.x > n.x + n.w) continue;
       const displayBottom = n.y + HEADER_H + n.rows.length * ROW_H + 8;
@@ -917,6 +880,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const rowIdx = Math.floor((cp.y - n.y - HEADER_H) / ROW_H);
       if (rowIdx >= 0 && rowIdx < n.rows.length && !n.rows[rowIdx].isParent && !n.rows[rowIdx].isSection && n.rows[rowIdx].canImport !== false) {
         const row = n.rows[rowIdx];
+        // Self-loops from forEach are only valid targets in the template section
+        if (isSelf && sectionOf(row.fieldPath ?? '') !== 'template') continue;
         const tgtType = row.ghostType ?? getFieldType(n.id, row.fieldPath ?? '');
         if (typeCompat(srcType, tgtType) === 'incompatible') return null;
         return { nodeId: n.id, rowIdx, fieldPath: row.fieldPath };
@@ -996,6 +961,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         ? { ...n, x: dragOrigin.current.nx + dx, y: dragOrigin.current.ny + dy } : n));
     }
     if (opDragId.current) {
+      opHasDragged.current = true;
       const dx = (e.clientX - opDragOrigin.current.mx) / zoom;
       const dy = (e.clientY - opDragOrigin.current.my) / zoom;
       setOpNodes(prev => prev.map(n => n.id === opDragId.current
@@ -1017,10 +983,11 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       hasDraggedPort.current = true;
       const cp = screenToCanvas(e.clientX, e.clientY);
       setDrawing(d => d ? { ...d, canvasX: cp.x, canvasY: cp.y } : null);
-      setHoverTarget(computeHoverTarget(cp, drawing.srcNodeId, drawing.srcType));
+      setHoverTarget(computeHoverTarget(cp, drawing.srcNodeId, drawing.srcType, drawing.srcFieldPath));
       // Track which node the cursor is over, independent of valid drop row
+      const srcIsForEach = !!drawing.srcFieldPath && sectionOf(drawing.srcFieldPath) === 'forEach';
       const overNode = nodes.find(n => {
-        if (n.id === drawing.srcNodeId) return false;
+        if (n.id === drawing.srcNodeId && !srcIsForEach) return false;
         if (cp.x < n.x || cp.x > n.x + n.w) return false;
         // Only env nodes have a bottom "Add field" row; kro-resource nodes use inline map-parent adding.
         const addFieldH = n.type === 'env' ? ROW_H : 0;
@@ -1036,7 +1003,16 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       if (ge.target === nodeId && getEdgeTargetFieldPath(ge) === fieldPath) removeExistingEdge(ge);
     }
     setExtraEdges(prev => prev.filter(e => !(e.tgtNodeId === nodeId && e.tgtFieldPath === fieldPath)));
-  }, [edges, getEdgeTargetFieldPath, removeExistingEdge]);
+    // If the row has a saved celExpr or segments template (e.g. an op-node connection), clear it
+    // so the field becomes editable instead of showing "invalid CEL".
+    const row = nodeMap.get(nodeId)?.rows.find(r => r.fieldPath === fieldPath);
+    if (row && (row.celExpr || row.segments)) {
+      setFieldEdits(prev => [
+        ...prev.filter(e => !(e.nodeId === nodeId && e.fieldPath === fieldPath)),
+        { nodeId, fieldPath, template: '' },
+      ]);
+    }
+  }, [edges, getEdgeTargetFieldPath, removeExistingEdge, nodeMap]);
 
   const onOpInputPortClick = useCallback((id: string, portName: string) => {
     setExtraEdges(prev => prev.filter(e => !(e.tgtNodeId === id && e.tgtFieldPath === portName)));
@@ -1047,7 +1023,12 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     if (bgWasClean.current && !hasPanned.current) { setSelected(null); }
     bgWasClean.current = false;
     isPanDragging.current = false;
+    const upOpDragId = opDragId.current;
     dragId.current = null; opDragId.current = null; opResizeId.current = null; setActive(false);
+    if (upOpDragId && !opHasDragged.current) {
+      setSelected(prev => prev === upOpDragId ? null : upOpDragId);
+    }
+    opHasDragged.current = false;
     if (drawing) {
       if (hoverTarget?.fieldPath) {
         // Block connecting tainted op nodes directly to resource fields
@@ -1265,15 +1246,26 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     // Mark for deletion at save time (template: '' means delete in applyFieldEditsToInput).
     // Also clean up any prior edits for this path and all descendant paths.
     const isDescendantOrSelf = (p: string) => p === fieldPath || p.startsWith(fieldPath + '.');
+    const reindex = (p: string) => reindexPathAfterDelete(fieldPath, p);
     setFieldEdits(prev => [
-      ...prev.filter(e => !(e.nodeId === nodeId && isDescendantOrSelf(e.fieldPath))),
+      ...prev
+        .filter(e => !(e.nodeId === nodeId && isDescendantOrSelf(e.fieldPath)))
+        .map(e => e.nodeId === nodeId ? { ...e, fieldPath: reindex(e.fieldPath) } : e),
       { nodeId, fieldPath, template: '' },
     ]);
-    // Remove extra edges that referenced this field or any of its descendants.
-    setExtraEdges(prev => prev.filter(e =>
-      !(e.tgtNodeId === nodeId && isDescendantOrSelf(e.tgtFieldPath)) &&
-      !(e.srcNodeId === nodeId && isDescendantOrSelf(e.srcFieldPath))
-    ));
+    // Remove extra edges that referenced this field or any of its descendants,
+    // and renumber surviving sibling paths.
+    setExtraEdges(prev => prev
+      .filter(e =>
+        !(e.tgtNodeId === nodeId && isDescendantOrSelf(e.tgtFieldPath)) &&
+        !(e.srcNodeId === nodeId && isDescendantOrSelf(e.srcFieldPath))
+      )
+      .map(e => ({
+        ...e,
+        tgtFieldPath: e.tgtNodeId === nodeId ? reindex(e.tgtFieldPath) : e.tgtFieldPath,
+        srcFieldPath: e.srcNodeId === nodeId ? reindex(e.srcFieldPath) : e.srcFieldPath,
+      }))
+    );
   }, []);
 
   const handleAddResource = useCallback(() => {
@@ -1393,8 +1385,11 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           <IconButton size="small"
             onClick={() => {
               if (nodes.some(n => n.id === DRAFT_NODE_ID)) return;
-              const rightmost = nodes.reduce((max, n) => Math.max(max, n.x + n.w), 0);
-              setNodes(prev => [...prev, { id: DRAFT_NODE_ID, type: 'draft', label: '', rows: [], x: rightmost + HG, y: 40, w: NW, h: 220 }]);
+              const cW = containerRef.current?.clientWidth ?? 800;
+              const cH = containerRef.current?.clientHeight ?? 480;
+              const cx = (cW / 2 - pan.x) / zoom - NW / 2;
+              const cy = (cH / 2 - pan.y) / zoom - 110;
+              setNodes(prev => [...prev, { id: DRAFT_NODE_ID, type: 'draft', label: '', rows: [], x: cx, y: cy, w: NW, h: 220 }]);
               setAddForm({ id: '', apiVersion: '', kind: '', mode: 'template', refLookup: 'name', refName: '', refLabels: [] });
             }}
             sx={{ bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'action.hover' } }}>
@@ -1409,38 +1404,25 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           </IconButton>
         </Tooltip>
         {addOpForm !== null && (
-          <Paper elevation={4} onMouseDown={e => e.stopPropagation()} sx={{
-            position: 'absolute', top: 40, right: 8, zIndex: 20,
-            p: 0.75, display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 120,
-            border: `1px solid ${alpha(userC, 0.3)}`,
-          }}>
-            {Object.values(EXPR_NODE_DEFS).map(def => (
-              <Box key={def.category} component="button"
-                onClick={() => {
-                  const cW = containerRef.current?.clientWidth ?? 800;
-                  const cH = containerRef.current?.clientHeight ?? 480;
-                  const nx = (cW * 0.6 - pan.x) / zoom;
-                  const ny = (cH * 0.5 - pan.y) / zoom;
-                  setOpNodes(prev => [...prev, {
-                    id: `op-${Date.now()}`,
-                    category: def.category,
-                    op: def.defaultOp,
-                    x: nx, y: ny,
-                    literals: {},
-                  }]);
-                  setDirtyOps(true);
-                  setAddOpForm(null);
-                }}
-                sx={{
-                  fontFamily: 'monospace', fontSize: '0.65rem', px: 0.75, py: 0.35,
-                  borderRadius: 0.5, border: `1px solid ${alpha(userC, 0.3)}`,
-                  bgcolor: 'transparent', color: userC, cursor: 'pointer', textAlign: 'left',
-                  '&:hover': { bgcolor: alpha(userC, 0.1) },
-                }}>
-                {def.label}
-              </Box>
-            ))}
-          </Paper>
+          <OpNodePalette
+            userC={userC}
+            onAdd={def => {
+              const cW = containerRef.current?.clientWidth ?? 800;
+              const cH = containerRef.current?.clientHeight ?? 480;
+              const nx = (cW * 0.6 - pan.x) / zoom;
+              const ny = (cH * 0.5 - pan.y) / zoom;
+              setOpNodes(prev => [...prev, {
+                id: `op-${Date.now()}`,
+                category: def.category,
+                op: def.defaultOp,
+                x: nx, y: ny,
+                literals: {},
+              }]);
+              setDirtyOps(true);
+              setAddOpForm(null);
+            }}
+            onClose={() => setAddOpForm(null)}
+          />
         )}
         {isDirty && (
           <Tooltip title={
@@ -1543,7 +1525,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             <Typography variant="caption" sx={{ fontSize: '0.64rem', opacity: 0.65 }}>{cfg.label}</Typography>
           </Box>
         ))}
-        {drawing && <Typography variant="caption" sx={{ fontSize: '0.62rem', color: userC, ml: 0.5 }}>drop on an existing field or a suggested field below the node</Typography>}
+        {drawing && <Typography variant="caption" sx={{ fontSize: '0.62rem', color: userC, ml: 0.5 }}>drop on the left side of another node to connect</Typography>}
       </Box>
 
       {/* Canvas */}
@@ -1568,12 +1550,16 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             const edgeTargetFp = getEdgeTargetFieldPath(e);
             const isDeleted = !!edgeTargetFp &&
               fieldEdits.some(fe => fe.nodeId === e.target && fe.fieldPath === edgeTargetFp && fe.template === '');
-            const sy = srcPortY(src, e.srcPortPath);
-            const ty = tgtPortY(tgt, e.tgtPortKey);
+            const srcExpanded = !drawing && (src.id === selected || src.id === drawingHoverNodeId);
+            const tgtExpanded = !drawing && (tgt.id === selected || tgt.id === drawingHoverNodeId);
+            const srcOff = srcExpanded ? sectionAddBarOffset(src) : 0;
+            const tgtOff = tgtExpanded ? sectionAddBarOffset(tgt) : 0;
+            const sy = srcPortY(src, e.srcPortPath, srcOff);
+            const ty = tgtPortY(tgt, e.tgtPortKey, tgtOff);
             const isSelfLoop = e.source === e.target;
             const d = isSelfLoop
               ? makeBezier(src.x + src.w, sy, src.x, ty)
-              : bezierPath(src, tgt, e);
+              : bezierPath(src, tgt, e, srcOff, tgtOff);
             const mx = isSelfLoop ? src.x + src.w + 24 : (src.x + src.w + tgt.x) / 2;
             const my = (sy + ty) / 2;
             const col = nodeColor(e.source);
@@ -1581,7 +1567,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               <g key={e.id}>
                 <path d={d} fill="none" stroke={col}
                   strokeWidth={isLit ? 3 : 1.75}
-                  strokeOpacity={isDeleted ? 0.2 : isLit ? 1 : tokenHover ? 0.25 : isHov ? 0.9 : 0.75}
+                  strokeOpacity={isDeleted ? 0.2 : isLit ? 1 : tokenHover ? 0.25 : relatedNodeIds && (!relatedNodeIds.has(e.source) || !relatedNodeIds.has(e.target)) ? 0.08 : isHov ? 0.9 : 0.75}
                   strokeDasharray={isDeleted ? '4 4' : undefined}
                   markerEnd={isDeleted ? undefined : `url(#${eid}-${src.type})`}
                   style={{ transition: 'stroke-opacity 0.15s, stroke-width 0.15s' }} />
@@ -1638,7 +1624,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               }
             } else {
               sx2 = src!.x + src!.w;
-              sy2 = extraPortY(src!, e.srcFieldPath);
+              const srcExp = !drawing && (src!.id === selected || src!.id === drawingHoverNodeId);
+              sy2 = extraPortY(src!, e.srcFieldPath, srcExp ? sectionAddBarOffset(src!) : 0);
             }
             let tx2: number;
             let ty2: number;
@@ -1656,7 +1643,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               ty2 = opNodeInputPortY(tgtOp, portIdx) + tgtOffset;
             } else {
               tx2 = tgt!.x;
-              ty2 = extraPortY(tgt!, e.tgtFieldPath);
+              const tgtExp = !drawing && (tgt!.id === selected || tgt!.id === drawingHoverNodeId);
+              ty2 = extraPortY(tgt!, e.tgtFieldPath, tgtExp ? sectionAddBarOffset(tgt!) : 0);
             }
             const col2 = srcOp ? userC : nodeColor(e.srcNodeId);
             const markerKey = srcOp ? 'user' : (src?.type ?? 'kro-resource');
@@ -1665,7 +1653,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               <g key={e.id}>
                 <path d={d} fill="none" stroke={col2}
                   strokeWidth={isLit ? 3 : 1.75}
-                  strokeOpacity={isLit ? 1 : tokenHover ? 0.25 : isHov ? 0.9 : 0.75}
+                  strokeOpacity={isLit ? 1 : tokenHover ? 0.25 : relatedNodeIds && (!relatedNodeIds.has(e.srcNodeId) || !relatedNodeIds.has(e.tgtNodeId)) ? 0.08 : isHov ? 0.9 : 0.75}
                   strokeDasharray={savedEdgeIds.has(e.id) ? undefined : '6 3'} markerEnd={`url(#${eid}-${markerKey})`}
                   style={{ transition: 'stroke-opacity 0.15s, stroke-width 0.15s' }} />
                 {/* Wide transparent hit path */}
@@ -1712,6 +1700,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onClick={onNodeClick}
             onPortDown={onPortDown}
             potentialFields={allSuggestionsMap.get(n.id) ?? []}
+            allSchemaFields={allSchemaFieldsMap.get(n.id)}
             isExpanded={selected === n.id || drawingHoverNodeId === n.id}
             onPotentialFieldClick={onPotentialFieldClick}
             onTokenHover={setTokenHover}
@@ -1721,6 +1710,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onDeleteRow={onDeleteRow}
             mapParentPaths={allMapPathsMap.get(n.id)}
             arrayParentPaths={allArrayPathsMap.get(n.id)}
+            preserveUnknownParentPaths={allPreserveUnknownPathsMap.get(n.id)}
             onAddArrayItem={addArrayItemToNode}
             onAddSectionItem={onAddSectionItem}
             nodeTypeByRef={nodeTypeByRef}
@@ -1732,6 +1722,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             activeOutPaths={activeOutPathsByNode.get(n.id)}
             opConnectedFields={opConnectedFieldsByNode.get(n.id)}
             onValueEdit={onValueEdit}
+            dimmed={relatedNodeIds !== null && !relatedNodeIds.has(n.id)}
           />
         ))}
 
@@ -1743,6 +1734,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             dark={dark}
             userC={userC}
             isDrawing={!!drawing}
+            selected={selected === opNode.id}
             connectedPortInfo={connectedPortInfoByOpId.get(opNode.id) ?? new Map()}
             onNodeDown={onOpNodeDown}
             onOutputPortDown={onOpNodeOutputPortDown}
@@ -1762,6 +1754,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onVarFieldPortDown={onVarFieldPortDown}
             hasVarFieldConnection={(vf) => extraEdges.some(e => e.srcNodeId === opNode.id && e.srcFieldPath === `${VAR_FIELD_PREFIX}${vf}`)}
             opNodesById={opNodesById}
+            dimmed={relatedNodeIds !== null && !relatedNodeIds.has(opNode.id)}
           />
         ))}
       </div>

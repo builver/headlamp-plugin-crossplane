@@ -4,6 +4,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   compare: {
     category: 'compare',
     label: 'Compare',
+    group: 'Logic',
     defaultOp: '==',
     ops: [
       { op: '==', label: '==' },
@@ -20,24 +21,36 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
     outputType: 'boolean',
     toCel: (op, inputs) => `(${inputs['A']} ${op} ${inputs['B']})`,
   },
-  logic: {
-    category: 'logic',
-    label: 'Logic',
+  and: {
+    category: 'and',
+    label: 'And',
+    group: 'Logic',
     defaultOp: '&&',
-    ops: [
-      { op: '&&', label: '&&' },
-      { op: '||', label: '||' },
-    ],
+    ops: [{ op: '&&', label: '&&' }],
     inputs: [
       { name: 'A', label: 'A', type: 'boolean' },
       { name: 'B', label: 'B', type: 'boolean' },
     ],
     outputType: 'boolean',
-    toCel: (op, inputs) => `(${inputs['A']} ${op} ${inputs['B']})`,
+    toCel: (_op, inputs) => `(${inputs['A']} && ${inputs['B']})`,
+  },
+  or: {
+    category: 'or',
+    label: 'Or',
+    group: 'Logic',
+    defaultOp: '||',
+    ops: [{ op: '||', label: '||' }],
+    inputs: [
+      { name: 'A', label: 'A', type: 'boolean' },
+      { name: 'B', label: 'B', type: 'boolean' },
+    ],
+    outputType: 'boolean',
+    toCel: (_op, inputs) => `(${inputs['A']} || ${inputs['B']})`,
   },
   not: {
     category: 'not',
     label: 'Not',
+    group: 'Logic',
     defaultOp: '!',
     ops: [{ op: '!', label: '!' }],
     inputs: [{ name: 'A', label: 'A', type: 'boolean' }],
@@ -47,6 +60,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   conditional: {
     category: 'conditional',
     label: 'Conditional',
+    group: 'Logic',
     defaultOp: '?:',
     ops: [{ op: '?:', label: '?:' }],
     inputs: [
@@ -60,6 +74,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'optional-or-value': {
     category: 'optional-or-value',
     label: 'orValue',
+    group: 'String',
     defaultOp: 'orValue',
     ops: [{ op: 'orValue', label: 'orValue' }],
     inputs: [
@@ -72,6 +87,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'string-replace': {
     category: 'string-replace',
     label: 'Replace',
+    group: 'String',
     defaultOp: 'replace',
     ops: [{ op: 'replace', label: 'replace' }],
     inputs: [
@@ -85,6 +101,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'string-concat': {
     category: 'string-concat',
     label: 'Concat',
+    group: 'String',
     defaultOp: '+',
     ops: [{ op: '+', label: '+' }],
     inputs: [
@@ -101,6 +118,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'has-value': {
     category: 'has-value',
     label: 'hasValue',
+    group: 'String',
     defaultOp: 'hasValue',
     ops: [{ op: 'hasValue', label: 'hasValue' }],
     inputs: [
@@ -112,6 +130,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   exists: {
     category: 'exists',
     label: 'exists',
+    group: 'Collection',
     defaultOp: 'exists',
     ops: [{ op: 'exists', label: 'exists' }],
     inputs: [
@@ -127,6 +146,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   map: {
     category: 'map',
     label: 'map',
+    group: 'Collection',
     defaultOp: 'map',
     ops: [{ op: 'map', label: 'map' }],
     inputs: [
@@ -142,6 +162,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   filter: {
     category: 'filter',
     label: 'filter',
+    group: 'Collection',
     defaultOp: 'filter',
     ops: [{ op: 'filter', label: 'filter' }],
     inputs: [
@@ -157,6 +178,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   all: {
     category: 'all',
     label: 'all',
+    group: 'Collection',
     defaultOp: 'all',
     ops: [{ op: 'all', label: 'all' }],
     inputs: [
@@ -172,6 +194,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   sortBy: {
     category: 'sortBy',
     label: 'sortBy',
+    group: 'Collection',
     defaultOp: 'sortBy',
     ops: [{ op: 'sortBy', label: 'sortBy' }],
     inputs: [
@@ -187,6 +210,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   join: {
     category: 'join',
     label: 'join',
+    group: 'String',
     defaultOp: 'join',
     ops: [{ op: 'join', label: 'join' }],
     inputs: [
@@ -199,6 +223,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   size: {
     category: 'size',
     label: 'size',
+    group: 'Collection',
     defaultOp: 'size',
     ops: [{ op: 'size', label: 'size' }],
     inputs: [
@@ -210,6 +235,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   split: {
     category: 'split',
     label: 'split',
+    group: 'String',
     defaultOp: 'split',
     ops: [{ op: 'split', label: 'split' }],
     inputs: [
@@ -222,6 +248,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'string-case': {
     category: 'string-case',
     label: 'Case',
+    group: 'String',
     defaultOp: 'lowerAscii',
     ops: [
       { op: 'lowerAscii', label: 'lower' },
@@ -238,6 +265,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'string-pred': {
     category: 'string-pred',
     label: 'StrTest',
+    group: 'String',
     defaultOp: 'contains',
     ops: [
       { op: 'contains',   label: 'contains' },
@@ -256,6 +284,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   substring: {
     category: 'substring',
     label: 'substr',
+    group: 'String',
     defaultOp: 'substring',
     ops: [{ op: 'substring', label: 'substr' }],
     inputs: [
@@ -269,6 +298,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'type-convert': {
     category: 'type-convert',
     label: 'Convert',
+    group: 'Type / Math',
     defaultOp: 'string',
     ops: [
       { op: 'string', label: 'str'  },
@@ -284,6 +314,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   math: {
     category: 'math',
     label: 'Math',
+    group: 'Type / Math',
     defaultOp: '*',
     ops: [
       { op: '*', label: '×' },
@@ -300,6 +331,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'list-unary': {
     category: 'list-unary',
     label: 'List',
+    group: 'Collection',
     defaultOp: 'sort',
     ops: [
       { op: 'sort',     label: 'sort'  },
@@ -316,6 +348,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'list-aggregate': {
     category: 'list-aggregate',
     label: 'Agg',
+    group: 'Collection',
     defaultOp: 'sum',
     ops: [
       { op: 'sum', label: 'sum' },
@@ -331,6 +364,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   merge: {
     category: 'merge',
     label: 'merge',
+    group: 'Collection',
     defaultOp: 'merge',
     ops: [{ op: 'merge', label: 'merge' }],
     inputs: [
@@ -343,6 +377,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'json-marshal': {
     category: 'json-marshal',
     label: 'json.marshal',
+    group: 'Type / Math',
     defaultOp: 'marshal',
     ops: [{ op: 'marshal', label: 'marshal' }],
     inputs: [
@@ -354,6 +389,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'json-unmarshal': {
     category: 'json-unmarshal',
     label: 'json.unmarshal',
+    group: 'Type / Math',
     defaultOp: 'unmarshal',
     ops: [{ op: 'unmarshal', label: 'unmarshal' }],
     inputs: [
@@ -365,6 +401,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'lists-range': {
     category: 'lists-range',
     label: 'lists.range',
+    group: 'Collection',
     defaultOp: 'range',
     ops: [{ op: 'range', label: 'range' }],
     inputs: [
@@ -376,6 +413,7 @@ export const EXPR_NODE_DEFS: Record<string, NodeDef> = {
   'raw-template': {
     category: 'raw-template',
     label: 'Template',
+    group: 'Advanced',
     defaultOp: 'template',
     ops: [{ op: 'template', label: 'T' }],
     inputs: [],

@@ -1,141 +1,22 @@
 import { Icon } from '@iconify/react';
 import { Autocomplete, Box, Button, IconButton, Paper, TextField, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
-import { Fragment, memo, MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DOT, HEADER_H, NODE_CFG, NODE_MIN_H, refAccent, refToNodeId, ROW_H, USER_C_DARK, USER_C_LIGHT } from './constants';
-
-function normalizePath(p: string) { return p.trim().replace(/\[(\d+)\]/g, '.$1'); }
+import { PortDot } from './PortDot';
+import { sectionOf, sectionRelPath } from './sectionDefs';
+import { SegmentedControl } from './SegmentedControl';
 import { AddForm, FieldSuggestion, GNode, KindOption, NodeType, TokenHover, TRow } from './types';
 import { abbrevType } from './typeUtils';
+import { VarPill } from './VarPill';
 
-// ── SegmentedControl ──────────────────────────────────────────────────────────
+function normalizePath(p: string) { return p.trim().replace(/\[(\d+)\]/g, '.$1'); }
 
-export interface SegmentedControlProps<T extends string> {
-  options: ReadonlyArray<{ value: T; label: string }>;
-  value: T;
-  onChange: (v: T) => void;
-  py?: number;
-}
-
-export function SegmentedControl<T extends string>({ options, value, onChange, py = 0.4 }: SegmentedControlProps<T>) {
-  return (
-    <Box sx={{ display: 'flex', border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
-      {options.map((opt, i) => (
-        <Box key={opt.value} onClick={() => onChange(opt.value)}
-          sx={{
-            flex: 1, textAlign: 'center', py, cursor: 'pointer', fontSize: '0.67rem',
-            fontWeight: value === opt.value ? 700 : 400,
-            bgcolor: value === opt.value ? 'action.selected' : 'transparent',
-            color: value === opt.value ? 'text.primary' : 'text.secondary',
-            '&:hover': { bgcolor: value === opt.value ? 'action.selected' : 'action.hover' },
-            transition: 'background-color 0.15s',
-            ...(i < options.length - 1 ? { borderRight: '1px solid', borderColor: 'divider' } : {}),
-          }}
-        >
-          {opt.label}
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
-// ── PortDot ───────────────────────────────────────────────────────────────────
-
-/**
- * A single connector dot on a node. Manages its own hover state and shows an ×
- * indicator when the port has an active connection and the user hovers over it.
- * Used by NodeCard (left/right dots) and ExprOpNodeCard (input/output dots).
- */
-export function PortDot({ color, right, top, dark, hasConnection, isDrawing, defaultCursor = 'crosshair', onMouseDown, onMouseUp, onClick }: {
-  color: string; right: boolean; top: number; dark: boolean;
-  /** Whether this port currently has at least one active edge — shows × on hover and changes cursor. */
-  hasConnection: boolean;
-  isDrawing: boolean;
-  defaultCursor?: string;
-  onMouseDown?: (e: MouseEvent) => void;
-  onMouseUp?: (e: MouseEvent) => void;
-  onClick?: (e: MouseEvent) => void;
-}) {
-  return (
-    <div role="button" tabIndex={-1}
-      style={{
-        position: 'absolute',
-        ...(right ? { right: -DOT / 2 } : { left: -DOT / 2 }),
-        top, width: DOT, height: DOT, borderRadius: '50%',
-        background: color, border: `2px solid ${dark ? '#1a1a1a' : '#fff'}`, zIndex: 3,
-        cursor: hasConnection && !isDrawing ? 'pointer' : defaultCursor,
-      }}
-      onMouseDown={onMouseDown}
-      onMouseUp={onMouseUp}
-      onClick={onClick}
-      onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && onClick) onClick(e as unknown as MouseEvent); }}
-    />
-  );
-}
-
-// ── VarPill ───────────────────────────────────────────────────────────────────
-
-export interface VarPillProps {
-  color: string;
-  label: string;
-  tooltip?: string;
-  optional?: boolean;
-  onToggleOptional?: (e: MouseEvent) => void;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-  /** Abbreviated type rendered as a faint sub-pill inside (e.g. "str", "bool") */
-  typeSuffix?: string;
-}
-
-export const VarPill = memo(function VarPill({
-  color, label, tooltip, optional, onToggleOptional,
-  onMouseEnter, onMouseLeave, typeSuffix,
-}: VarPillProps) {
-  const pill = (
-    <Box
-      component="span"
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-      sx={{
-        display: 'inline-flex', alignItems: 'center', gap: 0.25,
-        fontFamily: 'monospace', fontSize: '0.57rem', lineHeight: 1,
-        px: 0.5, py: 0.15, borderRadius: 0.5, flexShrink: 0,
-        bgcolor: alpha(color, 0.12), color,
-        border: `1px solid ${alpha(color, 0.3)}`,
-        cursor: 'default', overflow: 'hidden',
-      }}
-    >
-      <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {label}
-      </Box>
-      {optional !== undefined && onToggleOptional && (
-        <Box component="span" role="button" tabIndex={-1}
-          onMouseDown={e => e.stopPropagation()}
-          onClick={e => { e.stopPropagation(); onToggleOptional(e); }}
-          sx={{
-            cursor: 'pointer', fontFamily: 'monospace', fontSize: '0.6rem', lineHeight: 1, flexShrink: 0,
-            color: optional ? color : 'action.disabled',
-            '&:hover': { color },
-          }}>?</Box>
-      )}
-      {typeSuffix && (
-        <Box component="span" sx={{
-          fontFamily: 'monospace', fontSize: '0.5rem', lineHeight: 1,
-          px: 0.4, borderRadius: 0.4, flexShrink: 0,
-          border: `1px solid ${alpha(color, 0.25)}`, color, opacity: 0.5,
-        }}>
-          {typeSuffix}
-        </Box>
-      )}
-    </Box>
-  );
-  if (!tooltip) return pill;
-  return (
-    <Tooltip title={tooltip} placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
-      {pill}
-    </Tooltip>
-  );
-});
+export type { SegmentedControlProps } from './SegmentedControl';
+export { SegmentedControl } from './SegmentedControl';
+export { PortDot } from './PortDot';
+export type { VarPillProps } from './VarPill';
+export { VarPill } from './VarPill';
 
 // ── NodeCard ──────────────────────────────────────────────────────────────────
 
@@ -151,6 +32,8 @@ export interface NodeCardProps {
   onPortDown: (e: MouseEvent, nodeId: string, fieldPath: string) => void;
   /** Schema fields not yet present on this node. Used for autocomplete (and ghost rows during edge drag). */
   potentialFields: FieldSuggestion[];
+  /** All schema fields for this node (including object-type), minus used paths. Used by the inline field picker. */
+  allSchemaFields?: FieldSuggestion[];
   /** True when the node is selected OR is the current edge-drag hover target. */
   isExpanded: boolean;
   onPotentialFieldClick: (nodeId: string, fieldPath: string) => void;
@@ -172,6 +55,8 @@ export interface NodeCardProps {
   unknownFieldPaths?: Set<string>;
   /** True when this node's schema could not be loaded — shown with a warning in the header. */
   noSchemaWarning?: boolean;
+  /** Paths where x-kubernetes-preserve-unknown-fields: true — free-form input at those paths. */
+  preserveUnknownParentPaths?: Set<string>;
   /** Called when the user clicks the `?` toggle on an inPort pill. */
   onToggleInPortOptional?: (nodeId: string, fieldPath: string) => void;
   /** Called when the user clicks "+" on a forEach / includeWhen / readyWhen section header. */
@@ -190,24 +75,29 @@ export interface NodeCardProps {
   opConnectedFields?: Map<string, { label: string; type?: string; srcNodeId: string }>;
   /** Called when the user edits a plain (non-connected) field value inline. */
   onValueEdit?: (nodeId: string, fieldPath: string, value: string) => void;
+  /** When true, the node is faded because it is not related to the selected node. */
+  dimmed?: boolean;
 }
 
 export const NodeCard = memo(function NodeCard({
   node, selected, dark, isDrawing, hoverRowIdx,
-  onMouseDown, onClick, onPortDown, potentialFields, isExpanded,
-  onPotentialFieldClick, onTokenHover, onTokenLeave, editedPaths, onDelete, onDeleteRow, mapParentPaths, arrayParentPaths, onAddArrayItem, nodeTypeByRef, unknownFieldPaths, noSchemaWarning, onToggleInPortOptional, onAddSectionItem, onPortClick, activeInPaths, activeOutPaths, opConnectedFields, onValueEdit,
+  onMouseDown, onClick, onPortDown, potentialFields, allSchemaFields, isExpanded,
+  onPotentialFieldClick, onTokenHover, onTokenLeave, editedPaths, onDelete, onDeleteRow, mapParentPaths, arrayParentPaths, onAddArrayItem, nodeTypeByRef, unknownFieldPaths, noSchemaWarning, preserveUnknownParentPaths, onToggleInPortOptional, onAddSectionItem, onPortClick, activeInPaths, activeOutPaths, opConnectedFields, onValueEdit,
+  dimmed,
 }: NodeCardProps) {
   const cfg   = NODE_CFG[node.type];
   const accent = dark ? cfg.accentDark : cfg.accent;
   const userC  = dark ? USER_C_DARK : USER_C_LIGHT;
-  const [hovered,        setHovered]        = useState(false);
-  const [showAddField,   setShowAddField]   = useState(false);
+  const [hovered,           setHovered]           = useState(false);
+  const [addingToParentPath, setAddingToParentPath] = useState<string | null>(null);
   const [addFieldInput,  setAddFieldInput]  = useState('');
   const [addSuggIdx,     setAddSuggIdx]     = useState(-1);
   const [addingToMap,       setAddingToMap]       = useState<string | null>(null);
   const [addMapKey,         setAddMapKey]         = useState('');
   const [addingSectionKey,  setAddingSectionKey]  = useState<string | null>(null);
   const [sectionVarInput,   setSectionVarInput]   = useState('');
+  const [addingForEachSubVarPath, setAddingForEachSubVarPath] = useState<string | null>(null);
+  const [subFieldInput,           setSubFieldInput]           = useState('');
   const [hoveredRowPath,    setHoveredRowPath]    = useState<string | null>(null);
   const [editingRowPath,    setEditingRowPath]    = useState<string | null>(null);
   const [editingValue,      setEditingValue]      = useState('');
@@ -219,23 +109,15 @@ export const NodeCard = memo(function NodeCard({
   };
 
   useEffect(() => {
-    if (!isExpanded && node.type !== 'env' && !noSchemaWarning) { setShowAddField(false); setAddFieldInput(''); setAddSuggIdx(-1); setAddingToMap(null); setAddMapKey(''); setAddingSectionKey(null); setSectionVarInput(''); setEditingRowPath(null); setEditingValue(''); }
+    if (!isExpanded && node.type !== 'env' && !noSchemaWarning) { setAddingToParentPath(null); setAddFieldInput(''); setAddSuggIdx(-1); setAddingToMap(null); setAddMapKey(''); setAddingSectionKey(null); setSectionVarInput(''); setAddingForEachSubVarPath(null); setSubFieldInput(''); setEditingRowPath(null); setEditingValue(''); }
   }, [isExpanded, node.type, noSchemaWarning]); // node.type is stable per instance; listed to satisfy exhaustive-deps
 
-  // Filtered suggestions for the resource/ref autocomplete add-field input
-  const filteredSuggs = useMemo(() => {
-    if (!showAddField || node.type === 'env' || noSchemaWarning) return [];
-    const q = normalizePath(addFieldInput).toLowerCase();
-    if (!q) return potentialFields.slice(0, 50);
-    return potentialFields.filter(s => s.path.toLowerCase().includes(q)).slice(0, 50);
-  }, [showAddField, addFieldInput, potentialFields, node.type, noSchemaWarning]);
-
-  useEffect(() => { setAddSuggIdx(-1); }, [filteredSuggs]);
-
-  const commitAdd = (rawPath: string) => {
-    const path = normalizePath(rawPath);
-    if (path) onPotentialFieldClick(node.id, path);
-    setShowAddField(false); setAddFieldInput(''); setAddSuggIdx(-1);
+  const commitInlineAdd = (relativeKey: string) => {
+    const key = relativeKey.trim();
+    if (!key) return;
+    const fullPath = addingToParentPath ? `${addingToParentPath}.${key}` : key;
+    onPotentialFieldClick(node.id, normalizePath(fullPath));
+    setAddingToParentPath(null); setAddFieldInput(''); setAddSuggIdx(-1);
   };
 
   const showPotentialDots = hovered || isDrawing;
@@ -243,28 +125,63 @@ export const NodeCard = memo(function NodeCard({
   // env: free-form add always; no-schema nodes: free-form add always; resource/ref: schema-autocomplete add when expanded (not during edge draw)
   const freeFormAdd = node.type === 'env' || !!noSchemaWarning;
   const showAddButton = freeFormAdd || (isExpanded && !isDrawing && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema'));
-  const displayH = (displayRows.length === 0 ? NODE_MIN_H : HEADER_H + displayRows.length * ROW_H + 8) + (showAddButton ? ROW_H : 0) + (addingSectionKey ? ROW_H : 0);
+  // Sections that could be added but don't yet exist on this node
+  const canAddSections = isExpanded && !isDrawing && !!onAddSectionItem && node.type === 'kro-resource';
+  const missingSections: Array<'forEach' | 'includeWhen' | 'readyWhen'> = canAddSections
+    ? (['forEach', 'includeWhen', 'readyWhen'] as const).filter(s => !displayRows.some(r => r.isSection && r.key === s))
+    : [];
+  const showSectionAdd = missingSections.length > 0;
+  // addingSectionKey adds a row only when showing inside an existing section header
+  const addingSectionKeyInHeader = !!addingSectionKey && displayRows.some(r => r.isSection && r.key === addingSectionKey);
+  const displayH = (displayRows.length === 0 ? NODE_MIN_H : HEADER_H + displayRows.length * ROW_H + 8) + (addingToParentPath !== null ? ROW_H : 0) + (addingSectionKeyInHeader ? ROW_H : 0) + (showSectionAdd ? ROW_H : 0) + (addingForEachSubVarPath !== null ? ROW_H : 0);
 
-  // Index in displayRows after which to render the inline map-key input row.
-  const addInputAfterIdx = useMemo(() => {
-    if (!addingToMap) return -1;
-    const parentIdx = displayRows.findIndex(r => r.fieldPath === addingToMap && r.isParent);
+  // Shared helper: index of the last row in displayRows that is a descendant of the row at fp.
+  const lastDescendantIdx = useCallback((fp: string): number => {
+    const parentIdx = displayRows.findIndex(r => r.fieldPath === fp);
     if (parentIdx < 0) return displayRows.length - 1;
     const parentDepth = displayRows[parentIdx].depth;
     let last = parentIdx;
     for (let i = parentIdx + 1; i < displayRows.length; i++) {
-      if (displayRows[i].depth > parentDepth) last = i;
-      else break;
+      if (displayRows[i].depth > parentDepth) last = i; else break;
     }
     return last;
-  }, [addingToMap, displayRows]);
+  }, [displayRows]);
+
+  // Index in displayRows after which to render the inline map-key input row.
+  const addInputAfterIdx      = useMemo(() => addingToMap ? lastDescendantIdx(addingToMap) : -1, [addingToMap, lastDescendantIdx]);
+  // Index in displayRows after which to render the inline field picker row.
+  const addParentInputAfterIdx = useMemo(() => (addingToParentPath !== null && addingToParentPath !== '') ? lastDescendantIdx(addingToParentPath) : -1, [addingToParentPath, lastDescendantIdx]);
+  // Index in displayRows after which to inject the forEach sub-field inline input.
+  const addForEachSubAfterIdx  = useMemo(() => addingForEachSubVarPath ? lastDescendantIdx(addingForEachSubVarPath) : -1, [addingForEachSubVarPath, lastDescendantIdx]);
+
+  // Inline field picker: options filtered to direct children of the active parent path.
+  // Uses allSchemaFields (includes object-type fields) when available; falls back to potentialFields.
+  const inlineOptions = useMemo(() => {
+    if (addingToParentPath === null) return [] as FieldSuggestion[];
+    const pfx = addingToParentPath ? `${addingToParentPath}.` : '';
+    const source = allSchemaFields ?? potentialFields;
+    return source.filter(s => s.path.startsWith(pfx) && s.path.slice(pfx.length).split('.').length === 1);
+  }, [addingToParentPath, potentialFields, allSchemaFields]);
+
+  const filteredInlineOptions = useMemo(() => {
+    const pfx = addingToParentPath ? `${addingToParentPath}.` : '';
+    if (!addFieldInput) return inlineOptions.slice(0, 30);
+    const q = addFieldInput.toLowerCase();
+    return inlineOptions.filter(s => s.path.slice(pfx.length).toLowerCase().includes(q)).slice(0, 30);
+  }, [inlineOptions, addFieldInput, addingToParentPath]);
+
+  // Free-form input when: no schema, preserve-unknown path, or no suggestions at this level.
+  const isFreeFormInline = noSchemaWarning
+    || (addingToParentPath !== null && addingToParentPath !== '' && (preserveUnknownParentPaths?.has(addingToParentPath) ?? false))
+    || inlineOptions.length === 0;
 
 
   return (
     <div
       role="button" tabIndex={0}
       style={{ position: 'absolute', left: node.x, top: node.y, width: node.w, height: displayH,
-        cursor: isDrawing ? 'crosshair' : 'grab', zIndex: 2 }}
+        cursor: isDrawing ? 'crosshair' : 'grab', zIndex: 2,
+        opacity: dimmed ? 0.25 : 1, transition: 'opacity 0.15s' }}
       onMouseDown={e => { e.stopPropagation(); onMouseDown(e, node.id); }}
       onClick={e => { e.stopPropagation(); onClick(node.id); }}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onClick(node.id); }}
@@ -274,7 +191,7 @@ export const NodeCard = memo(function NodeCard({
       {/* Port circles for rows */}
       {/* Port dots — unified over displayRows (includes ghost rows in their merged position) */}
       {displayRows.map((row, i) => {
-        const top = HEADER_H + i * ROW_H + ROW_H / 2 - DOT / 2;
+        const top = HEADER_H + (showSectionAdd ? ROW_H : 0) + i * ROW_H + ROW_H / 2 - DOT / 2;
         // Left (inPort) dot — shown when there's a committed CEL ref OR an unsaved ExtraEdge.
         const inColor = row.inPort
           ? refAccent(row.inPort.ref, dark)
@@ -350,12 +267,108 @@ export const NodeCard = memo(function NodeCard({
               <Icon icon="mdi:trash-can-outline" width={12} />
             </Box>
           )}
+          {showAddButton && (
+            <Box component="span" role="button" tabIndex={-1}
+              onMouseDown={e => e.stopPropagation()}
+              onClick={e => { e.stopPropagation(); setAddingToParentPath(prev => prev === '' ? null : ''); setAddFieldInput(''); setAddSuggIdx(-1); }}
+              sx={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 16, height: 16, borderRadius: 0.5, flexShrink: 0,
+                color: addingToParentPath === '' ? userC : alpha(accent, 0.6), cursor: 'pointer',
+                bgcolor: addingToParentPath === '' ? alpha(userC, 0.12) : 'transparent',
+                '&:hover': { color: userC, bgcolor: alpha(userC, 0.12) },
+              }}>
+              <Icon icon="mdi:plus" width={12} />
+            </Box>
+          )}
         </Box>
+
+        {showSectionAdd && (
+          <Box sx={{
+            height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+            borderBottom: `1px dashed ${alpha(accent, 0.2)}`,
+            px: 1, gap: 0.5,
+          }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            {addingSectionKey === 'forEach' && missingSections.includes('forEach') ? (
+              <input
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+                placeholder="forEach var name"
+                value={sectionVarInput}
+                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: '4px' }}
+                onChange={e => setSectionVarInput(e.target.value)}
+                onKeyDown={e => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') {
+                    const name = sectionVarInput.trim();
+                    if (name) onAddSectionItem!(node.id, 'forEach', name);
+                    setAddingSectionKey(null); setSectionVarInput('');
+                  } else if (e.key === 'Escape') {
+                    setAddingSectionKey(null); setSectionVarInput('');
+                  }
+                }}
+              />
+            ) : (
+              <>
+                <Icon icon="mdi:plus" width={9} style={{ color: accent, flexShrink: 0, opacity: 0.6 }} />
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.58rem', color: accent, opacity: 0.6, mr: 0.25 }}>section:</Typography>
+                {missingSections.map(sec => (
+                  <Box key={sec} component="span" role="button" tabIndex={-1}
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (sec === 'forEach') { setAddingSectionKey('forEach'); setSectionVarInput(''); }
+                      else { onAddSectionItem!(node.id, sec); }
+                    }}
+                    sx={{ display: 'inline-flex', alignItems: 'center', px: 0.5, py: 0.1, borderRadius: 0.3, cursor: 'pointer', fontSize: '0.58rem', fontFamily: 'monospace', color: accent, opacity: 0.65, border: `1px solid ${alpha(accent, 0.35)}`, '&:hover': { opacity: 1, bgcolor: alpha(accent, 0.1) } }}>
+                    {sec}
+                  </Box>
+                ))}
+              </>
+            )}
+          </Box>
+        )}
 
         {/* Rows — unified render of displayRows (includes ghost rows at correct hierarchy positions) */}
         {(() => {
           const mapParentDepth = displayRows.find(r => r.fieldPath === addingToMap && r.isParent)?.depth ?? 0;
           const mapInputIndent = 8 + (mapParentDepth + 1) * 10;
+          // Inline field picker input row (injected after parent's last child, or before all rows for top-level)
+          const inlineParentRow = addingToParentPath !== null && addingToParentPath !== ''
+            ? displayRows.find(r => r.fieldPath === addingToParentPath && r.isParent)
+            : undefined;
+          const inlinePickerDepth = inlineParentRow ? inlineParentRow.depth + 1 : 0;
+          const inlinePickerIndent = 8 + inlinePickerDepth * 10;
+          const inlinePickerInput = addingToParentPath !== null ? (
+            <Box key="inline-picker-input" sx={{ height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <input
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+                placeholder={isFreeFormInline ? 'field name' : 'type a field…'}
+                value={addFieldInput}
+                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: `${inlinePickerIndent}px` }}
+                onChange={e => { setAddFieldInput(e.target.value); setAddSuggIdx(-1); }}
+                onKeyDown={e => {
+                  e.stopPropagation();
+                  if (e.key === 'ArrowDown') { e.preventDefault(); setAddSuggIdx(idx => Math.min(idx + 1, filteredInlineOptions.length - 1)); }
+                  else if (e.key === 'ArrowUp') { e.preventDefault(); setAddSuggIdx(idx => Math.max(idx - 1, -1)); }
+                  else if (e.key === 'Enter') {
+                    if (!isFreeFormInline && addSuggIdx >= 0 && filteredInlineOptions[addSuggIdx]) {
+                      const pfx = addingToParentPath ? `${addingToParentPath}.` : '';
+                      commitInlineAdd(filteredInlineOptions[addSuggIdx].path.slice(pfx.length));
+                    } else {
+                      commitInlineAdd(addFieldInput.trim());
+                    }
+                  }
+                  else if (e.key === 'Escape') { setAddingToParentPath(null); setAddFieldInput(''); setAddSuggIdx(-1); }
+                }}
+                onBlur={() => { setTimeout(() => { setAddingToParentPath(null); setAddFieldInput(''); setAddSuggIdx(-1); }, 150); }}
+              />
+            </Box>
+          ) : null;
           const inlineMapInput = addingToMap ? (
             <Box key="inline-map-input" sx={{ height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
               onMouseDown={e => e.stopPropagation()}
@@ -382,7 +395,37 @@ export const NodeCard = memo(function NodeCard({
             </Box>
           ) : null;
 
-          return displayRows.map((row: TRow, i: number) => {
+          const inlineForEachSubInput = addingForEachSubVarPath ? (() => {
+            const varName = sectionRelPath(addingForEachSubVarPath);
+            const varRow = displayRows.find(r => r.fieldPath === addingForEachSubVarPath);
+            const subIndent = 8 + ((varRow ? varRow.depth + 1 : 2)) * 10;
+            return (
+              <Box key="inline-foreach-sub-input" sx={{ height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
+                onMouseDown={e => e.stopPropagation()}>
+                <input
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                  placeholder="field name"
+                  value={subFieldInput}
+                  style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: `${subIndent}px` }}
+                  onChange={e => setSubFieldInput(e.target.value)}
+                  onKeyDown={e => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      const sub = subFieldInput.trim();
+                      if (sub) onAddSectionItem!(node.id, 'forEach', varName + '.' + sub);
+                      setAddingForEachSubVarPath(null); setSubFieldInput('');
+                    } else if (e.key === 'Escape') {
+                      setAddingForEachSubVarPath(null); setSubFieldInput('');
+                    }
+                  }}
+                  onBlur={() => { setTimeout(() => { setAddingForEachSubVarPath(null); setSubFieldInput(''); }, 150); }}
+                />
+              </Box>
+            );
+          })() : null;
+
+          const rows = displayRows.map((row: TRow, i: number) => {
           const indent     = 8 + row.depth * 10;
           const hasIn      = !!row.inPort;
           const hasOut     = !!row.outPort;
@@ -396,16 +439,24 @@ export const NodeCard = memo(function NodeCard({
           const isHov      = i === hoverRowIdx && !row.isParent;
           const isEdited   = !row.isParent && !!row.fieldPath && editedPaths.has(node.id + '::' + row.fieldPath);
           const amberC     = dark ? '#ffd54f' : '#f57f17';
-          const isEditable = isExpanded && !isDrawing && !row.isParent && !row.isSection && !row.isForEachRef && !isGhost && !hasIn && !hasSeg && !hasCelExpr && !(activeInPaths?.has(row.fieldPath ?? '')) && !!row.fieldPath && !!onValueEdit;
+          const isEditable = isExpanded && !isDrawing && !row.isParent && !row.isSection && !row.isForEachSubField && !isGhost && !hasIn && !hasSeg && !hasCelExpr && !(activeInPaths?.has(row.fieldPath ?? '')) && !!row.fieldPath && !!onValueEdit;
           const isEditing  = isEditable && editingRowPath === row.fieldPath;
+          // True for top-level forEach variable rows (e.g. _forEach.role, not _forEach.role.name)
+          const isForEachVarRow = !!(row.fieldPath && sectionOf(row.fieldPath) === 'forEach' && !sectionRelPath(row.fieldPath).includes('.'));
+          const forEachSubAddBtn = isForEachVarRow && isExpanded && !isDrawing && onAddSectionItem
+            ? <Box component="span" role="button" tabIndex={-1}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => { e.stopPropagation(); setAddingForEachSubVarPath(row.fieldPath!); setSubFieldInput(''); setAddingSectionKey(null); }}
+                sx={{ display: 'inline-flex', alignItems: 'center', px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.45, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }}>
+                <Icon icon="mdi:plus" width={9} />
+              </Box>
+            : null;
 
           // Section-header rows (forEach / includeWhen / readyWhen labels)
           if (row.isSection) {
             const secKey = row.key as 'forEach' | 'includeWhen' | 'readyWhen';
             const isFE = secKey === 'forEach';
-            const sectionPrefix = `_${secKey}.`;
-            const sectionFull = !isFE && displayRows.some(r => !r.isSection && r.fieldPath?.startsWith(sectionPrefix));
-            const canAdd = isExpanded && !isDrawing && !!onAddSectionItem && (isFE || !sectionFull);
+            const canAdd = isExpanded && !isDrawing && !!onAddSectionItem;
             const inputOpen = addingSectionKey === secKey;
             return (
               <Fragment key={`section-${i}`}>
@@ -455,26 +506,6 @@ export const NodeCard = memo(function NodeCard({
                   </Box>
                 )}
               </Fragment>
-            );
-          }
-
-          // forEach variable usage reference rows — indented sub-rows showing where a var is used
-          if (row.isForEachRef) {
-            return (
-              <Box key={`feref-${i}`} sx={{
-                height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5,
-                borderTop: `1px solid ${alpha(accent, 0.08)}`,
-                bgcolor: dark ? alpha(accent, 0.04) : alpha(accent, 0.02),
-                pl: `${indent}px`, overflow: 'hidden',
-              }}>
-                <Icon icon="mdi:arrow-right-thin" width={10} style={{ color: accent, opacity: 0.55, flexShrink: 0 }} />
-                <Typography variant="caption" noWrap sx={{
-                  fontFamily: 'monospace', fontSize: '0.6rem',
-                  color: dark ? alpha(accent, 0.7) : alpha(accent, 0.8),
-                }}>
-                  {row.value}
-                </Typography>
-              </Box>
             );
           }
 
@@ -530,6 +561,7 @@ export const NodeCard = memo(function NodeCard({
 
           const isNumericParent = row.isParent && /^\d+$/.test(row.key);
           const isRowHovered = isExpanded && (!row.isParent || isNumericParent) && !!row.fieldPath && hoveredRowPath === row.fieldPath;
+          const displayKey = /^\d+$/.test(row.key) ? `[${row.key}]:` : `${row.key}:`;
           return (
             <Fragment key={i}>
             <Box sx={{
@@ -572,7 +604,7 @@ export const NodeCard = memo(function NodeCard({
                     {isExpanded && !arrayParentPaths?.has(row.fieldPath ?? '') && !mapParentPaths?.has(row.fieldPath ?? '') && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema') && (
                       <Box component="span" role="button" tabIndex={-1}
                         onMouseDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); setShowAddField(true); setAddFieldInput((row.fieldPath ?? '') + '.'); setAddSuggIdx(-1); }}
+                        onClick={e => { e.stopPropagation(); setAddingToParentPath(row.fieldPath!); setAddFieldInput(''); setAddSuggIdx(-1); }}
                         sx={{ display: 'inline-flex', alignItems: 'center', px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }}
                       >
                         <Icon icon="mdi:plus" width={9} />
@@ -591,7 +623,7 @@ export const NodeCard = memo(function NodeCard({
                 ) : hasSeg ? (
                   // Composed CEL string — render as inline token pills
                   <>
-                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{row.key}:</Typography>
+                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{displayKey}</Typography>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, overflow: 'hidden', flexWrap: 'nowrap', minWidth: 0 }}>
                       {row.segments!.map((seg, si) => {
                         if (seg.kind === 'literal') {
@@ -600,6 +632,23 @@ export const NodeCard = memo(function NodeCard({
                               sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.55, flexShrink: 0 }}>
                               {seg.text}
                             </Typography>
+                          );
+                        }
+                        if (seg.text === 'expr') {
+                          const rawExpr = `\${${seg.srcRef}.${seg.srcPath}}`;
+                          return (
+                            <Tooltip key={si} title={`Invalid or unrecognized CEL: ${rawExpr}`} placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
+                              <Box component="span" sx={{
+                                display: 'inline-flex', alignItems: 'center', gap: 0.25,
+                                fontFamily: 'monospace', fontSize: '0.57rem', lineHeight: 1,
+                                px: 0.5, py: 0.15, borderRadius: 0.5, flexShrink: 0,
+                                bgcolor: alpha('#ef4444', 0.08), color: '#ef4444',
+                                border: `1px solid ${alpha('#ef4444', 0.3)}`,
+                              }}>
+                                <Icon icon="mdi:alert-circle-outline" width={9} />
+                                <Box component="span">invalid CEL</Box>
+                              </Box>
+                            </Tooltip>
                           );
                         }
                         const segColor = refAccent(seg.srcRef!, dark, nodeTypeByRef?.get(seg.srcRef!));
@@ -619,10 +668,26 @@ export const NodeCard = memo(function NodeCard({
                 ) : hasCelExpr ? (
                   // Complex CEL expression driven by an op-node — show key label + op-node VarPill
                   <>
-                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{row.key}:</Typography>
+                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{displayKey}</Typography>
                     {(() => {
                       const opInfo = row.fieldPath ? opConnectedFields?.get(row.fieldPath) : undefined;
-                      if (!opInfo) return null;
+                      if (!opInfo) {
+                        const rawExpr = row.celExpr ?? '';
+                        return (
+                          <Tooltip title={`Invalid or unrecognized CEL: ${rawExpr}`} placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
+                            <Box component="span" sx={{
+                              display: 'inline-flex', alignItems: 'center', gap: 0.25,
+                              fontFamily: 'monospace', fontSize: '0.57rem', lineHeight: 1,
+                              px: 0.5, py: 0.15, borderRadius: 0.5, flexShrink: 0,
+                              bgcolor: alpha('#ef4444', 0.08), color: '#ef4444',
+                              border: `1px solid ${alpha('#ef4444', 0.3)}`,
+                            }}>
+                              <Icon icon="mdi:alert-circle-outline" width={9} />
+                              <Box component="span">invalid CEL</Box>
+                            </Box>
+                          </Tooltip>
+                        );
+                      }
                       return (
                         <VarPill
                           color={userC}
@@ -638,21 +703,23 @@ export const NodeCard = memo(function NodeCard({
                 ) : hasIn ? (
                   // Pure single-ref CEL (inPort) — render as a source-field pill
                   <>
-                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{row.key}:</Typography>
+                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{displayKey}</Typography>
                     <VarPill
                       color={pa}
                       label={row.inPort!.srcShort}
                       tooltip={row.inPort!.srcPath ? `${row.inPort!.origRef ?? row.inPort!.ref}.${row.inPort!.srcPath}` : (row.inPort!.origRef ?? row.inPort!.srcShort)}
                       optional={row.inPort!.optional}
+                      typeSuffix={isForEachVarRow ? '[]' : undefined}
                       onToggleOptional={e => { e.stopPropagation(); onToggleInPortOptional?.(node.id, row.fieldPath!); }}
                       onMouseEnter={() => onTokenHover({ srcNodeId: refToNodeId(row.inPort!.ref), srcPath: row.inPort!.srcPath, tgtNodeId: node.id })}
                       onMouseLeave={onTokenLeave}
                     />
+                    {forEachSubAddBtn}
                   </>
                 ) : hasActiveIn ? (
                   // Unsaved ExtraEdge connection — render as a pending VarPill
                   <>
-                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{row.key}:</Typography>
+                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{displayKey}</Typography>
                     {(() => {
                       const opInfo = row.fieldPath ? opConnectedFields?.get(row.fieldPath) : undefined;
                       if (opInfo) {
@@ -679,45 +746,47 @@ export const NodeCard = memo(function NodeCard({
                   </>
                 ) : (hasOut || isVirt) ? (
                   <>
-                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0, ...(isVirt && { color: userC }) }}>{row.key}:</Typography>
-                    {row.value !== undefined
-                      ? isEditing
-                        // eslint-disable-next-line jsx-a11y/no-autofocus
-                        ? <input autoFocus value={editingValue}
-                            style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
-                            onChange={e => setEditingValue(e.target.value)}
-                            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitValueEdit(row.fieldPath!, editingValue); else if (e.key === 'Escape') { setEditingRowPath(null); setEditingValue(''); } }}
-                            onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
-                            onMouseDown={e => e.stopPropagation()}
-                          />
-                        : <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.75 }}>{row.value}</Typography>
-                      : row.ghostType
-                        ? <Box component="span" sx={{
-                            fontFamily: 'monospace', fontSize: '0.5rem', lineHeight: 1,
-                            px: 0.4, borderRadius: 0.4, flexShrink: 0,
-                            border: `1px solid ${alpha(isVirt ? userC : accent, 0.25)}`,
-                            color: isVirt ? userC : accent, opacity: 0.55,
-                          }}>
-                            {abbrevType(row.ghostType)}
-                          </Box>
-                        : null
+                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0, ...(isVirt && { color: userC }) }}>{displayKey}</Typography>
+                    {isEditing
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      ? <input autoFocus value={editingValue}
+                          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
+                          onChange={e => setEditingValue(e.target.value)}
+                          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitValueEdit(row.fieldPath!, editingValue); else if (e.key === 'Escape') { setEditingRowPath(null); setEditingValue(''); } }}
+                          onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
+                          onMouseDown={e => e.stopPropagation()}
+                        />
+                      : row.value !== undefined
+                        ? <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.75 }}>{row.value}</Typography>
+                        : row.ghostType
+                          ? <Box component="span" sx={{
+                              fontFamily: 'monospace', fontSize: '0.5rem', lineHeight: 1,
+                              px: 0.4, borderRadius: 0.4, flexShrink: 0,
+                              border: `1px solid ${alpha(isVirt ? userC : accent, 0.25)}`,
+                              color: isVirt ? userC : accent, opacity: 0.55,
+                            }}>
+                              {abbrevType(row.ghostType)}
+                            </Box>
+                          : null
                     }
+                    {forEachSubAddBtn}
                   </>
                 ) : (
                   <>
-                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.5, flexShrink: 0 }}>{row.key}:</Typography>
-                    {row.value !== undefined && (
-                      isEditing
-                        // eslint-disable-next-line jsx-a11y/no-autofocus
-                        ? <input autoFocus value={editingValue}
-                            style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
-                            onChange={e => setEditingValue(e.target.value)}
-                            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitValueEdit(row.fieldPath!, editingValue); else if (e.key === 'Escape') { setEditingRowPath(null); setEditingValue(''); } }}
-                            onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
-                            onMouseDown={e => e.stopPropagation()}
-                          />
-                        : <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.75 }}>{row.value}</Typography>
-                    )}
+                    <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.5, flexShrink: 0 }}>{displayKey}</Typography>
+                    {isEditing
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      ? <input autoFocus value={editingValue}
+                          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
+                          onChange={e => setEditingValue(e.target.value)}
+                          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitValueEdit(row.fieldPath!, editingValue); else if (e.key === 'Escape') { setEditingRowPath(null); setEditingValue(''); } }}
+                          onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
+                          onMouseDown={e => e.stopPropagation()}
+                        />
+                      : row.value !== undefined
+                        ? <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.75 }}>{row.value}</Typography>
+                        : null
+                    }
                   </>
                 )}
               </Box>
@@ -746,97 +815,55 @@ export const NodeCard = memo(function NodeCard({
               )}
             </Box>
             {addInputAfterIdx === i && inlineMapInput}
+            {addParentInputAfterIdx === i && inlinePickerInput}
+            {addForEachSubAfterIdx === i && inlineForEachSubInput}
             </Fragment>
           );
-        });
+          });
+          return (
+            <>
+              {addingToParentPath === '' && inlinePickerInput}
+              {rows}
+            </>
+          );
         })()}
-
-        {showAddButton && (
-          <Box
-            role="button" tabIndex={-1}
-            sx={{
-              height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
-              borderTop: `1px dashed ${alpha(userC, showAddField ? 0.35 : 0.18)}`,
-              px: 1, gap: 0.5,
-              bgcolor: showAddField ? (dark ? alpha(userC, 0.1) : alpha(userC, 0.06)) : 'transparent',
-              cursor: showAddField ? 'text' : 'pointer',
-              '&:hover': showAddField ? {} : { bgcolor: dark ? alpha(userC, 0.07) : alpha(userC, 0.04) },
-            }}
-            onClick={e => { e.stopPropagation(); if (!showAddField) setShowAddField(true); }}
-            onMouseDown={e => e.stopPropagation()}
-          >
-            {showAddField && freeFormAdd ? (
-              <input
-                // eslint-disable-next-line jsx-a11y/no-autofocus
-                autoFocus
-                value={addFieldInput}
-                placeholder="e.g. data.myKey"
-                onChange={e => setAddFieldInput(e.target.value)}
-                onKeyDown={e => {
-                  e.stopPropagation();
-                  if (e.key === 'Enter') { commitAdd(addFieldInput); }
-                  else if (e.key === 'Escape') { setShowAddField(false); setAddFieldInput(''); }
-                }}
-                onBlur={() => { setShowAddField(false); setAddFieldInput(''); }}
-                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
-              />
-            ) : showAddField ? (
-              <input
-                // eslint-disable-next-line jsx-a11y/no-autofocus
-                autoFocus
-                value={addFieldInput}
-                placeholder="type a field path…"
-                onChange={e => { setAddFieldInput(e.target.value); setAddSuggIdx(-1); }}
-                onKeyDown={e => {
-                  e.stopPropagation();
-                  if (e.key === 'ArrowDown') { e.preventDefault(); setAddSuggIdx(i => Math.min(i + 1, filteredSuggs.length - 1)); }
-                  else if (e.key === 'ArrowUp') { e.preventDefault(); setAddSuggIdx(i => Math.max(i - 1, -1)); }
-                  else if (e.key === 'Enter') {
-                    if (addSuggIdx >= 0 && filteredSuggs[addSuggIdx]) commitAdd(filteredSuggs[addSuggIdx].path);
-                    else commitAdd(addFieldInput);
-                  }
-                  else if (e.key === 'Escape') { setShowAddField(false); setAddFieldInput(''); setAddSuggIdx(-1); }
-                }}
-                onBlur={() => { setTimeout(() => { setShowAddField(false); setAddFieldInput(''); setAddSuggIdx(-1); }, 150); }}
-                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
-              />
-            ) : (
-              <>
-                <Icon icon="mdi:plus" width={9} style={{ color: userC, flexShrink: 0 }}/>
-                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.6rem', color: userC, opacity: 0.55 }}>Add field…</Typography>
-              </>
-            )}
-          </Box>
-        )}
 
       </Paper>
 
-      {/* Autocomplete dropdown — rendered outside Paper so it can overflow the node boundary */}
-      {showAddField && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema') && filteredSuggs.length > 0 && (
+      {/* Inline field picker dropdown — rendered outside Paper so it can overflow the node boundary */}
+      {addingToParentPath !== null && !isFreeFormInline && filteredInlineOptions.length > 0 && (
         <Paper elevation={8} sx={{
-          position: 'absolute', top: displayH - 1, left: 0, right: 0, zIndex: 30,
-          maxHeight: 180, overflowY: 'auto',
+          position: 'absolute',
+          top: addingToParentPath === ''
+            ? HEADER_H + (showSectionAdd ? ROW_H : 0) + ROW_H
+            : HEADER_H + (showSectionAdd ? ROW_H : 0) + (addParentInputAfterIdx + 2) * ROW_H,
+          left: 0, right: 0, zIndex: 30,
+          maxHeight: 160, overflowY: 'auto',
           borderRadius: '0 0 6px 6px',
           border: `1px solid ${alpha(userC, 0.35)}`,
           borderTop: 'none',
         }}
           onMouseDown={e => e.stopPropagation()}
         >
-          {filteredSuggs.map((s, si) => (
-            <Box key={s.path}
-              onMouseDown={e => { e.preventDefault(); commitAdd(s.path); }}
-              onMouseEnter={() => setAddSuggIdx(si)}
-              sx={{
-                px: 1.5, py: 0.3, cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 0.75,
-                bgcolor: si === addSuggIdx ? alpha(userC, 0.14) : 'transparent',
-                '&:hover': { bgcolor: alpha(userC, 0.08) },
-                borderBottom: `1px solid ${alpha(userC, 0.06)}`,
-              }}
-            >
-              <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.6rem' }}>{s.path}</Typography>
-              <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.54rem', opacity: 0.4, ml: 'auto', flexShrink: 0 }}>{s.type}</Typography>
-            </Box>
-          ))}
+          {filteredInlineOptions.map((s, si) => {
+            const pfx = addingToParentPath ? `${addingToParentPath}.` : '';
+            const relKey = s.path.slice(pfx.length);
+            return (
+              <Box key={s.path}
+                onMouseDown={e => { e.preventDefault(); commitInlineAdd(relKey); }}
+                onMouseEnter={() => setAddSuggIdx(si)}
+                sx={{
+                  px: 1.5, py: 0.3, cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 0.75,
+                  bgcolor: si === addSuggIdx ? alpha(userC, 0.14) : 'transparent',
+                  '&:hover': { bgcolor: alpha(userC, 0.08) },
+                  borderBottom: `1px solid ${alpha(userC, 0.06)}`,
+                }}
+              >
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.6rem' }}>{relKey}</Typography>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: '0.54rem', opacity: 0.4, ml: 'auto', flexShrink: 0 }}>{s.type}</Typography>
+              </Box>
+            );
+          })}
         </Paper>
       )}
     </div>

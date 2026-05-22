@@ -41,37 +41,49 @@ export function getResKind(res: unknown): string {
   return (res as any)?.template?.kind ?? (res as any)?.externalRef?.kind ?? (res as any)?.kind ?? '';
 }
 
+/** Iterates over schema.properties entries, computing dot-paths and invoking visitor for each.
+ *  The visitor receives (val, path, recurse) where recurse(sub, subPrefix) descends into sub-schemas. */
+function walkSchemaProperties(
+  schema: any, prefix: string, maxDepth: number, result: Set<string>,
+  visit: (val: any, path: string, recurse: (sub: any, subPrefix: string) => void) => void,
+): void {
+  if (!schema?.properties || maxDepth <= 0) return;
+  for (const [key, val] of Object.entries(schema.properties as Record<string, any>)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const recurse = (sub: any, subPrefix: string) =>
+      walkSchemaProperties(sub, subPrefix, maxDepth - 1, result, visit);
+    visit(val, path, recurse);
+  }
+}
+
 /** Returns dot-paths that are map types (additionalProperties, no fixed properties) in the schema. */
 export function findMapPaths(schema: any, prefix = '', maxDepth = 6): Set<string> {
   const result = new Set<string>();
-  if (!schema?.properties || maxDepth <= 0) return result;
-  for (const [key, val] of Object.entries(schema.properties as Record<string, any>)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (val.additionalProperties !== undefined && !val.properties) {
-      result.add(path);
-    } else if (val.properties) {
-      for (const p of findMapPaths(val, path, maxDepth - 1)) result.add(p);
-    }
-  }
+  walkSchemaProperties(schema, prefix, maxDepth, result, (val, path, recurse) => {
+    if (val.additionalProperties !== undefined && !val.properties) result.add(path);
+    else if (val.properties) recurse(val, path);
+  });
   return result;
 }
 
 /** Returns dot-paths that are array types (items present) in the schema. */
 export function findArrayPaths(schema: any, prefix = '', maxDepth = 6): Set<string> {
   const result = new Set<string>();
-  if (!schema?.properties || maxDepth <= 0) return result;
-  for (const [key, val] of Object.entries(schema.properties as Record<string, any>)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (val.type === 'array' && val.items) {
-      result.add(path);
-    }
-    if (val.properties) {
-      for (const p of findArrayPaths(val, path, maxDepth - 1)) result.add(p);
-    }
-    if (val.type === 'array' && val.items?.properties) {
-      for (const p of findArrayPaths(val.items, `${path}[]`, maxDepth - 1)) result.add(p);
-    }
-  }
+  walkSchemaProperties(schema, prefix, maxDepth, result, (val, path, recurse) => {
+    if (val.type === 'array' && val.items) result.add(path);
+    if (val.properties) recurse(val, path);
+    if (val.type === 'array' && val.items?.properties) recurse(val.items, `${path}[]`);
+  });
+  return result;
+}
+
+/** Returns dot-paths where x-kubernetes-preserve-unknown-fields: true in the schema. */
+export function findPreserveUnknownPaths(schema: any, prefix = '', maxDepth = 6): Set<string> {
+  const result = new Set<string>();
+  walkSchemaProperties(schema, prefix, maxDepth, result, (val, path, recurse) => {
+    if (val['x-kubernetes-preserve-unknown-fields'] === true) result.add(path);
+    if (val.properties) recurse(val, path);
+  });
   return result;
 }
 

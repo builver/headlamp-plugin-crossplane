@@ -2,8 +2,66 @@ import { AstCall, CelNode, celNodeToCelInner, parseCelAst } from './celAst';
 import { celInterpRe, extractGroup, isSimplePath, parseSegments } from './celUtils';
 import { refToNodeId, VAR_FIELD_PREFIX } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
+import { deleteDeepPath, getDeepPath, setDeepPath } from './pathUtils';
 import { qualifiedPath, SECTION_DEFS, sectionOf, sectionRelPath } from './sectionDefs';
 import { ExtraEdge, FieldEdit, FieldSuggestion, OpNode, OutPort, RowSegment, TRow } from './types';
+
+// ── Scalar CEL value classifier ────────────────────────────────────────────────
+
+const BARE_VAR_RE = /^\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/;
+
+/** Classifies a scalar string value into one of the TRow CEL display modes. */
+function parseScalarCelValue(
+  val: string,
+  knownIds: Set<string>,
+): Pick<TRow, 'inPort' | 'segments' | 'celExpr' | 'value'> {
+  const CEL_RE = celInterpRe();
+  const matches: RegExpExecArray[] = [];
+  let mm: RegExpExecArray | null;
+  while ((mm = CEL_RE.exec(val)) !== null) {
+    if (knownIds.has(mm[1])) matches.push(mm);
+  }
+  if (matches.length === 1 && val.trim() === matches[0][0] && isSimplePath(matches[0][2])) {
+    const srcPath = matches[0][2];
+    const optional = srcPath.includes('?');
+    const srcShort = srcPath.replace(/\?/g, '').split('.').pop() ?? srcPath.replace(/\?/g, '');
+    return { inPort: { ref: matches[0][1], srcPath, srcShort, optional } };
+  } else if (matches.length > 0) {
+    return { segments: parseSegments(val, knownIds) };
+  }
+  const bareM = BARE_VAR_RE.exec(val);
+  if (bareM && knownIds.has(bareM[1])) {
+    return { inPort: { ref: bareM[1], srcPath: '', srcShort: bareM[1], optional: false } };
+  } else if (/^\$\{(true|false|null|-?\d+(?:\.\d+)?|"[^"]*"|'[^']*')\}$/.test(val)) {
+    return { value: val };
+  } else if (/\$\{/.test(val)) {
+    return { celExpr: val };
+  }
+  return { value: val };
+}
+
+// ── TRow factory helpers ───────────────────────────────────────────────────────
+
+/** Leaf row. String values are auto-classified via parseScalarCelValue. */
+export function makeLeafRow(
+  depth: number, key: string, fieldPath: string,
+  val: unknown, knownIds: Set<string>,
+  extra?: Partial<TRow>,
+): TRow {
+  const cel = typeof val === 'string' ? parseScalarCelValue(val, knownIds) : {};
+  const value = (typeof val !== 'string' && val !== null && val !== undefined)
+    ? (Array.isArray(val) ? `[${(val as unknown[]).length}]` : String(val))
+    : undefined;
+  return { depth, key, isParent: false, fieldPath, ...(value !== undefined ? { value } : {}), ...cel, ...extra };
+}
+
+/** Parent (container) row. */
+export function makeParentRow(
+  depth: number, key: string, fieldPath: string,
+  extra?: Partial<TRow>,
+): TRow {
+  return { depth, key, isParent: true, fieldPath, ...extra };
+}
 
 // ── Template row builder ───────────────────────────────────────────────────────
 
@@ -17,59 +75,27 @@ export function buildTemplateRows(
     const path = pathSoFar ? `${pathSoFar}.${key}` : key;
     if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
       const children = buildTemplateRows(val, knownIds, outPortPaths, visitedOutPorts, depth + 1, path);
-      if (children.length > 0) { rows.push({ depth, key, isParent: true, fieldPath: path }); rows.push(...children); }
-    } else if (Array.isArray(val) && val.some((item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item))) {
-      // Array of objects — expand into indexed item rows
-      rows.push({ depth, key, isParent: true, fieldPath: path, isArrayParent: true });
+      if (children.length > 0) { rows.push(makeParentRow(depth, key, path)); rows.push(...children); }
+    } else if (Array.isArray(val) && val.length > 0) {
+      // Array — expand into indexed item rows
+      rows.push(makeParentRow(depth, key, path, { isArrayParent: true }));
       for (let i = 0; i < val.length; i++) {
         const item = val[i];
         const itemPath = `${path}.${i}`;
-        rows.push({ depth: depth + 1, key: String(i), isParent: true, fieldPath: itemPath });
         if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+          rows.push(makeParentRow(depth + 1, String(i), itemPath));
           const children = buildTemplateRows(item, knownIds, outPortPaths, visitedOutPorts, depth + 2, itemPath);
           rows.push(...children);
+        } else if (item !== null && item !== undefined) {
+          rows.push(makeLeafRow(depth + 1, String(i), itemPath, item, knownIds));
         }
       }
     } else {
       const isOut = outPortPaths.has(path);
       if (isOut) visitedOutPorts.add(path);
       const outPort = isOut ? { path, short: key } : undefined;
-      if (typeof val === 'string') {
-        const CEL_RE = celInterpRe();
-        const matches: RegExpExecArray[] = [];
-        let mm: RegExpExecArray | null;
-        while ((mm = CEL_RE.exec(val)) !== null) {
-          if (knownIds.has(mm[1])) matches.push(mm);
-        }
-        if (matches.length === 1 && val.trim() === matches[0][0] && isSimplePath(matches[0][2])) {
-          // Pure single simple CEL ref → inPort dot
-          const srcPath = matches[0][2];
-          const optional = srcPath.includes('?');
-          const srcShort = srcPath.replace(/\?/g, '').split('.').pop() ?? srcPath.replace(/\?/g, '');
-          rows.push({ depth, key, isParent: false, fieldPath: path, outPort,
-            inPort: { ref: matches[0][1], srcPath, srcShort, optional } });
-        } else if (matches.length > 0) {
-          // Composed / multi-ref or complex-path string → segments (with expr pill for complex paths)
-          rows.push({ depth, key, isParent: false, fieldPath: path, outPort,
-            segments: parseSegments(val, knownIds) });
-        } else {
-          // Bare forEach variable reference: ${role} or ${each} — no dot, no field path.
-          const BARE_VAR_RE = /^\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/;
-          const bareM = BARE_VAR_RE.exec(val);
-          if (bareM && knownIds.has(bareM[1])) {
-            rows.push({ depth, key, isParent: false, fieldPath: path, outPort,
-              inPort: { ref: bareM[1], srcPath: '', srcShort: bareM[1], optional: false } });
-          } else if (/\$\{/.test(val)) {
-            // Multiline or complex CEL that didn't match the simple ref.path regex
-            rows.push({ depth, key, isParent: false, fieldPath: path, outPort, celExpr: val });
-          } else {
-            rows.push({ depth, key, isParent: false, fieldPath: path, outPort, value: val });
-          }
-        }
-      } else if (Array.isArray(val)) {
-        rows.push({ depth, key, isParent: false, fieldPath: path, outPort, value: `[${(val as unknown[]).length}]` });
-      } else if (val !== null && val !== undefined) {
-        rows.push({ depth, key, isParent: false, fieldPath: path, outPort, value: String(val) });
+      if (val !== null && val !== undefined) {
+        rows.push(makeLeafRow(depth, key, path, val, knownIds, { outPort }));
       }
     }
   }
@@ -132,7 +158,7 @@ export function insertRowAtPath(
     const pKey       = parts[d];
     const parentPath = parts.slice(0, d + 1).join('.');
     if (!rows.some(r => r.fieldPath === parentPath)) {
-      toInsert.push({ depth: d, key: pKey, isParent: true, fieldPath: parentPath, ...(ghostParent && { isGhost: true }) });
+      toInsert.push(makeParentRow(d, pKey, parentPath, ghostParent ? { isGhost: true } : undefined));
     }
   }
   toInsert.push({ depth: leafDepth, key: leafKey, isParent: false, fieldPath, ...leafExtra });
@@ -169,43 +195,6 @@ export function mergeWithGhostFields(rows: TRow[], potFields: FieldSuggestion[])
 // ── Patch helpers ─────────────────────────────────────────────────────────────
 
 /** Reads a nested value from obj at the given dot-separated path. */
-export function getDeepPath(obj: any, dotPath: string): unknown {
-  let cur = obj;
-  for (const part of dotPath.split('.')) {
-    if (cur === null || cur === undefined || typeof cur !== 'object') return undefined;
-    cur = cur[part];
-  }
-  return cur;
-}
-
-/** Sets a nested value on obj using a dot-separated path, creating objects or arrays as needed. */
-export function setDeepPath(obj: any, dotPath: string, value: any): void {
-  const parts = dotPath.split('.');
-  let cur = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const nextIsIndex = /^\d+$/.test(parts[i + 1]);
-    if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') cur[parts[i]] = nextIsIndex ? [] : {};
-    cur = cur[parts[i]];
-  }
-  cur[parts[parts.length - 1]] = value;
-}
-
-/** Deletes a nested key on obj at the given dot-separated path.
- *  If the parent is an array and the key is a numeric index, splices the element out (no holes). */
-export function deleteDeepPath(obj: any, dotPath: string): void {
-  const parts = dotPath.split('.');
-  let cur = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') return;
-    cur = cur[parts[i]];
-  }
-  const lastKey = parts[parts.length - 1];
-  if (Array.isArray(cur) && /^\d+$/.test(lastKey)) {
-    cur.splice(parseInt(lastKey), 1);
-  } else {
-    delete cur[lastKey];
-  }
-}
 
 /** After deleting a leaf, walks back up and removes any ancestor objects that became empty. */
 function pruneEmptyAncestors(obj: any, dotPath: string): void {
@@ -312,12 +301,42 @@ export function applyFieldEditsToInput(input: any, fieldEdits: FieldEdit[]): any
 }
 
 /**
- * Remove a leaf row at `fieldPath` from `rows`, then prune any parent rows that
- * become childless as a result (repeated until stable for nested empty parents).
+ * Given a deleted array-item path (last segment is a digit), remap a sibling path
+ * so that items with a higher index are decremented by 1.  Returns `p` unchanged
+ * if the deletion is not an array item or `p` is not an affected sibling.
+ */
+export function reindexPathAfterDelete(deletedPath: string, p: string): string {
+  const segs = deletedPath.split('.');
+  const lastSeg = segs[segs.length - 1];
+  if (!/^\d+$/.test(lastSeg)) return p;
+  const deletedIdx = parseInt(lastSeg, 10);
+  const parentPrefix = segs.slice(0, -1).join('.') + '.';
+  if (!p.startsWith(parentPrefix)) return p;
+  const rest = p.slice(parentPrefix.length);
+  const dotIdx = rest.indexOf('.');
+  const firstSeg = dotIdx === -1 ? rest : rest.slice(0, dotIdx);
+  const tail = dotIdx === -1 ? '' : rest.slice(dotIdx);
+  const sibIdx = parseInt(firstSeg, 10);
+  if (isNaN(sibIdx) || sibIdx <= deletedIdx) return p;
+  return parentPrefix + (sibIdx - 1) + tail;
+}
+
+/**
+ * Remove a leaf row at `fieldPath` from `rows`, renumber any higher-indexed
+ * siblings if the path is an array item, then prune any parent rows that become
+ * childless (repeated until stable for nested empty parents).
  */
 export function removeRowAtPath(rows: TRow[], fieldPath: string): TRow[] {
   // Remove target and all descendant rows (needed when deleting an array item parent)
   let result = rows.filter(r => r.fieldPath !== fieldPath && !r.fieldPath?.startsWith(fieldPath + '.'));
+  // Renumber higher-indexed siblings in the same array
+  result = result.map(r => {
+    if (!r.fieldPath) return r;
+    const newFp = reindexPathAfterDelete(fieldPath, r.fieldPath);
+    if (newFp === r.fieldPath) return r;
+    const newKey = newFp.split('.').pop()!;
+    return { ...r, fieldPath: newFp, key: newKey };
+  });
   let changed = true;
   while (changed) {
     changed = false;
@@ -362,29 +381,7 @@ export function buildKnownForRes(res: any, baseKnown: Set<string>): Set<string> 
 function parseSpecialFieldValue(
   val: unknown, key: string, fieldPath: string, knownIds: Set<string>,
 ): TRow {
-  const depth = 1;
-  if (typeof val === 'string') {
-    const CEL_RE = celInterpRe();
-    const matches: RegExpExecArray[] = [];
-    let mm: RegExpExecArray | null;
-    while ((mm = CEL_RE.exec(val)) !== null) {
-      if (knownIds.has(mm[1])) matches.push(mm);
-    }
-    if (matches.length === 1 && val.trim() === matches[0][0] && isSimplePath(matches[0][2])) {
-      const srcPath = matches[0][2];
-      const optional = srcPath.includes('?');
-      const srcShort = srcPath.replace(/\?/g, '').split('.').pop() ?? srcPath.replace(/\?/g, '');
-      return { depth, key, isParent: false, fieldPath,
-        inPort: { ref: matches[0][1], srcPath, srcShort, optional } };
-    } else if (matches.length > 0) {
-      return { depth, key, isParent: false, fieldPath, segments: parseSegments(val, knownIds) };
-    } else if (/\$\{/.test(val)) {
-      return { depth, key, isParent: false, fieldPath, celExpr: val };
-    } else {
-      return { depth, key, isParent: false, fieldPath, value: val };
-    }
-  }
-  return { depth, key, isParent: false, fieldPath, value: String(val ?? '') };
+  return makeLeafRow(1, key, fieldPath, val, knownIds);
 }
 
 /**
@@ -409,7 +406,7 @@ export function buildSpecialFieldRows(res: any, knownForRes: Set<string>): TRow[
   if (includeWhenExprs.length) {
     rows.push({ depth: 0, key: 'includeWhen', isParent: false, isSection: true, canImport: false, canExport: false });
     includeWhenExprs.forEach((expr, idx) => {
-      const key = includeWhenExprs.length === 1 ? 'value' : String(idx);
+      const key = String(idx);
       rows.push({ ...parseSpecialFieldValue(expr, key, qualifiedPath('includeWhen', key), knownForRes),
         canImport: true, canExport: false });
     });
@@ -419,7 +416,7 @@ export function buildSpecialFieldRows(res: any, knownForRes: Set<string>): TRow[
   if (readyWhenExprs.length) {
     rows.push({ depth: 0, key: 'readyWhen', isParent: false, isSection: true, canImport: false, canExport: false });
     readyWhenExprs.forEach((expr, idx) => {
-      const key = readyWhenExprs.length === 1 ? 'value' : String(idx);
+      const key = String(idx);
       rows.push({ ...parseSpecialFieldValue(expr, key, qualifiedPath('readyWhen', key), knownForRes),
         canImport: true, canExport: false });
     });
@@ -462,7 +459,8 @@ type ParsedOperand =
 
 function celBinaryOpToCategory(op: string): string | null {
   if (['==', '!=', '>', '<', '>=', '<='].includes(op)) return 'compare';
-  if (['&&', '||'].includes(op)) return 'logic';
+  if (op === '&&') return 'and';
+  if (op === '||') return 'or';
   if (op === '+') return 'string-concat';
   return null;
 }
@@ -1060,13 +1058,11 @@ export function reconstructOpGraph(input: any, requirements?: any): { opNodes: O
         out.extraEdges[i] = { ...e, srcNodeId: res.id as string, srcFieldPath: newPath };
       }
     }
-    toConditionExprs(res.includeWhen).forEach((expr, idx, arr) => {
-      const key = arr.length === 1 ? 'value' : String(idx);
-      walkConditionString(expr, res.id as string, qualifiedPath('includeWhen', key), knownForRes, selfRefIds, out, counter);
+    toConditionExprs(res.includeWhen).forEach((expr, idx) => {
+      walkConditionString(expr, res.id as string, qualifiedPath('includeWhen', String(idx)), knownForRes, selfRefIds, out, counter);
     });
-    toConditionExprs(res.readyWhen).forEach((expr, idx, arr) => {
-      const key = arr.length === 1 ? 'value' : String(idx);
-      walkConditionString(expr, res.id as string, qualifiedPath('readyWhen', key), knownForRes, selfRefIds, out, counter);
+    toConditionExprs(res.readyWhen).forEach((expr, idx) => {
+      walkConditionString(expr, res.id as string, qualifiedPath('readyWhen', String(idx)), knownForRes, selfRefIds, out, counter);
     });
     for (const entry of (res.forEach ?? []))
       for (const [varName, val] of Object.entries(entry as Record<string, unknown>))

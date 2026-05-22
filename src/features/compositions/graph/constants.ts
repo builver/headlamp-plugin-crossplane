@@ -76,21 +76,40 @@ export function opNodeInputPortY(node: OpNode, portIdx: number): number {
 }
 
 /**
- * Total extra rows consumed by the predicate varFields section:
- * one row per path segment across all varFields, plus 1 for the "add field" input row.
+ * Builds a deduplicated, alphabetically-sorted flat tree from varFields.
+ * Intermediate parent paths that are not explicit varFields are included as
+ * structural (non-exportable) rows, matching resource-node row behaviour.
  */
-export function opNodeVarFieldExtraRows(varFields: string[]): number {
-  return varFields.reduce((sum, vf) => sum + vf.split('.').length, 0) + 1;
+export function buildVarFieldRows(varFields: string[]): Array<{ path: string; depth: number; key: string; isExportable: boolean }> {
+  const varFieldSet = new Set(varFields);
+  const allPaths = new Set<string>();
+  for (const vf of varFields) {
+    const segs = vf.split('.');
+    for (let i = 1; i <= segs.length; i++) allPaths.add(segs.slice(0, i).join('.'));
+  }
+  return Array.from(allPaths).sort().map(path => {
+    const segs = path.split('.');
+    return { path, depth: segs.length - 1, key: segs[segs.length - 1], isExportable: varFieldSet.has(path) };
+  });
 }
 
 /**
- * Absolute row index (counted from port row 0) of the leaf row for varField at index vfi.
+ * Total extra rows consumed by the predicate varFields section:
+ * one row per unique tree node across all varFields, plus 1 for the "add field" input row.
+ */
+export function opNodeVarFieldExtraRows(varFields: string[]): number {
+  return buildVarFieldRows(varFields).length + 1;
+}
+
+/**
+ * Absolute row index (counted from port row 0) of the row for varField at index vfi.
  * varPortIdx is the index of the 'var' input port among the node's fixed inputs.
  */
 export function varFieldLeafRow(varFields: string[], varPortIdx: number, vfi: number): number {
-  const rowsBefore = varFields.slice(0, vfi).reduce((sum, vf) => sum + vf.split('.').length, 0);
-  const thisSegs = varFields[vfi]?.split('.').length ?? 1;
-  return varPortIdx + 1 + rowsBefore + thisSegs - 1;
+  const rows = buildVarFieldRows(varFields);
+  const path = varFields[vfi];
+  const idx = rows.findIndex(r => r.path === path);
+  return varPortIdx + 1 + Math.max(0, idx);
 }
 
 // eslint-disable-next-line no-unused-vars

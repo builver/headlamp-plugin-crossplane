@@ -2,11 +2,12 @@ import { Icon } from '@iconify/react';
 import { Box, Paper, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { memo, MouseEvent } from 'react';
-import { DOT, nodeIdToRef, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refAccent, varFieldLeafRow } from './constants';
+import { buildVarFieldRows, DOT, nodeIdToRef, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refAccent, varFieldLeafRow } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
-import { PortDot, VarPill } from './NodeCard';
+import { PortDot } from './PortDot';
 import { NodeType, OpNode, TokenHover } from './types';
 import { abbrevType } from './typeUtils';
+import { VarPill } from './VarPill';
 
 export interface ConnectedPortInfo {
   /** Short display label (last segment of the source field path, or op category label). */
@@ -52,6 +53,9 @@ export interface ExprOpNodeCardProps {
   onVarFieldPortDown?: (e: MouseEvent, id: string, varFieldPath: string) => void;
   hasVarFieldConnection?: (varFieldPath: string) => boolean;
   opNodesById?: Map<string, OpNode>;
+  selected?: boolean;
+  /** When true, the node is faded because it is not related to the selected node. */
+  dimmed?: boolean;
 }
 
 export const ExprOpNodeCard = memo(function ExprOpNodeCard({
@@ -59,23 +63,27 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
   onNodeDown, onOutputPortDown, onInputPortUp, onInputPortClick, onOpChange, onLiteralChange, onResizeStart, onDelete,
   onTogglePortOptional, onTokenHover, onTokenLeave,
   onAddVarField, onRemoveVarField, onVarFieldPortDown, hasVarFieldConnection, opNodesById,
+  selected, dimmed,
 }: ExprOpNodeCardProps) {
   const def = EXPR_NODE_DEFS[node.category];
   if (!def) return null;
   const isRawTemplate = node.category === 'raw-template';
   const isPredicate = !!def.hasPredicate;
   const activePortCount = def.variadic ? (node.portCount ?? def.inputs.length) : def.inputs.length;
-  const activePorts = def.variadic
+  const allPorts = def.variadic
     ? Array.from({ length: activePortCount }, (_, i) => ({
         name: String.fromCharCode(65 + i),
         label: String.fromCharCode(65 + i),
         type: def.inputs[0].type,
       }))
     : def.inputs;
+  // For variadic nodes the effect always keeps exactly one trailing empty port.
+  // Hide it when the node is not selected so only the meaningful ports are visible.
+  const activePorts = (def.variadic && !selected) ? allPorts.slice(0, -1) : allPorts;
   const varPortIdx = isPredicate ? activePorts.findIndex(p => p.name === 'var') : -1;
   const varFields = isPredicate ? (node.varFields ?? []) : [];
   const extraRows = isPredicate ? opNodeVarFieldExtraRows(varFields) : 0;
-  const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(activePortCount) + extraRows * OP_NODE_PORT_H;
+  const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(activePorts.length) + extraRows * OP_NODE_PORT_H;
 
   return (
     <div
@@ -85,6 +93,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
         position: 'absolute', left: node.x, top: node.y,
         width: OP_NODE_W, height: cardH,
         cursor: isDrawing ? 'crosshair' : 'grab', zIndex: 2,
+        opacity: dimmed ? 0.25 : 1, transition: 'opacity 0.15s',
       }}
       onMouseDown={e => { e.stopPropagation(); onNodeDown(e, node.id); }}
       onKeyDown={e => { if (e.key === 'Delete') onDelete(node.id); }}
@@ -120,9 +129,9 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
         onMouseDown={e => { e.stopPropagation(); onOutputPortDown(e, node.id); }}
       />
 
-      <Paper elevation={2} sx={{
+      <Paper elevation={selected ? 8 : 2} sx={{
         width: '100%', height: cardH,
-        border: dirty ? `1.5px dashed ${alpha(userC, 0.6)}` : `1.5px solid ${alpha(userC, 0.5)}`,
+        border: dirty ? `1.5px dashed ${alpha(userC, 0.6)}` : `1.5px solid ${alpha(userC, selected ? 1 : 0.5)}`,
         borderRadius: 1.5, overflow: 'hidden',
         display: 'flex', flexDirection: 'column',
         background: dark
@@ -187,17 +196,19 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           }}>
             {abbrevType(def.outputType)}
           </Box>
-          <Box component="span" role="button" tabIndex={-1}
-            onMouseDown={e => e.stopPropagation()}
-            onClick={e => { e.stopPropagation(); onDelete(node.id); }}
-            sx={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 14, height: 14, borderRadius: 0.4, flexShrink: 0,
-              color: alpha(userC, 0.5), cursor: 'pointer',
-              '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
-            }}>
-            <Icon icon="mdi:close" width={10} />
-          </Box>
+          {selected && (
+            <Box component="span" role="button" tabIndex={-1}
+              onMouseDown={e => e.stopPropagation()}
+              onClick={e => { e.stopPropagation(); onDelete(node.id); }}
+              sx={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 14, height: 14, borderRadius: 0.4, flexShrink: 0,
+                color: alpha(userC, 0.5), cursor: 'pointer',
+                '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
+              }}>
+              <Icon icon="mdi:close" width={10} />
+            </Box>
+          )}
         </Box>
 
         {/* Raw-template textarea body */}
@@ -274,50 +285,46 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
             );
 
             if (isPredicate && port.name === 'var') {
-              const varFieldRows = varFields.flatMap((vf) => {
-                const segs = vf.split('.');
-                return segs.map((seg, si) => {
-                  const isLeaf = si === segs.length - 1;
-                  const indent = 8 + si * 10;
-                  return (
-                    <Box key={`vf-${vf}-${si}`} sx={{
-                      height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
-                      borderTop: `1px solid ${alpha(userC, si === 0 ? 0.07 : 0.04)}`,
-                      pl: `${indent}px`, pr: 1, gap: 0.5, overflow: 'hidden',
+              const varFieldRows = buildVarFieldRows(varFields).map((row) => {
+                const indent = 18 + row.depth * 10;
+                return (
+                  <Box key={`vf-${row.path}`} sx={{
+                    height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+                    borderTop: `1px solid ${alpha(userC, row.depth === 0 ? 0.07 : 0.04)}`,
+                    pl: `${indent}px`, pr: 1, gap: 0.5, overflow: 'hidden',
+                  }}>
+                    <Typography variant="caption" noWrap sx={{
+                      fontFamily: 'monospace', fontSize: '0.58rem',
+                      color: userC, opacity: row.isExportable ? 0.85 : 0.4,
+                      flex: 1,
                     }}>
-                      <Typography variant="caption" noWrap sx={{
-                        fontFamily: 'monospace', fontSize: '0.58rem',
-                        color: userC, opacity: isLeaf ? 0.85 : 0.4,
-                        flex: 1,
-                      }}>
-                        {seg}:
-                      </Typography>
-                      {isLeaf && (
-                        <>
-                          <Box component="span" role="button" tabIndex={-1}
-                            onMouseDown={e => e.stopPropagation()}
-                            onClick={e => { e.stopPropagation(); onRemoveVarField?.(node.id, vf); }}
-                            sx={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              width: 14, height: 14, borderRadius: 0.4, flexShrink: 0,
-                              color: alpha(userC, 0.4), cursor: 'pointer',
-                              '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
-                            }}>
-                            <Icon icon="mdi:close" width={9} />
-                          </Box>
-                          {/* spacer matching the absolute PortDot outside Paper */}
-                          <Box sx={{ width: DOT, flexShrink: 0 }} />
-                        </>
-                      )}
-                    </Box>
-                  );
-                });
+                      {row.key}:
+                    </Typography>
+                    {row.isExportable && (
+                      <>
+                        <Box component="span" role="button" tabIndex={-1}
+                          onMouseDown={e => e.stopPropagation()}
+                          onClick={e => { e.stopPropagation(); onRemoveVarField?.(node.id, row.path); }}
+                          sx={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 14, height: 14, borderRadius: 0.4, flexShrink: 0,
+                            color: alpha(userC, 0.4), cursor: 'pointer',
+                            '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
+                          }}>
+                          <Icon icon="mdi:close" width={9} />
+                        </Box>
+                        {/* spacer matching the absolute PortDot outside Paper */}
+                        <Box sx={{ width: DOT, flexShrink: 0 }} />
+                      </>
+                    )}
+                  </Box>
+                );
               });
               const addFieldRow = (
                 <Box key="add-vf" sx={{
                   height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
                   borderTop: `1px solid ${alpha(userC, 0.07)}`,
-                  pl: 2, pr: 1, gap: 0.5, overflow: 'hidden',
+                  pl: '18px', pr: 1, gap: 0.5, overflow: 'hidden',
                 }}>
                   <input
                     placeholder="add field…"

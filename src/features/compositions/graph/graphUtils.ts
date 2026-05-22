@@ -1,7 +1,8 @@
-import { celInterpRe, findCelRefs, isSimplePath } from './celUtils';
+import { celInterpRe, findCelRefs, isSimplePath, reconstructTemplate } from './celUtils';
 import { EDGE_TYPE_FOR, HEADER_H, HG, NODE_MIN_H, nodeH, nodeIdToRef, NW, OP_NODE_PORT_H, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refToNodeId, ROW_H, SCHEMA_NODE_ID, VG } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
-import { buildKnownForRes, buildSpecialFieldRows, buildTemplateRows, forEachVarNames, getDeepPath, insertRowAtPath, postProcessEachRefs, reconstructOpGraph } from './rowUtils';
+import { getDeepPath } from './pathUtils';
+import { buildKnownForRes, buildSpecialFieldRows, buildTemplateRows, forEachVarNames, insertRowAtPath, makeLeafRow, postProcessEachRefs, reconstructOpGraph } from './rowUtils';
 import { qualifiedPath, sectionOf, sectionRelPath } from './sectionDefs';
 import { CelRef, ExtraEdge, GEdge, GNode, NodeType, OpNode, OutPort, TRow } from './types';
 
@@ -101,30 +102,6 @@ function collectSimpleRefs(template: unknown, known: Set<string>): CelRef[] {
   walk(template); return out;
 }
 
-/** Forward BFS from the forEach section path through op nodes; returns template field paths that are targets. */
-function findForEachUsages(
-  varName: string, nodeId: string,
-  opEdges: ExtraEdge[], opNdIds: Set<string>,
-): string[] {
-  const srcFieldPath = qualifiedPath('forEach', varName);
-  const reachableOps = new Set<string>();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const e of opEdges) {
-      if (!opNdIds.has(e.tgtNodeId) || reachableOps.has(e.tgtNodeId)) continue;
-      const fromSelf = e.srcNodeId === nodeId && (e.srcFieldPath === srcFieldPath || e.srcFieldPath.startsWith(srcFieldPath + '.'));
-      if (fromSelf || reachableOps.has(e.srcNodeId)) { reachableOps.add(e.tgtNodeId); changed = true; }
-    }
-  }
-  const usages = new Set<string>();
-  for (const e of opEdges) {
-    if (!reachableOps.has(e.srcNodeId) || opNdIds.has(e.tgtNodeId)) continue;
-    if (e.tgtNodeId === nodeId && e.tgtFieldPath && sectionOf(e.tgtFieldPath) === 'template')
-      usages.add(e.tgtFieldPath);
-  }
-  return [...usages];
-}
 
 /** Returns true if a condition expression field has any value (non-empty array, or any non-null scalar). */
 // eslint-disable-next-line eqeqeq
@@ -132,6 +109,136 @@ function hasCond(v: unknown): boolean { return Array.isArray(v) ? v.length > 0 :
 
 /** AllRef: a CEL ref augmented with its graph context, used only inside buildGraph. */
 type AllRef = CelRef & { targetId: string; srcNodeId: string; isForEachVarRef?: boolean };
+
+/** Outer-scope variables captured by makeNode — passed explicitly to keep the function testable. */
+interface MakeNodeContext {
+  outPortsMap: Map<string, Map<string, OutPort>>;
+  forEachVarFields: Map<string, Map<string, string[]>>;
+  forEachVarFieldsFlat: Map<string, Set<string>>;
+  opEdges: ExtraEdge[];
+  opNdIds: Set<string>;
+  known: Set<string>;
+}
+
+function makeNode(
+  id: string, type: NodeType, label: string,
+  template: any | null, sublabel: string | undefined, res: any | undefined,
+  ctx: MakeNodeContext,
+): GNode {
+  const { outPortsMap, forEachVarFields, forEachVarFieldsFlat, opEdges, opNdIds, known } = ctx;
+  const opArr   = [...(outPortsMap.get(id) ?? new Map()).values()]
+    .sort((a, b) => a.path.localeCompare(b.path));
+  const opPaths = new Set(opArr.map(p => p.path));
+  const visited = new Set<string>();
+  const varNames = res ? forEachVarNames(res) : [];
+  const knownForRows = res ? buildKnownForRes(res, known) : known;
+  let rows = template ? buildTemplateRows(template, knownForRows, opPaths, visited) : [];
+  // Insert unvisited outPort rows alphabetically alongside template rows.
+  // Look up the actual primitive value so it can be displayed even without a template row.
+  for (const op of opArr.filter(p => !visited.has(p.path))) {
+    const raw = template ? getDeepPath(template, op.path) : undefined;
+    const value = raw !== null && raw !== undefined && typeof raw !== 'object' ? String(raw) : undefined;
+    rows = insertRowAtPath(rows, op.path, { outPort: op, value });
+  }
+  // Remove pass-through forEach var rows, collect bare ${varName} usages, redirect self-refs.
+  const bareVarUsages = new Map<string, string[]>();
+  if (varNames.length) {
+    const varNameSet = new Set(varNames);
+    const flatFields = forEachVarFieldsFlat.get(id) ?? new Set<string>();
+    rows = rows.filter(row => {
+      // Simple direct ref: ${foo.loopvariable} → inPort row where key === accessed field name
+      if (row.inPort && varNameSet.has(row.inPort.ref) && row.inPort.srcPath !== '' && row.key === row.inPort.srcShort)
+        return false;
+      // Complex expr or op-driven: key is a known forEach var field and row has CEL content (not a static value)
+      if (!row.inPort && flatFields.has(row.key) && (!!row.celExpr || !!row.segments || !!row.outPort))
+        return false;
+      return true;
+    });
+    // Capture bare ${varName} usages (srcPath === '') before ref is redirected by postProcessEachRefs.
+    for (const row of rows) {
+      if (row.inPort && row.inPort.srcPath === '' && varNameSet.has(row.inPort.ref) && row.fieldPath) {
+        const vn = row.inPort.ref;
+        if (!bareVarUsages.has(vn)) bareVarUsages.set(vn, []);
+        bareVarUsages.get(vn)!.push(row.fieldPath);
+      }
+    }
+    rows = postProcessEachRefs(rows, id, new Set(['each', ...varNames]));
+  }
+  // Append forEach / includeWhen / readyWhen section rows for resource nodes that have them.
+  const resHasIncludeWhen = res && hasCond(res.includeWhen);
+  const resHasReadyWhen = res && hasCond(res.readyWhen);
+  if (res && (res.forEach?.length || resHasIncludeWhen || resHasReadyWhen)) {
+    const knownForSpec = buildKnownForRes(res, known);
+    const selfRefs = new Set<string>(['each', ...varNames]);
+    // Build outPort map for forEach KV rows from op edges. Any _forEach.<var>[.<field>] path
+    // maps back to the KV row at _forEach.<var> so the KV row carries the confirmed port dot.
+    const forEachOutPorts = new Map<string, OutPort>();
+    for (const e of opEdges) {
+      if (!opNdIds.has(e.srcNodeId) && e.srcNodeId === id && sectionOf(e.srcFieldPath) === 'forEach') {
+        const relPath = sectionRelPath(e.srcFieldPath);
+        const varName = relPath.split('.')[0];
+        const kvPath = qualifiedPath('forEach', varName);
+        if (!forEachOutPorts.has(kvPath)) forEachOutPorts.set(kvPath, { path: kvPath, short: varName });
+      }
+    }
+    const specialRows = buildSpecialFieldRows(res, knownForSpec).map(row =>
+      (!row.isSection && row.fieldPath && forEachOutPorts.has(row.fieldPath))
+        ? { ...row, outPort: forEachOutPorts.get(row.fieldPath) }
+        : row
+    );
+    const processedSpecial = postProcessEachRefs(specialRows, id, selfRefs);
+    const templateHeader: TRow[] = (processedSpecial.length > 0 && rows.length > 0)
+      ? [{ depth: 0, key: 'template', isParent: false, isSection: true, canImport: false, canExport: false }]
+      : [];
+    rows = [...processedSpecial, ...templateHeader, ...rows];
+  }
+  // For fields driven by an op node (concat, replace, etc.), replace the segments display with
+  // celExpr so NodeCard shows the raw template rather than misleading direct-ref source pills.
+  // Runs after special rows are merged so includeWhen/readyWhen/forEach rows are also converted.
+  const opTargetPaths = new Set(
+    opEdges
+      .filter(e => e.tgtNodeId === id && opNdIds.has(e.srcNodeId) && e.srcFieldPath === 'output')
+      .map(e => e.tgtFieldPath)
+  );
+  if (opTargetPaths.size > 0) {
+    rows = rows.map(row => {
+      if (!row.isParent && row.segments && row.fieldPath && opTargetPaths.has(row.fieldPath)) {
+        // eslint-disable-next-line no-unused-vars
+        const { segments: _s, inPort: _i, ...rest } = row;
+        // For template rows, get raw value from template; for special section rows fall back
+        // to reconstructing from segments (getDeepPath won't find _includeWhen.* etc.).
+        const rawVal = template ? getDeepPath(template, row.fieldPath) : undefined;
+        const celExpr = typeof rawVal === 'string' ? rawVal : reconstructTemplate(row.segments!);
+        return { ...rest, celExpr };
+      }
+      return row;
+    });
+  }
+  // Build forEach sub-rows: one output-port row per ${varName.field} access in the template.
+  if (res?.forEach?.length) {
+    const varFieldMap = forEachVarFields.get(id) ?? new Map<string, string[]>();
+    const enriched: TRow[] = [];
+    for (const row of rows) {
+      enriched.push(row);
+      if (!row.isSection && !row.isParent && row.fieldPath && sectionOf(row.fieldPath) === 'forEach') {
+        const varName = sectionRelPath(row.fieldPath);
+        // Only top-level variable rows (not already-sub-field rows like _forEach.role.name).
+        if (varName.includes('.')) continue;
+        for (const field of (varFieldMap.get(varName) ?? [])) {
+          const subFp = qualifiedPath('forEach', varName + '.' + field);
+          // Skip if a user-added (isVirtual) sub-row already exists.
+          if (enriched.some(r => r.fieldPath === subFp)) continue;
+          enriched.push(makeLeafRow(row.depth + 1, field, subFp, undefined, new Set(),
+            { isForEachSubField: true, canImport: false, canExport: true, outPort: { path: subFp, short: field } }));
+        }
+      }
+    }
+    rows = enriched;
+  }
+  // Strip leading '?' from row keys produced by optional-chaining paths (e.g. '?name' → 'name').
+  rows = rows.map(r => r.key.startsWith('?') ? { ...r, key: r.key.slice(1) } : r);
+  return { id, type, label, sublabel, rows, x: 0, y: 0, w: NW, h: nodeH(rows) };
+}
 
 export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; edges: GEdge[]; opNodes: OpNode[]; extraEdges: ExtraEdge[] } {
   const resources: any[] = input?.resources ?? [];
@@ -227,135 +334,10 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
     if (!m.has(e.srcFieldPath)) m.set(e.srcFieldPath, { path: e.srcFieldPath, short });
   }
 
-  const makeNode = (id: string, type: NodeType, label: string, template: any | null, sublabel?: string, res?: any): GNode => {
-    const opArr   = [...(outPortsMap.get(id) ?? new Map()).values()]
-      .sort((a, b) => a.path.localeCompare(b.path));
-    const opPaths = new Set(opArr.map(p => p.path));
-    const visited = new Set<string>();
-    const varNames = res ? forEachVarNames(res) : [];
-    const knownForRows = res ? buildKnownForRes(res, known) : known;
-    let rows = template ? buildTemplateRows(template, knownForRows, opPaths, visited) : [];
-    // Insert unvisited outPort rows alphabetically alongside template rows.
-    // Look up the actual primitive value so it can be displayed even without a template row.
-    for (const op of opArr.filter(p => !visited.has(p.path))) {
-      const raw = template ? getDeepPath(template, op.path) : undefined;
-      const value = raw !== null && raw !== undefined && typeof raw !== 'object' ? String(raw) : undefined;
-      rows = insertRowAtPath(rows, op.path, { outPort: op, value });
-    }
-    // For fields driven by an op node (concat, replace, etc.), replace the segments display with
-    // celExpr so NodeCard shows the raw template rather than misleading direct-ref source pills.
-    const opTargetPaths = new Set(
-      opEdges
-        .filter(e => e.tgtNodeId === id && opNdIds.has(e.srcNodeId) && e.srcFieldPath === 'output')
-        .map(e => e.tgtFieldPath)
-    );
-    if (opTargetPaths.size > 0) {
-      rows = rows.map(row => {
-        if (!row.isParent && row.segments && row.fieldPath && opTargetPaths.has(row.fieldPath)) {
-          // eslint-disable-next-line no-unused-vars
-          const { segments: _s, inPort: _i, ...rest } = row;
-          const rawVal = template ? getDeepPath(template, row.fieldPath) : undefined;
-          return { ...rest, celExpr: typeof rawVal === 'string' ? rawVal : '' };
-        }
-        return row;
-      });
-    }
-    // Remove pass-through forEach var rows, collect bare ${varName} usages, redirect self-refs.
-    const bareVarUsages = new Map<string, string[]>();
-    if (varNames.length) {
-      const varNameSet = new Set(varNames);
-      const flatFields = forEachVarFieldsFlat.get(id) ?? new Set<string>();
-      rows = rows.filter(row => {
-        // Simple direct ref: ${foo.loopvariable} → inPort row where key === accessed field name
-        if (row.inPort && varNameSet.has(row.inPort.ref) && row.inPort.srcPath !== '' && row.key === row.inPort.srcShort)
-          return false;
-        // Complex expr or op-driven: key is a known forEach var field and row has CEL content (not a static value)
-        if (!row.inPort && flatFields.has(row.key) && (!!row.celExpr || !!row.segments || !!row.outPort))
-          return false;
-        return true;
-      });
-      // Capture bare ${varName} usages (srcPath === '') before ref is redirected by postProcessEachRefs.
-      for (const row of rows) {
-        if (row.inPort && row.inPort.srcPath === '' && varNameSet.has(row.inPort.ref) && row.fieldPath) {
-          const vn = row.inPort.ref;
-          if (!bareVarUsages.has(vn)) bareVarUsages.set(vn, []);
-          bareVarUsages.get(vn)!.push(row.fieldPath);
-        }
-      }
-      rows = postProcessEachRefs(rows, id, new Set(['each', ...varNames]));
-    }
-    // Append forEach / includeWhen / readyWhen section rows for resource nodes that have them.
-    const resHasIncludeWhen = res && hasCond(res.includeWhen);
-    const resHasReadyWhen = res && hasCond(res.readyWhen);
-    if (res && (res.forEach?.length || resHasIncludeWhen || resHasReadyWhen)) {
-      const knownForSpec = buildKnownForRes(res, known);
-      const selfRefs = new Set<string>(['each', ...varNames]);
-      // Build outPort map for forEach KV rows from op edges. Any _forEach.<var>[.<field>] path
-      // maps back to the KV row at _forEach.<var> so the KV row carries the confirmed port dot.
-      const forEachOutPorts = new Map<string, OutPort>();
-      for (const e of opEdges) {
-        if (!opNdIds.has(e.srcNodeId) && e.srcNodeId === id && sectionOf(e.srcFieldPath) === 'forEach') {
-          const relPath = sectionRelPath(e.srcFieldPath);
-          const varName = relPath.split('.')[0];
-          const kvPath = qualifiedPath('forEach', varName);
-          if (!forEachOutPorts.has(kvPath)) forEachOutPorts.set(kvPath, { path: kvPath, short: varName });
-        }
-      }
-      const specialRows = buildSpecialFieldRows(res, knownForSpec).map(row =>
-        (!row.isSection && row.fieldPath && forEachOutPorts.has(row.fieldPath))
-          ? { ...row, outPort: forEachOutPorts.get(row.fieldPath) }
-          : row
-      );
-      const processedSpecial = postProcessEachRefs(specialRows, id, selfRefs);
-      const templateHeader: TRow[] = (processedSpecial.length > 0 && rows.length > 0)
-        ? [{ depth: 0, key: 'template', isParent: false, isSection: true, canImport: false, canExport: false }]
-        : [];
-      rows = [...processedSpecial, ...templateHeader, ...rows];
-    }
-    // Build forEach sub-rows.
-    if (res?.forEach?.length) {
-      const varFieldMap = forEachVarFields.get(id) ?? new Map<string, string[]>();
-      // Collect surviving template row paths to avoid adding type-3 sub-rows for still-visible fields.
-      const existingTemplatePaths = new Set(
-        rows.filter(r => !r.isForEachRef && !r.isSection).map(r => r.fieldPath).filter((fp): fp is string => !!fp)
-      );
-      // Insert forEach sub-rows below each forEach KV row.
-      const enriched: TRow[] = [];
-      for (const row of rows) {
-        enriched.push(row);
-        if (!row.isSection && !row.isParent && row.fieldPath && sectionOf(row.fieldPath) === 'forEach') {
-          const varName = sectionRelPath(row.fieldPath);
-          // Sub-rows for ${varName.field} accesses (dotted forEach var refs in template).
-          // fieldPath uses the qualified forEach path so extraPortY can anchor op-node chain edges.
-          for (const field of (varFieldMap.get(varName) ?? [])) {
-            const subFp = qualifiedPath('forEach', varName + '.' + field);
-            enriched.push({ depth: row.depth + 1, key: field, isParent: false, isForEachRef: true, value: field,
-              fieldPath: subFp, canImport: false, canExport: true,
-              outPort: { path: subFp, short: field } });
-          }
-          // Sub-rows for bare ${varName} usages (collected from rows before filtering)
-          for (const fp of (bareVarUsages.get(varName) ?? [])) {
-            enriched.push({ depth: row.depth + 1, key: fp.split('.').pop() ?? fp, isParent: false, isForEachRef: true,
-              value: fp, canImport: false, canExport: true });
-          }
-          // Sub-rows for fields set via op-node chains rooted in this forEach variable.
-          // Only add if the template row was filtered out (i.e. not still visible in the template section).
-          for (const fp of findForEachUsages(varName, id, opEdges, opNdIds)) {
-            if (existingTemplatePaths.has(fp)) continue;
-            enriched.push({ depth: row.depth + 1, key: fp.split('.').pop() ?? fp, isParent: false, isForEachRef: true,
-              value: fp, canImport: false, canExport: true });
-          }
-        }
-      }
-      rows = enriched;
-    }
-    // Strip leading '?' from row keys produced by optional-chaining paths (e.g. '?name' → 'name').
-    rows = rows.map(r => r.key.startsWith('?') ? { ...r, key: r.key.slice(1) } : r);
-    return { id, type, label, sublabel, rows, x: 0, y: 0, w: NW, h: nodeH(rows) };
-  };
+  const ctx: MakeNodeContext = { outPortsMap, forEachVarFields, forEachVarFieldsFlat, opEdges, opNdIds, known };
 
   const nodes: GNode[] = [];
-  nodes.push(makeNode(SCHEMA_NODE_ID, 'schema', 'schema', null));
+  nodes.push(makeNode(SCHEMA_NODE_ID, 'schema', 'schema', null, undefined, undefined, ctx));
   // One node per required resource — node ID = requirementName (also the CEL identifier).
   for (const req of envReqs) {
     const reqName = req.requirementName as string;
@@ -367,7 +349,7 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
     if (req.name)      metadata.name      = req.name;
     if (req.namespace) metadata.namespace = req.namespace;
     if (Object.keys(metadata).length) displayTemplate.metadata = metadata;
-    nodes.push(makeNode(reqName, 'env', reqName, Object.keys(displayTemplate).length ? displayTemplate : null));
+    nodes.push(makeNode(reqName, 'env', reqName, Object.keys(displayTemplate).length ? displayTemplate : null, undefined, undefined, ctx));
   }
   for (const res of resources) {
     if (res.externalRef) {
@@ -377,9 +359,9 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
         kind: res.externalRef.kind,
         ...(res.externalRef.metadata ? { metadata: res.externalRef.metadata } : {}),
       };
-      nodes.push(makeNode(res.id, 'kro-ref', res.id, displayTemplate, undefined, res));
+      nodes.push(makeNode(res.id, 'kro-ref', res.id, displayTemplate, undefined, res, ctx));
     } else {
-      nodes.push(makeNode(res.id, 'kro-resource', res.id, res.template ?? null, undefined, res));
+      nodes.push(makeNode(res.id, 'kro-resource', res.id, res.template ?? null, undefined, res, ctx));
     }
   }
 
@@ -407,7 +389,7 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
       for (const field of fields) {
         const srcPortPath = qualifiedPath('forEach', varName + '.' + field);
         for (const row of node.rows) {
-          if (!row.inPort || row.inPort.ref !== id || row.isForEachRef) continue;
+          if (!row.inPort || row.inPort.ref !== id) continue;
           const topField = row.inPort.srcPath.replace(/\?/g, '').split('.')[0];
           if (topField !== field) continue;
           const tgtPortKey = `${id}::${row.inPort.srcPath}`;
@@ -529,27 +511,34 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
 
 // ── Edge geometry ─────────────────────────────────────────────────────────────
 
-export function rowPortY(node: GNode, rowIdx: number): number {
-  return node.y + HEADER_H + rowIdx * ROW_H + ROW_H / 2;
+export function rowPortY(node: GNode, rowIdx: number, topOffset = 0): number {
+  return node.y + HEADER_H + topOffset + rowIdx * ROW_H + ROW_H / 2;
 }
 
-export function srcPortY(src: GNode, portPath: string): number {
+/** Returns ROW_H if this kro-resource node will show the section-add bar at the top when expanded. */
+export function sectionAddBarOffset(node: GNode): number {
+  if (node.type !== 'kro-resource') return 0;
+  const sections = ['forEach', 'includeWhen', 'readyWhen'] as const;
+  return sections.some(s => !node.rows.some(r => r.isSection && r.key === s)) ? ROW_H : 0;
+}
+
+export function srcPortY(src: GNode, portPath: string, topOffset = 0): number {
   const idx = src.rows.findIndex(r => r.outPort?.path === portPath);
-  return idx >= 0 ? rowPortY(src, idx) : src.y + (src.type === 'kro-resource' ? HEADER_H / 2 : src.h / 2);
+  return idx >= 0 ? rowPortY(src, idx, topOffset) : src.y + (src.type === 'kro-resource' ? HEADER_H / 2 : src.h / 2);
 }
 
-export function tgtPortY(tgt: GNode, portKey: string): number {
+export function tgtPortY(tgt: GNode, portKey: string, topOffset = 0): number {
   // Only match inPort rows: GEdges are created only for exact single-ref fields (same condition
   // as buildTemplateRows inPort case), so there is always a matching inPort row. Matching
   // segments rows would cause the GEdge to land on a composed/multi-segment field that uses
   // the same source ref — producing a spurious extra arrow alongside the correct op-node edge.
   const idx = tgt.rows.findIndex(r => r.inPort && `${r.inPort.ref}::${r.inPort.srcPath}` === portKey);
-  return idx >= 0 ? rowPortY(tgt, idx) : tgt.y + tgt.h / 2;
+  return idx >= 0 ? rowPortY(tgt, idx, topOffset) : tgt.y + tgt.h / 2;
 }
 
-export function extraPortY(node: GNode, fieldPath: string): number {
+export function extraPortY(node: GNode, fieldPath: string, topOffset = 0): number {
   const idx = node.rows.findIndex(r => r.fieldPath === fieldPath);
-  return idx >= 0 ? rowPortY(node, idx) : node.y + node.h / 2;
+  return idx >= 0 ? rowPortY(node, idx, topOffset) : node.y + node.h / 2;
 }
 
 export function makeBezier(sx: number, sy: number, tx: number, ty: number): string {
@@ -557,6 +546,6 @@ export function makeBezier(sx: number, sy: number, tx: number, ty: number): stri
   return `M ${sx} ${sy} C ${sx + d} ${sy} ${tx - d} ${ty} ${tx} ${ty}`;
 }
 
-export function bezierPath(src: GNode, tgt: GNode, edge: GEdge): string {
-  return makeBezier(src.x + src.w, srcPortY(src, edge.srcPortPath), tgt.x, tgtPortY(tgt, edge.tgtPortKey));
+export function bezierPath(src: GNode, tgt: GNode, edge: GEdge, srcTopOffset = 0, tgtTopOffset = 0): string {
+  return makeBezier(src.x + src.w, srcPortY(src, edge.srcPortPath, srcTopOffset), tgt.x, tgtPortY(tgt, edge.tgtPortKey, tgtTopOffset));
 }
