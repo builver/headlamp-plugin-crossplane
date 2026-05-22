@@ -35,7 +35,9 @@ jobs:
 
       - name: Compute checksum
         id: checksum
-        run: echo "sha256=$(sha256sum ${{ steps.tarball.outputs.file }} | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+        run: |
+          file="${{ steps.tarball.outputs.file }}"
+          echo "sha256=$(sha256sum "$file" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Derive version
         id: version
