@@ -13,12 +13,22 @@ and Managed Resources - all without leaving Headlamp.
   Configurations, and every XR kind, plus live Crossplane pod status grouped by
   system/provider/function
 - **Composite Resources & Claims** - list and detail views for all
-  dynamically-defined XR kinds and their claims, with Ready/Synced status chips
-  and composition linkage
-- **Compositions** - browse all Compositions with a visual map showing which XRs
-  and Managed Resources each one owns
+  dynamically-defined XR kinds (Crossplane v1 and v2) and their claims, with
+  Ready/Synced status chips and composition linkage; per-kind sidebar entries
+  registered dynamically at runtime
+- **Compositions** - list and detail pages for all Compositions; the detail
+  page includes a visual kro pipeline graph editor for kro-based steps
+  (graph/YAML toggle with CEL expression editing and schema-aware port wiring)
+- **Managed Resources** - browse ManagedResourceDefinitions with per-kind
+  resource list and detail pages; Managed Resource Activation Policy (MRAP)
+  list and create dialog
 - **Package management** - list and detail pages for Providers, Functions, and
   Configurations including revision history and installed object tables
+- **Map integration** - registers a Crossplane map source in Headlamp's map
+  view; expands XR resource graphs via BFS, resolving dynamic plural names and
+  linking Claims, XRs, Managed Resources, and package resources
+- **Resource glances** - Ready/Synced status chips surfaced on any Crossplane
+  resource card across the Headlamp UI
 
 ## Screenshots
 
@@ -38,14 +48,101 @@ and Managed Resources - all without leaving Headlamp.
 
 ![Composition detail page](docs/images/composition.png)
 
+### Composition graph editor
+
+![Composition graph editor](docs/images/composition-graph.png)
+
 ## Installation
 
-Install via the Headlamp plugin catalog, or manually:
+### Headlamp plugin catalog
+
+The easiest way — search for **headlamp-plugin-crossplane** in the Headlamp
+plugin catalog and install from there.
+
+### Desktop / manual install
 
 1. Download the latest `.tar.gz` from the [Releases](../../releases) page.
 2. Extract into your Headlamp plugins directory (`~/.config/Headlamp/plugins/`
    on macOS/Linux).
 3. Restart Headlamp.
+
+### Kubernetes (Headlamp plugin manager)
+
+Headlamp's built-in plugin manager (available since Headlamp 0.31.0) can
+install and keep plugins up to date automatically. Enable it in the
+[Headlamp Helm chart](https://artifacthub.io/packages/helm/headlamp/headlamp)
+by adding the following to your values:
+
+```yaml
+config:
+  watchPlugins: true
+
+pluginsManager:
+  enabled: true
+  configContent: |
+    plugins:
+      - name: crossplane
+        source: https://artifacthub.io/packages/headlamp/headlamp-plugin-crossplane/crossplane
+        version: 1.0.0
+    installOptions:
+      parallel: true
+```
+
+Replace `version` with the release you want to pin, or omit it to always
+install the latest. The plugin manager runs as a sidecar and handles
+downloading and reloading without manual intervention.
+
+### Kubernetes (init container)
+
+For Headlamp running in a cluster, use the published container image as an init
+container. It copies the plugin files into a shared volume before Headlamp
+starts.
+
+Add the following to your Headlamp `Deployment` (or Helm values):
+
+```yaml
+volumes:
+  - name: headlamp-plugins
+    emptyDir: {}
+
+initContainers:
+  - name: crossplane-plugin
+    image: ghcr.io/builver/headlamp-plugin-crossplane:latest
+    volumeMounts:
+      - name: headlamp-plugins
+        mountPath: /target
+
+containers:
+  - name: headlamp
+    # ... existing headlamp container config ...
+    volumeMounts:
+      - name: headlamp-plugins
+        mountPath: /headlamp/plugins
+```
+
+If you use the [Headlamp Helm chart](https://headlamp.dev/docs/latest/installation/in-cluster/),
+the equivalent values are:
+
+```yaml
+initContainers:
+  - name: crossplane-plugin
+    image: ghcr.io/builver/headlamp-plugin-crossplane:latest
+    volumeMounts:
+      - name: headlamp-plugins
+        mountPath: /target
+
+volumeMounts:
+  - name: headlamp-plugins
+    mountPath: /headlamp/plugins
+
+volumes:
+  - name: headlamp-plugins
+    emptyDir: {}
+```
+
+Images are published to
+[ghcr.io/builver/headlamp-plugin-crossplane](https://github.com/builver/headlamp-plugin-crossplane/pkgs/container/headlamp-plugin-crossplane)
+and tagged by semver (e.g. `1.0.0`, `1.0`) as well as `latest`.
 
 ## Development
 
