@@ -9,7 +9,7 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Tooltip } from '@mui/material';
+import { Box, Link as MuiLink, Tooltip } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import React from 'react';
 import { makeCompositeTypeColumn } from '../../components/columns';
@@ -88,6 +88,25 @@ function PipelineSteps({ item }: { item: KubeObject }) {
   );
 }
 
+function CompositionNameLink({ item }: { item: KubeObject }) {
+  const launch = () => Activity.launch({
+    id: `crossplane-composition-${item.metadata.name}`,
+    title: `Composition ${item.metadata.name}`,
+    hideTitleInHeader: true,
+    location: 'full',
+    cluster: item.cluster,
+    icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
+    content: <CompositionDetailPage name={item.metadata.name} />,
+  });
+  return (
+    <MuiLink component="button" onClick={launch}
+      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
+    >
+      {item.metadata.name}
+    </MuiLink>
+  );
+}
+
 export function CompositionListPage() {
   const filterFunction = useFilterFunc();
   const [compositions, error] = Composition.useList();
@@ -118,26 +137,7 @@ export function CompositionListPage() {
           {
             label: 'Name',
             getValue: item => item.metadata.name,
-            render: item => (
-              <span
-                role="button"
-                tabIndex={-1}
-                style={{ cursor: 'pointer', color: 'inherit', textDecoration: 'underline' }}
-                onClick={() =>
-                  Activity.launch({
-                    id: `crossplane-composition-${item.metadata.name}`,
-                    title: `Composition ${item.metadata.name}`,
-                    hideTitleInHeader: true,
-                    location: 'full',
-                    cluster: item.cluster,
-                    icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
-                    content: <CompositionDetailPage name={item.metadata.name} />,
-                  })
-                }
-              >
-                {item.metadata.name}
-              </span>
-            ),
+            render: item => <CompositionNameLink item={item} />,
           },
           makeCompositeTypeColumn(xrds),
           {

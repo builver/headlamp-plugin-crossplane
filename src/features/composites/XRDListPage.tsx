@@ -1,5 +1,5 @@
 import { Icon } from '@iconify/react';
-import { SectionBox } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { Link, SectionBox } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import {
   Accordion,
@@ -48,7 +48,9 @@ function ScopeSection({ title, description, xrds, scope }: ScopeSectionProps) {
               <Box display="flex" alignItems="center" gap={1}>
                 <Typography fontWeight={500}>{kind}</Typography>
                 <Typography variant="body2" color="textSecondary">
-                  {plural}.{group}
+                  <Link routeName="crossplane-xrd-detail" params={{ name: xrd.metadata.name }}>
+                    {plural}.{group}
+                  </Link>
                 </Typography>
               </Box>
             </AccordionSummary>
