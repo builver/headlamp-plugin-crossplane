@@ -4,7 +4,7 @@ import { Box, Button, IconButton, Paper, Tooltip, Typography } from '@mui/materi
 import { alpha, useTheme } from '@mui/material/styles';
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getGroupVersion } from '../../../components/map/apiPaths';
-import { overlayRowWithTemplate } from './celUtils';
+import { overlayRowWithTemplate, shortFieldName } from './celUtils';
 import {
   CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, K8S_BASE_FIELDS, K8S_MAP_PATHS,
   NODE_CFG, nodeH, nodeIdToRef, NW,
@@ -359,7 +359,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         label = EXPR_NODE_DEFS[srcOp.category]?.label ?? srcOp.category;
         type  = EXPR_NODE_DEFS[srcOp.category]?.outputType;
       } else {
-        label = e.srcFieldPath.replace(/\?/g, '').split('.').pop() ?? e.srcFieldPath.replace(/\?/g, '');
+        label = shortFieldName(e.srcFieldPath);
         type  = getFieldType(e.srcNodeId, e.srcFieldPath);
       }
       const optional = srcOp ? undefined : e.srcFieldPath.includes('?');
@@ -485,7 +485,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           color = cfg ? (dark ? cfg.accentDark : cfg.accent) : userC;
         }
       }
-      const label = e.srcFieldPath.replace(/\?/g, '').split('.').pop() ?? e.srcFieldPath.replace(/\?/g, '');
+      const label = shortFieldName(e.srcFieldPath);
       inner.set(e.tgtFieldPath, { color, label, srcNodeId: e.srcNodeId, srcFieldPath: e.srcFieldPath });
     }
     return map;

@@ -1,7 +1,7 @@
 import { Icon } from '@iconify/react';
 import { Autocomplete, Box, Button, IconButton, Paper, TextField, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
-import { Fragment, memo, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, Fragment, memo, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DOT, HEADER_H, NODE_CFG, NODE_MIN_H, refAccent, refToNodeId, ROW_H, USER_C_DARK, USER_C_LIGHT } from './constants';
 import { PortDot } from './PortDot';
 import { sectionOf, sectionRelPath } from './sectionDefs';
@@ -17,6 +17,44 @@ export { SegmentedControl } from './SegmentedControl';
 export { PortDot } from './PortDot';
 export type { VarPillProps } from './VarPill';
 export { VarPill } from './VarPill';
+
+// ── Local helpers ─────────────────────────────────────────────────────────────
+
+function InvalidCelChip({ expr }: { expr: string }) {
+  return (
+    <Tooltip title={`Invalid or unrecognized CEL: ${expr}`} placement="top"
+      PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
+      <Box component="span" sx={{
+        display: 'inline-flex', alignItems: 'center', gap: 0.25,
+        fontFamily: 'monospace', fontSize: '0.57rem', lineHeight: 1,
+        px: 0.5, py: 0.15, borderRadius: 0.5, flexShrink: 0,
+        bgcolor: alpha('#ef4444', 0.08), color: '#ef4444',
+        border: `1px solid ${alpha('#ef4444', 0.3)}`,
+      }}>
+        <Icon icon="mdi:alert-circle-outline" width={9} />
+        <Box component="span">invalid CEL</Box>
+      </Box>
+    </Tooltip>
+  );
+}
+
+const inputBaseStyle = (userC: string, indent: number): CSSProperties => ({
+  flex: 1, border: 'none', outline: 'none', background: 'transparent',
+  fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC,
+  paddingLeft: `${indent}px`,
+});
+
+function IconBtn({ icon, onClick, width = 12, sx: extraSx }: { icon: string; onClick: () => void; width?: number; sx?: object }) {
+  return (
+    <Box component="span" role="button" tabIndex={-1}
+      onMouseDown={e => e.stopPropagation()}
+      onClick={e => { e.stopPropagation(); onClick(); }}
+      sx={{ display: 'inline-flex', alignItems: 'center', ...extraSx }}
+    >
+      <Icon icon={icon} width={width} />
+    </Box>
+  );
+}
 
 // ── NodeCard ──────────────────────────────────────────────────────────────────
 
@@ -256,31 +294,24 @@ export const NodeCard = memo(function NodeCard({
             </Tooltip>
           )}
           {selected && (node.type === 'kro-resource' || node.type === 'kro-ref') && onDelete && (
-            <Box component="span" role="button" tabIndex={-1}
-              onMouseDown={e => e.stopPropagation()}
-              onClick={e => { e.stopPropagation(); onDelete(node.id); }}
+            <IconBtn icon="mdi:trash-can-outline" onClick={() => onDelete(node.id)}
               sx={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                justifyContent: 'center',
                 width: 16, height: 16, borderRadius: 0.5, flexShrink: 0,
                 color: alpha(accent, 0.6), cursor: 'pointer',
                 '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
-              }}>
-              <Icon icon="mdi:trash-can-outline" width={12} />
-            </Box>
+              }} />
           )}
           {showAddButton && (
-            <Box component="span" role="button" tabIndex={-1}
-              onMouseDown={e => e.stopPropagation()}
-              onClick={e => { e.stopPropagation(); setAddingToParentPath(prev => prev === '' ? null : ''); setAddFieldInput(''); setAddSuggIdx(-1); }}
+            <IconBtn icon="mdi:plus"
+              onClick={() => { setAddingToParentPath(prev => prev === '' ? null : ''); setAddFieldInput(''); setAddSuggIdx(-1); }}
               sx={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                justifyContent: 'center',
                 width: 16, height: 16, borderRadius: 0.5, flexShrink: 0,
                 color: addingToParentPath === '' ? userC : alpha(accent, 0.6), cursor: 'pointer',
                 bgcolor: addingToParentPath === '' ? alpha(userC, 0.12) : 'transparent',
                 '&:hover': { color: userC, bgcolor: alpha(userC, 0.12) },
-              }}>
-              <Icon icon="mdi:plus" width={12} />
-            </Box>
+              }} />
           )}
         </Box>
 
@@ -298,7 +329,7 @@ export const NodeCard = memo(function NodeCard({
                 autoFocus
                 placeholder="forEach var name"
                 value={sectionVarInput}
-                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: '4px' }}
+                style={inputBaseStyle(userC, 4)}
                 onChange={e => setSectionVarInput(e.target.value)}
                 onKeyDown={e => {
                   e.stopPropagation();
@@ -350,7 +381,7 @@ export const NodeCard = memo(function NodeCard({
                 autoFocus
                 placeholder={isFreeFormInline ? 'field name' : 'type a field…'}
                 value={addFieldInput}
-                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: `${inlinePickerIndent}px` }}
+                style={inputBaseStyle(userC, inlinePickerIndent)}
                 onChange={e => { setAddFieldInput(e.target.value); setAddSuggIdx(-1); }}
                 onKeyDown={e => {
                   e.stopPropagation();
@@ -379,7 +410,7 @@ export const NodeCard = memo(function NodeCard({
                 autoFocus
                 placeholder="key name"
                 value={addMapKey}
-                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: `${mapInputIndent}px` }}
+                style={inputBaseStyle(userC, mapInputIndent)}
                 onChange={e => setAddMapKey(e.target.value)}
                 onKeyDown={e => {
                   e.stopPropagation();
@@ -408,7 +439,7 @@ export const NodeCard = memo(function NodeCard({
                   autoFocus
                   placeholder="field name"
                   value={subFieldInput}
-                  style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: `${subIndent}px` }}
+                  style={inputBaseStyle(userC, subIndent)}
                   onChange={e => setSubFieldInput(e.target.value)}
                   onKeyDown={e => {
                     e.stopPropagation();
@@ -445,12 +476,9 @@ export const NodeCard = memo(function NodeCard({
           // True for top-level forEach variable rows (e.g. _forEach.role, not _forEach.role.name)
           const isForEachVarRow = !!(row.fieldPath && sectionOf(row.fieldPath) === 'forEach' && !sectionRelPath(row.fieldPath).includes('.'));
           const forEachSubAddBtn = isForEachVarRow && isExpanded && !isDrawing && onAddSectionItem
-            ? <Box component="span" role="button" tabIndex={-1}
-                onMouseDown={e => e.stopPropagation()}
-                onClick={e => { e.stopPropagation(); setAddingForEachSubVarPath(row.fieldPath!); setSubFieldInput(''); setAddingSectionKey(null); }}
-                sx={{ display: 'inline-flex', alignItems: 'center', px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.45, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }}>
-                <Icon icon="mdi:plus" width={9} />
-              </Box>
+            ? <IconBtn icon="mdi:plus" width={9}
+                onClick={() => { setAddingForEachSubVarPath(row.fieldPath!); setSubFieldInput(''); setAddingSectionKey(null); }}
+                sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.45, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
             : null;
 
           // Section-header rows (forEach / includeWhen / readyWhen labels)
@@ -471,16 +499,12 @@ export const NodeCard = memo(function NodeCard({
                     {row.key}
                   </Typography>
                   {canAdd && (
-                    <Box component="span" role="button" tabIndex={-1}
-                      onMouseDown={e => e.stopPropagation()}
-                      onClick={e => {
-                        e.stopPropagation();
+                    <IconBtn icon="mdi:plus" width={9}
+                      onClick={() => {
                         if (isFE) { setAddingSectionKey(inputOpen ? null : 'forEach'); setSectionVarInput(''); }
                         else { onAddSectionItem!(node.id, secKey); }
                       }}
-                      sx={{ display: 'inline-flex', alignItems: 'center', px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }}>
-                      <Icon icon="mdi:plus" width={9} />
-                    </Box>
+                      sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
                   )}
                 </Box>
                 {inputOpen && (
@@ -491,7 +515,7 @@ export const NodeCard = memo(function NodeCard({
                       autoFocus
                       placeholder="var name"
                       value={sectionVarInput}
-                      style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC, paddingLeft: '18px' }}
+                      style={inputBaseStyle(userC, 18)}
                       onChange={e => setSectionVarInput(e.target.value)}
                       onKeyDown={e => {
                         e.stopPropagation();
@@ -594,31 +618,19 @@ export const NodeCard = memo(function NodeCard({
                       {/^\d+$/.test(row.key) ? `[${row.key}]` : `${row.key}:`}
                     </Typography>
                     {isExpanded && arrayParentPaths?.has(row.fieldPath ?? '') && (
-                      <Box component="span" role="button" tabIndex={-1}
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); onAddArrayItem?.(node.id, row.fieldPath!); }}
-                        sx={{ display: 'inline-flex', alignItems: 'center', px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }}
-                      >
-                        <Icon icon="mdi:plus" width={9} />
-                      </Box>
+                      <IconBtn icon="mdi:plus" width={9}
+                        onClick={() => onAddArrayItem?.(node.id, row.fieldPath!)}
+                        sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
                     )}
                     {isExpanded && !arrayParentPaths?.has(row.fieldPath ?? '') && !mapParentPaths?.has(row.fieldPath ?? '') && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema') && (
-                      <Box component="span" role="button" tabIndex={-1}
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); setAddingToParentPath(row.fieldPath!); setAddFieldInput(''); setAddSuggIdx(-1); }}
-                        sx={{ display: 'inline-flex', alignItems: 'center', px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }}
-                      >
-                        <Icon icon="mdi:plus" width={9} />
-                      </Box>
+                      <IconBtn icon="mdi:plus" width={9}
+                        onClick={() => { setAddingToParentPath(row.fieldPath!); setAddFieldInput(''); setAddSuggIdx(-1); }}
+                        sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
                     )}
                     {isExpanded && mapParentPaths?.has(row.fieldPath ?? '') && (
-                      <Box component="span" role="button" tabIndex={-1}
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); setAddingToMap(row.fieldPath!); setAddMapKey(''); }}
-                        sx={{ display: 'inline-flex', alignItems: 'center', px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }}
-                      >
-                        <Icon icon="mdi:plus" width={9} />
-                      </Box>
+                      <IconBtn icon="mdi:plus" width={9}
+                        onClick={() => { setAddingToMap(row.fieldPath!); setAddMapKey(''); }}
+                        sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
                     )}
                   </>
                 ) : hasSeg ? (
@@ -637,20 +649,7 @@ export const NodeCard = memo(function NodeCard({
                         }
                         if (seg.text === 'expr') {
                           const rawExpr = `\${${seg.srcRef}.${seg.srcPath}}`;
-                          return (
-                            <Tooltip key={si} title={`Invalid or unrecognized CEL: ${rawExpr}`} placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
-                              <Box component="span" sx={{
-                                display: 'inline-flex', alignItems: 'center', gap: 0.25,
-                                fontFamily: 'monospace', fontSize: '0.57rem', lineHeight: 1,
-                                px: 0.5, py: 0.15, borderRadius: 0.5, flexShrink: 0,
-                                bgcolor: alpha('#ef4444', 0.08), color: '#ef4444',
-                                border: `1px solid ${alpha('#ef4444', 0.3)}`,
-                              }}>
-                                <Icon icon="mdi:alert-circle-outline" width={9} />
-                                <Box component="span">invalid CEL</Box>
-                              </Box>
-                            </Tooltip>
-                          );
+                          return <InvalidCelChip key={si} expr={rawExpr} />;
                         }
                         const segColor = refAccent(seg.srcRef!, dark, nodeTypeByRef?.get(seg.srcRef!));
                         return (
@@ -674,20 +673,7 @@ export const NodeCard = memo(function NodeCard({
                       const opInfo = row.fieldPath ? opConnectedFields?.get(row.fieldPath) : undefined;
                       if (!opInfo) {
                         const rawExpr = row.celExpr ?? '';
-                        return (
-                          <Tooltip title={`Invalid or unrecognized CEL: ${rawExpr}`} placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
-                            <Box component="span" sx={{
-                              display: 'inline-flex', alignItems: 'center', gap: 0.25,
-                              fontFamily: 'monospace', fontSize: '0.57rem', lineHeight: 1,
-                              px: 0.5, py: 0.15, borderRadius: 0.5, flexShrink: 0,
-                              bgcolor: alpha('#ef4444', 0.08), color: '#ef4444',
-                              border: `1px solid ${alpha('#ef4444', 0.3)}`,
-                            }}>
-                              <Icon icon="mdi:alert-circle-outline" width={9} />
-                              <Box component="span">invalid CEL</Box>
-                            </Box>
-                          </Tooltip>
-                        );
+                        return <InvalidCelChip expr={rawExpr} />;
                       }
                       return (
                         <VarPill
@@ -751,7 +737,7 @@ export const NodeCard = memo(function NodeCard({
                     {isEditing
                       // eslint-disable-next-line jsx-a11y/no-autofocus
                       ? <input autoFocus value={editingValue}
-                          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
+                          style={{ ...inputBaseStyle(userC, 0), minWidth: 0 }}
                           onChange={e => setEditingValue(e.target.value)}
                           onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitValueEdit(row.fieldPath!, editingValue); else if (e.key === 'Escape') { setEditingRowPath(null); setEditingValue(''); } }}
                           onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
@@ -778,7 +764,7 @@ export const NodeCard = memo(function NodeCard({
                     {isEditing
                       // eslint-disable-next-line jsx-a11y/no-autofocus
                       ? <input autoFocus value={editingValue}
-                          style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'monospace', fontSize: '0.6rem', color: userC, caretColor: userC }}
+                          style={{ ...inputBaseStyle(userC, 0), minWidth: 0 }}
                           onChange={e => setEditingValue(e.target.value)}
                           onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') commitValueEdit(row.fieldPath!, editingValue); else if (e.key === 'Escape') { setEditingRowPath(null); setEditingValue(''); } }}
                           onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
@@ -802,17 +788,14 @@ export const NodeCard = memo(function NodeCard({
                 </Tooltip>
               )}
               {isRowHovered && onDeleteRow && (
-                <Box component="span" role="button" tabIndex={-1}
-                  onMouseDown={e => e.stopPropagation()}
-                  onClick={e => { e.stopPropagation(); onDeleteRow(node.id, row.fieldPath!); }}
+                <IconBtn icon="mdi:close" width={10}
+                  onClick={() => onDeleteRow(node.id, row.fieldPath!)}
                   sx={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    justifyContent: 'center',
                     width: 14, height: 14, borderRadius: 0.3, flexShrink: 0, mr: 0.5, cursor: 'pointer',
                     color: alpha('#ef4444', 0.5),
                     '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.1) },
-                  }}>
-                  <Icon icon="mdi:close" width={10} />
-                </Box>
+                  }} />
               )}
             </Box>
             {addInputAfterIdx === i && inlineMapInput}
@@ -929,17 +912,13 @@ export function DraftNodeCard({ node, screenLeft, screenTop, dark, addForm, kind
             sx={{ color: accent, fontSize: '0.72rem', lineHeight: 1, flex: 1 }}>
             Add resource
           </Typography>
-          <Box component="span" role="button" tabIndex={-1}
-            onMouseDown={e => e.stopPropagation()}
-            onClick={e => { e.stopPropagation(); onCancel(); }}
+          <IconBtn icon="mdi:close" onClick={onCancel}
             sx={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              justifyContent: 'center',
               width: 16, height: 16, borderRadius: 0.5, flexShrink: 0,
               color: alpha(accent, 0.6), cursor: 'pointer',
               '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
-            }}>
-            <Icon icon="mdi:close" width={12} />
-          </Box>
+            }} />
         </Box>
 
         {/* Form body */}

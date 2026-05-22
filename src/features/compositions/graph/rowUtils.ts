@@ -1,5 +1,5 @@
 import { AstCall, CelNode, celNodeToCelInner, parseCelAst } from './celAst';
-import { celInterpRe, extractGroup, isSimplePath, parseSegments } from './celUtils';
+import { collectCelMatches, extractGroup, parseSegments,parseSingleRefMatch } from './celUtils';
 import { refToNodeId, VAR_FIELD_PREFIX } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { deleteDeepPath, getDeepPath, setDeepPath } from './pathUtils';
@@ -15,17 +15,10 @@ function parseScalarCelValue(
   val: string,
   knownIds: Set<string>,
 ): Pick<TRow, 'inPort' | 'segments' | 'celExpr' | 'value'> {
-  const CEL_RE = celInterpRe();
-  const matches: RegExpExecArray[] = [];
-  let mm: RegExpExecArray | null;
-  while ((mm = CEL_RE.exec(val)) !== null) {
-    if (knownIds.has(mm[1])) matches.push(mm);
-  }
-  if (matches.length === 1 && val.trim() === matches[0][0] && isSimplePath(matches[0][2])) {
-    const srcPath = matches[0][2];
-    const optional = srcPath.includes('?');
-    const srcShort = srcPath.replace(/\?/g, '').split('.').pop() ?? srcPath.replace(/\?/g, '');
-    return { inPort: { ref: matches[0][1], srcPath, srcShort, optional } };
+  const matches = collectCelMatches(val, knownIds);
+  const single = parseSingleRefMatch(matches, val);
+  if (single) {
+    return { inPort: { ref: single.ref, srcPath: single.srcPath, srcShort: single.srcShort, optional: single.optional } };
   } else if (matches.length > 0) {
     return { segments: parseSegments(val, knownIds) };
   }

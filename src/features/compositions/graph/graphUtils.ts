@@ -1,4 +1,4 @@
-import { celInterpRe, findCelRefs, isSimplePath, reconstructTemplate } from './celUtils';
+import { collectCelMatches, findCelRefs, parseSingleRefMatch, reconstructTemplate, walkTemplate } from './celUtils';
 import { EDGE_TYPE_FOR, HEADER_H, HG, NODE_MIN_H, nodeH, nodeIdToRef, NW, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refToNodeId, ROW_H, SCHEMA_NODE_ID, VAR_FIELD_PREFIX, varFieldLeafRow, VG } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { getDeepPath } from './pathUtils';
@@ -86,20 +86,12 @@ export function dagLayout(
  */
 function collectSimpleRefs(template: unknown, known: Set<string>): CelRef[] {
   const out: CelRef[] = [];
-  function walk(obj: unknown): void {
-    if (typeof obj === 'string') {
-      const RE = celInterpRe();
-      const matches: RegExpExecArray[] = [];
-      let m: RegExpExecArray | null;
-      while ((m = RE.exec(obj)) !== null) { if (known.has(m[1])) matches.push(m); }
-      if (matches.length === 1 && obj.trim() === matches[0][0] && isSimplePath(matches[0][2])) {
-        const [, ref, path] = matches[0];
-        out.push({ srcRef: ref, srcPath: path, srcShort: path.split('.').pop() ?? path });
-      }
-    } else if (Array.isArray(obj)) obj.forEach(walk);
-    else if (obj !== null && typeof obj === 'object') Object.values(obj as Record<string, unknown>).forEach(walk);
-  }
-  walk(template); return out;
+  walkTemplate(template, (s: string) => {
+    const matches = collectCelMatches(s, known);
+    const single = parseSingleRefMatch(matches, s);
+    if (single) out.push({ srcRef: single.ref, srcPath: single.srcPath, srcShort: single.srcShort });
+  });
+  return out;
 }
 
 

@@ -1,6 +1,6 @@
 import { AstRef, CelNode, parseCelTemplate } from './celAst';
 import { refToNodeId } from './constants';
-import { CelRef, RowSegment, TRow, TypeCompat } from './types';
+import { CelRef, RowSegment, TRow } from './types';
 
 /** Creates a fresh `${refId.path}` CEL interpolation regex. Always returns a new instance (g flag). */
 export const celInterpRe = () => /\$\{([a-zA-Z_][a-zA-Z0-9_]*)\.([^}]+)\}/g;
@@ -21,6 +21,42 @@ export const OP_DISPLAY: Record<string, string> = {
   ' >= ': '≥',   ' <= ': '≤',
 };
 
+/** Returns the last dot-segment of a path, with `?` optional-chaining markers stripped. */
+export function shortFieldName(path: string): string {
+  const clean = path.replace(/\?/g, '');
+  return clean.split('.').pop() ?? clean;
+}
+
+/** Runs the CEL interpolation regex over `str`, returning only matches whose ref is in `knownIds`. */
+export function collectCelMatches(str: string, knownIds: Set<string>): RegExpExecArray[] {
+  const RE = celInterpRe();
+  const matches: RegExpExecArray[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = RE.exec(str)) !== null) { if (knownIds.has(m[1])) matches.push(m); }
+  return matches;
+}
+
+/**
+ * If `matches` contains exactly one match and `val` is exactly that interpolation with a simple
+ * dot-path, returns the parsed components. Returns null otherwise.
+ */
+export function parseSingleRefMatch(
+  matches: RegExpExecArray[], val: string,
+): { ref: string; srcPath: string; srcShort: string; optional: boolean } | null {
+  if (matches.length !== 1 || val.trim() !== matches[0][0] || !isSimplePath(matches[0][2])) return null;
+  const srcPath = matches[0][2];
+  return { ref: matches[0][1], srcPath, srcShort: shortFieldName(srcPath), optional: srcPath.includes('?') };
+}
+
+/** Recursively walks an unknown value, calling `onString` for every string leaf. */
+export function walkTemplate(obj: unknown, onString: (s: string) => void): void {
+  if (typeof obj === 'string') { onString(obj); }
+  else if (Array.isArray(obj)) { obj.forEach(v => walkTemplate(v, onString)); }
+  else if (obj !== null && typeof obj === 'object') {
+    Object.values(obj as Record<string, unknown>).forEach(v => walkTemplate(v, onString));
+  }
+}
+
 /** Splits a CEL-interpolated string into typed segments for display. */
 export function parseSegments(val: string, known: Set<string>): RowSegment[] {
   const RE = celInterpRe();
@@ -32,9 +68,7 @@ export function parseSegments(val: string, known: Set<string>): RowSegment[] {
     const ref = m[1]; const path = m[2];
     const srcNodeId = refToNodeId(ref);
     if (known.has(ref)) {
-      const displayText = isSimplePath(path)
-        ? (path.replace(/\?/g, '').split('.').pop() ?? path)
-        : 'expr';
+      const displayText = isSimplePath(path) ? shortFieldName(path) : 'expr';
       segs.push({ kind: 'cel', text: displayText, srcRef: ref, srcPath: path, srcNodeId });
     } else {
       segs.push({ kind: 'literal', text: m[0] });
@@ -61,26 +95,22 @@ function collectAstRefs(node: CelNode, out: AstRef[]): void {
 
 export function findCelRefs(template: unknown, known: Set<string>): CelRef[] {
   const seen = new Set<string>(); const out: CelRef[] = [];
-  function walk(obj: unknown): void {
-    if (typeof obj === 'string') {
-      for (const seg of parseCelTemplate(obj, known)) {
-        if (seg.kind !== 'interp') continue;
-        const refs: AstRef[] = [];
-        collectAstRefs(seg.cel, refs);
-        for (const ref of refs) {
-          if (!ref.fieldPath || !known.has(ref.nodeRef)) continue;
-          const k = `${ref.nodeRef}::${ref.fieldPath}`;
-          if (!seen.has(k)) {
-            seen.add(k);
-            const srcShort = ref.fieldPath.replace(/\?/g, '').split('.').pop() ?? ref.fieldPath.replace(/\?/g, '');
-            out.push({ srcRef: ref.nodeRef, srcPath: ref.fieldPath, srcShort });
-          }
+  walkTemplate(template, (s: string) => {
+    for (const seg of parseCelTemplate(s, known)) {
+      if (seg.kind !== 'interp') continue;
+      const refs: AstRef[] = [];
+      collectAstRefs(seg.cel, refs);
+      for (const ref of refs) {
+        if (!ref.fieldPath || !known.has(ref.nodeRef)) continue;
+        const k = `${ref.nodeRef}::${ref.fieldPath}`;
+        if (!seen.has(k)) {
+          seen.add(k);
+          out.push({ srcRef: ref.nodeRef, srcPath: ref.fieldPath, srcShort: shortFieldName(ref.fieldPath) });
         }
       }
-    } else if (Array.isArray(obj)) obj.forEach(walk);
-    else if (obj && typeof obj === 'object') Object.values(obj as Record<string, unknown>).forEach(walk);
-  }
-  walk(template); return out;
+    }
+  });
+  return out;
 }
 
 /** Extracts balanced-parentheses content starting at `from`.
@@ -149,20 +179,6 @@ export function validateCelInner(s: string): string | null {
   return null;
 }
 
-/**
- * Type compatibility between a source field type and the target field type.
- * 'ok'           → types match or are both numeric
- * 'coerce'       → target is string, source is not — usually safe with string()
- * 'incompatible' → types differ in a way that will likely cause a CEL runtime error
- */
-export function typeCompatibility(srcType: string | undefined, tgtType: string | undefined): TypeCompat {
-  if (!srcType || !tgtType || srcType === tgtType || tgtType === 'any' || srcType === 'any') return 'ok';
-  const numeric = new Set(['integer', 'number']);
-  if (numeric.has(srcType) && numeric.has(tgtType)) return 'ok';
-  if (tgtType === 'string') return 'coerce';
-  return 'incompatible';
-}
-
 /** Rebuilds raw CEL string from RowSegment[]. */
 export function reconstructTemplate(segments: RowSegment[]): string {
   return segments.map(s => s.kind === 'cel' ? `\${${s.srcRef}.${s.srcPath}}` : s.text).join('');
@@ -176,18 +192,11 @@ export function reconstructTemplate(segments: RowSegment[]): string {
  */
 export function overlayRowWithTemplate(row: TRow, template: string, knownIds: Set<string>): TRow {
   const base = { ...row, inPort: undefined, segments: undefined, celExpr: undefined, value: undefined };
-  const CEL_RE = celInterpRe();
-  const matches: RegExpExecArray[] = [];
-  let mm: RegExpExecArray | null;
-  while ((mm = CEL_RE.exec(template)) !== null) {
-    if (knownIds.has(mm[1])) matches.push(mm);
-  }
+  const matches = collectCelMatches(template, knownIds);
   // Simple single-ref template → keep inPort display so the ? toggle stays available
-  if (matches.length === 1 && template.trim() === matches[0][0] && isSimplePath(matches[0][2])) {
-    const srcPath = matches[0][2];
-    const optional = srcPath.includes('?');
-    const srcShort = srcPath.replace(/\?/g, '').split('.').pop() ?? srcPath.replace(/\?/g, '');
-    return { ...base, inPort: { ref: matches[0][1], srcPath, srcShort, optional } };
+  const single = parseSingleRefMatch(matches, template);
+  if (single) {
+    return { ...base, inPort: { ref: single.ref, srcPath: single.srcPath, srcShort: single.srcShort, optional: single.optional } };
   }
   if (matches.length > 0) return { ...base, segments: parseSegments(template, knownIds) };
   if (/^\$\{(true|false|null|-?\d+(?:\.\d+)?|"[^"]*"|'[^']*')\}$/.test(template)) return { ...base, value: template };
