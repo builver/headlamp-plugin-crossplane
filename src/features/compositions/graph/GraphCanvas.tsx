@@ -27,6 +27,11 @@ import {
 import { typeCompat } from './typeUtils';
 import { useCompositionSchemas } from './useCompositionSchemas';
 
+/** Imperatively update all SVG path elements inside a `<g>` with a new `d` attribute. */
+function setEdgePaths(g: SVGGElement, d: string): void {
+  g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
+}
+
 // ── GraphCanvas ───────────────────────────────────────────────────────────────
 
 export interface GraphCanvasProps {
@@ -451,6 +456,10 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   extraEdgesRef.current = extraEdges;
   const opNodesRef = useRef(opNodes);
   opNodesRef.current = opNodes;
+  const opNodesByIdRef = useRef(opNodesById);
+  opNodesByIdRef.current = opNodesById;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   // SVG <g> element refs — keyed by edge id — for direct path updates during drag.
   const edgeGroupRefs      = useRef(new Map<string, SVGGElement>());
@@ -669,8 +678,10 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const dragId          = useRef<string | null>(null);
   const dragOrigin      = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
   const dragCurrentPos  = useRef({ x: 0, y: 0 });
+  const draggedElRef    = useRef<HTMLDivElement | null>(null);
   const hasDragged      = useRef(false); // true if the current node drag moved the pointer
   const opDragCurrentPos = useRef({ x: 0, y: 0 });
+  const opDraggedElRef  = useRef<HTMLDivElement | null>(null);
 
   const screenToCanvas = useCallback((sx: number, sy: number) => {
     const r = containerRef.current?.getBoundingClientRect();
@@ -793,6 +804,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     opDragId.current = id;
     opHasDragged.current = false;
     opDragOrigin.current = { mx: e.clientX, my: e.clientY, nx: node.x, ny: node.y };
+    opDraggedElRef.current = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-opnode-id="${id}"]`) ?? null;
   }, [opNodes]);
 
   const onOpNodeInputPortUp = useCallback((e: MouseEvent, id: string, portName: string) => {
@@ -945,6 +957,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       setNodes(prev => prev.map(nd => nd.id === DRAFT_NODE_ID ? { ...nd, x: nx, y: ny } : nd));
     }
     dragOrigin.current = { mx: e.clientX, my: e.clientY, nx, ny };
+    draggedElRef.current = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-node-id="${id}"]`) ?? null;
     setActive(true);
   }, [nodes, drawing]);
 
@@ -989,17 +1002,20 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const src = e.source === nodeId ? moved : displayNodeMapRef.current.get(e.source);
       const tgt = e.target === nodeId ? moved : displayNodeMapRef.current.get(e.target);
       if (!src || !tgt) continue;
-      const sy = srcPortY(src, e.srcPortPath, 0);
-      const ty = tgtPortY(tgt, e.tgtPortKey, 0);
+      const sel = selectedRef.current;
+      const srcOff = src.id === sel ? sectionAddBarOffset(src) : 0;
+      const tgtOff = tgt.id === sel ? sectionAddBarOffset(tgt) : 0;
+      const sy = srcPortY(src, e.srcPortPath, srcOff);
+      const ty = tgtPortY(tgt, e.tgtPortKey, tgtOff);
       const isSelfLoop = e.source === e.target;
-      const d = isSelfLoop ? makeBezier(src.x + src.w, sy, src.x, ty) : bezierPath(src, tgt, e, 0, 0);
-      g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
+      const d = isSelfLoop ? makeBezier(src.x + src.w, sy, src.x, ty) : bezierPath(src, tgt, e, srcOff, tgtOff);
+      setEdgePaths(g, d);
     }
 
     for (const e of extraEdgesRef.current) {
       if (e.srcNodeId !== nodeId && e.tgtNodeId !== nodeId) continue;
-      const srcOp = opNodesRef.current.find(n => n.id === e.srcNodeId);
-      const tgtOp = opNodesRef.current.find(n => n.id === e.tgtNodeId);
+      const srcOp = opNodesByIdRef.current.get(e.srcNodeId);
+      const tgtOp = opNodesByIdRef.current.get(e.tgtNodeId);
       const g = extraEdgeGroupRefs.current.get(e.id);
       if (!g) continue;
 
@@ -1011,7 +1027,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         const srcNode = e.srcNodeId === nodeId ? moved : displayNodeMapRef.current.get(e.srcNodeId);
         if (!srcNode) continue;
         sx2 = srcNode.x + srcNode.w;
-        sy2 = extraPortY(srcNode, e.srcFieldPath, 0);
+        sy2 = extraPortY(srcNode, e.srcFieldPath, srcNode.id === selectedRef.current ? sectionAddBarOffset(srcNode) : 0);
       }
 
       let tx2: number;
@@ -1022,17 +1038,17 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         const tgtNode = e.tgtNodeId === nodeId ? moved : displayNodeMapRef.current.get(e.tgtNodeId);
         if (!tgtNode) continue;
         tx2 = tgtNode.x;
-        ty2 = extraPortY(tgtNode, e.tgtFieldPath, 0);
+        ty2 = extraPortY(tgtNode, e.tgtFieldPath, tgtNode.id === selectedRef.current ? sectionAddBarOffset(tgtNode) : 0);
       }
 
       const d = makeBezier(sx2, sy2, tx2, ty2);
-      g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
+      setEdgePaths(g, d);
     }
   }, []);
 
   /** Updates SVG path `d` attributes for all extra edges connected to a dragged op node. */
   const updateDraggedOpNodeEdges = useCallback((opNodeId: string, pos: { x: number; y: number }) => {
-    const opNode = opNodesRef.current.find(n => n.id === opNodeId);
+    const opNode = opNodesByIdRef.current.get(opNodeId);
     if (!opNode) return;
     const moved = { ...opNode, x: pos.x, y: pos.y };
 
@@ -1046,14 +1062,14 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       if (e.srcNodeId === opNodeId) {
         ({ sx: sx2, sy: sy2 } = opNodeSrcCoords(moved, e.srcFieldPath));
       } else {
-        const srcOp2 = opNodesRef.current.find(n => n.id === e.srcNodeId);
+        const srcOp2 = opNodesByIdRef.current.get(e.srcNodeId);
         if (srcOp2) {
           ({ sx: sx2, sy: sy2 } = opNodeSrcCoords(srcOp2, e.srcFieldPath));
         } else {
           const srcNode = displayNodeMapRef.current.get(e.srcNodeId);
           if (!srcNode) continue;
           sx2 = srcNode.x + srcNode.w;
-          sy2 = extraPortY(srcNode, e.srcFieldPath, 0);
+          sy2 = extraPortY(srcNode, e.srcFieldPath, srcNode.id === selectedRef.current ? sectionAddBarOffset(srcNode) : 0);
         }
       }
 
@@ -1062,19 +1078,19 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       if (e.tgtNodeId === opNodeId) {
         ({ tx: tx2, ty: ty2 } = opNodeTgtCoords(moved, e.tgtFieldPath));
       } else {
-        const tgtOp2 = opNodesRef.current.find(n => n.id === e.tgtNodeId);
+        const tgtOp2 = opNodesByIdRef.current.get(e.tgtNodeId);
         if (tgtOp2) {
           ({ tx: tx2, ty: ty2 } = opNodeTgtCoords(tgtOp2, e.tgtFieldPath));
         } else {
           const tgtNode = displayNodeMapRef.current.get(e.tgtNodeId);
           if (!tgtNode) continue;
           tx2 = tgtNode.x;
-          ty2 = extraPortY(tgtNode, e.tgtFieldPath, 0);
+          ty2 = extraPortY(tgtNode, e.tgtFieldPath, tgtNode.id === selectedRef.current ? sectionAddBarOffset(tgtNode) : 0);
         }
       }
 
       const d = makeBezier(sx2, sy2, tx2, ty2);
-      g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
+      setEdgePaths(g, d);
     }
   }, []);
 
@@ -1084,8 +1100,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const dx = (e.clientX - dragOrigin.current.mx) / zoomRef.current;
       const dy = (e.clientY - dragOrigin.current.my) / zoomRef.current;
       dragCurrentPos.current = { x: dragOrigin.current.nx + dx, y: dragOrigin.current.ny + dy };
-      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-node-id="${dragId.current}"]`);
-      if (el) el.style.transform = `translate(${dx}px,${dy}px)`;
+      if (draggedElRef.current) draggedElRef.current.style.transform = `translate(${dx}px,${dy}px)`;
       updateDraggedNodeEdges(dragId.current, dragCurrentPos.current);
     }
     if (opDragId.current) {
@@ -1093,8 +1108,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const dx = (e.clientX - opDragOrigin.current.mx) / zoomRef.current;
       const dy = (e.clientY - opDragOrigin.current.my) / zoomRef.current;
       opDragCurrentPos.current = { x: opDragOrigin.current.nx + dx, y: opDragOrigin.current.ny + dy };
-      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-opnode-id="${opDragId.current}"]`);
-      if (el) el.style.transform = `translate(${dx}px,${dy}px)`;
+      if (opDraggedElRef.current) opDraggedElRef.current.style.transform = `translate(${dx}px,${dy}px)`;
       updateDraggedOpNodeEdges(opDragId.current, opDragCurrentPos.current);
     }
     if (opResizeId.current) {
@@ -1157,8 +1171,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     // Commit node drag: clear DOM transform, write final position to React state once.
     const upDragId = dragId.current;
     if (upDragId && hasDragged.current) {
-      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-node-id="${upDragId}"]`);
-      if (el) el.style.transform = '';
+      if (draggedElRef.current) draggedElRef.current.style.transform = '';
+      draggedElRef.current = null;
       const fp = dragCurrentPos.current;
       setNodes(prev => prev.map(n => n.id === upDragId ? { ...n, x: fp.x, y: fp.y } : n));
     }
@@ -1166,8 +1180,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     // Commit op-node drag similarly.
     const upOpDragId = opDragId.current;
     if (upOpDragId && opHasDragged.current) {
-      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-opnode-id="${upOpDragId}"]`);
-      if (el) el.style.transform = '';
+      if (opDraggedElRef.current) opDraggedElRef.current.style.transform = '';
+      opDraggedElRef.current = null;
       const fp = opDragCurrentPos.current;
       setOpNodes(prev => prev.map(n => n.id === upOpDragId ? { ...n, x: fp.x, y: fp.y } : n));
     }
