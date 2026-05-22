@@ -89,6 +89,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
     <div
       role="button"
       tabIndex={0}
+      data-opnode-id={node.id}
       style={{
         position: 'absolute', left: node.x, top: node.y,
         width: OP_NODE_W, height: cardH,

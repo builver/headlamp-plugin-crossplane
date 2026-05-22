@@ -179,6 +179,7 @@ export const NodeCard = memo(function NodeCard({
   return (
     <div
       role="button" tabIndex={0}
+      data-node-id={node.id}
       style={{ position: 'absolute', left: node.x, top: node.y, width: node.w, height: displayH,
         cursor: isDrawing ? 'crosshair' : 'grab', zIndex: 2,
         opacity: dimmed ? 0.25 : 1, transition: 'opacity 0.15s' }}

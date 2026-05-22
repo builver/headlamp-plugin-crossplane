@@ -1,5 +1,5 @@
 import { celInterpRe, findCelRefs, isSimplePath, reconstructTemplate } from './celUtils';
-import { EDGE_TYPE_FOR, HEADER_H, HG, NODE_MIN_H, nodeH, nodeIdToRef, NW, OP_NODE_PORT_H, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refToNodeId, ROW_H, SCHEMA_NODE_ID, VG } from './constants';
+import { EDGE_TYPE_FOR, HEADER_H, HG, NODE_MIN_H, nodeH, nodeIdToRef, NW, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refToNodeId, ROW_H, SCHEMA_NODE_ID, VAR_FIELD_PREFIX, varFieldLeafRow, VG } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { getDeepPath } from './pathUtils';
 import { buildKnownForRes, buildSpecialFieldRows, buildTemplateRows, forEachVarNames, insertRowAtPath, makeLeafRow, postProcessEachRefs, reconstructOpGraph } from './rowUtils';
@@ -548,4 +548,40 @@ export function makeBezier(sx: number, sy: number, tx: number, ty: number): stri
 
 export function bezierPath(src: GNode, tgt: GNode, edge: GEdge, srcTopOffset = 0, tgtTopOffset = 0): string {
   return makeBezier(src.x + src.w, srcPortY(src, edge.srcPortPath, srcTopOffset), tgt.x, tgtPortY(tgt, edge.tgtPortKey, tgtTopOffset));
+}
+
+/**
+ * Canvas coordinates of the output port of an op node for an extra edge.
+ * Handles both var-field ports and the standard output port.
+ */
+export function opNodeSrcCoords(node: OpNode, srcFieldPath: string): { sx: number; sy: number } {
+  const sx = node.x + OP_NODE_W;
+  let sy: number;
+  if (srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
+    const vp = srcFieldPath.slice(VAR_FIELD_PREFIX.length);
+    const def = EXPR_NODE_DEFS[node.category];
+    const vpi = def?.inputs.findIndex(p => p.name === 'var') ?? 0;
+    const vfs = node.varFields ?? [];
+    sy = node.y + OP_NODE_HDR_H + varFieldLeafRow(vfs, vpi, Math.max(0, vfs.indexOf(vp))) * OP_NODE_PORT_H + OP_NODE_PORT_H / 2;
+  } else {
+    const def = EXPR_NODE_DEFS[node.category];
+    const pc = def?.variadic ? (node.portCount ?? def.inputs.length) : (def?.inputs.length ?? 1);
+    sy = opNodeOutputPortY(node, pc);
+  }
+  return { sx, sy };
+}
+
+/**
+ * Canvas coordinates of an input port of an op node for an extra edge.
+ */
+export function opNodeTgtCoords(node: OpNode, tgtFieldPath: string): { tx: number; ty: number } {
+  const def = EXPR_NODE_DEFS[node.category];
+  const portIdx = def?.variadic
+    ? (tgtFieldPath.charCodeAt(0) - 65)
+    : (def?.inputs.findIndex(p => p.name === tgtFieldPath) ?? 0);
+  const tgtVarPortIdx = def?.hasPredicate ? def.inputs.findIndex(p => p.name === 'var') : -1;
+  const tgtOffset = tgtVarPortIdx >= 0 && portIdx > tgtVarPortIdx
+    ? opNodeVarFieldExtraRows(node.varFields ?? []) * OP_NODE_PORT_H
+    : 0;
+  return { tx: node.x, ty: opNodeInputPortY(node, portIdx) + tgtOffset };
 }

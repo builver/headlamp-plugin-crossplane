@@ -8,12 +8,12 @@ import { overlayRowWithTemplate } from './celUtils';
 import {
   CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, K8S_BASE_FIELDS, K8S_MAP_PATHS,
   NODE_CFG, nodeH, nodeIdToRef, NW,
-  OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
-  ROW_H, SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT, VAR_FIELD_PREFIX, varFieldLeafRow,
+  OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
+  ROW_H, SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT, VAR_FIELD_PREFIX,
 } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { ConnectedPortInfo, ExprOpNodeCard } from './ExprOpNodeCard';
-import { bezierPath, buildGraph, extraPortY, makeBezier, sectionAddBarOffset, srcPortY, tgtPortY } from './graphUtils';
+import { bezierPath, buildGraph, extraPortY, makeBezier, opNodeSrcCoords, opNodeTgtCoords, sectionAddBarOffset, srcPortY, tgtPortY } from './graphUtils';
 import { DraftNodeCard, NodeCard } from './NodeCard';
 import { OpNodePalette } from './OpNodePalette';
 import { applyExtraEdgesToInput, applyFieldEditsToInput, buildTemplateRows, insertRowAtPath, makeLeafRow, reindexPathAfterDelete, removeRowAtPath } from './rowUtils';
@@ -442,6 +442,20 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   /** Node map keyed on display rows (includes injected info rows) — used for SVG edge Y calculations. */
   const displayNodeMap = useMemo(() => new Map(nodesForDisplay.map(n => [n.id, n])), [nodesForDisplay]);
 
+  // Always-current refs so stable drag callbacks can read latest React state without deps.
+  const displayNodeMapRef = useRef(displayNodeMap);
+  displayNodeMapRef.current = displayNodeMap;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+  const extraEdgesRef = useRef(extraEdges);
+  extraEdgesRef.current = extraEdges;
+  const opNodesRef = useRef(opNodes);
+  opNodesRef.current = opNodes;
+
+  // SVG <g> element refs — keyed by edge id — for direct path updates during drag.
+  const edgeGroupRefs      = useRef(new Map<string, SVGGElement>());
+  const extraEdgeGroupRefs = useRef(new Map<string, SVGGElement>());
+
   /**
    * For each regular (non-op) node: maps fieldPath → source accent color for ExtraEdges that
    * target that field but are not yet saved (so not reflected in row.inPort).
@@ -651,10 +665,12 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     return related;
   }, [selected, edges, extraEdges]);
 
-  const bgWasClean  = useRef(false); // true if bg mousedown had no subsequent mouse movement
-  const dragId      = useRef<string | null>(null);
-  const dragOrigin  = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
-  const hasDragged  = useRef(false); // true if the current node drag moved the pointer
+  const bgWasClean      = useRef(false); // true if bg mousedown had no subsequent mouse movement
+  const dragId          = useRef<string | null>(null);
+  const dragOrigin      = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
+  const dragCurrentPos  = useRef({ x: 0, y: 0 });
+  const hasDragged      = useRef(false); // true if the current node drag moved the pointer
+  const opDragCurrentPos = useRef({ x: 0, y: 0 });
 
   const screenToCanvas = useCallback((sx: number, sy: number) => {
     const r = containerRef.current?.getBoundingClientRect();
@@ -958,21 +974,128 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     addFieldToNode(nodeId, fieldPath);
   }, [addFieldToNode]);
 
+  // ── Direct edge-path updates during drag (no React re-render) ───────────────
+
+  /** Updates SVG path `d` attributes for all edges connected to a dragged regular node. */
+  const updateDraggedNodeEdges = useCallback((nodeId: string, pos: { x: number; y: number }) => {
+    const displayNode = displayNodeMapRef.current.get(nodeId);
+    if (!displayNode) return;
+    const moved = { ...displayNode, x: pos.x, y: pos.y };
+
+    for (const e of edgesRef.current) {
+      if (e.source !== nodeId && e.target !== nodeId) continue;
+      const g = edgeGroupRefs.current.get(e.id);
+      if (!g) continue;
+      const src = e.source === nodeId ? moved : displayNodeMapRef.current.get(e.source);
+      const tgt = e.target === nodeId ? moved : displayNodeMapRef.current.get(e.target);
+      if (!src || !tgt) continue;
+      const sy = srcPortY(src, e.srcPortPath, 0);
+      const ty = tgtPortY(tgt, e.tgtPortKey, 0);
+      const isSelfLoop = e.source === e.target;
+      const d = isSelfLoop ? makeBezier(src.x + src.w, sy, src.x, ty) : bezierPath(src, tgt, e, 0, 0);
+      g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
+    }
+
+    for (const e of extraEdgesRef.current) {
+      if (e.srcNodeId !== nodeId && e.tgtNodeId !== nodeId) continue;
+      const srcOp = opNodesRef.current.find(n => n.id === e.srcNodeId);
+      const tgtOp = opNodesRef.current.find(n => n.id === e.tgtNodeId);
+      const g = extraEdgeGroupRefs.current.get(e.id);
+      if (!g) continue;
+
+      let sx2: number;
+      let sy2: number;
+      if (srcOp) {
+        ({ sx: sx2, sy: sy2 } = opNodeSrcCoords(srcOp, e.srcFieldPath));
+      } else {
+        const srcNode = e.srcNodeId === nodeId ? moved : displayNodeMapRef.current.get(e.srcNodeId);
+        if (!srcNode) continue;
+        sx2 = srcNode.x + srcNode.w;
+        sy2 = extraPortY(srcNode, e.srcFieldPath, 0);
+      }
+
+      let tx2: number;
+      let ty2: number;
+      if (tgtOp) {
+        ({ tx: tx2, ty: ty2 } = opNodeTgtCoords(tgtOp, e.tgtFieldPath));
+      } else {
+        const tgtNode = e.tgtNodeId === nodeId ? moved : displayNodeMapRef.current.get(e.tgtNodeId);
+        if (!tgtNode) continue;
+        tx2 = tgtNode.x;
+        ty2 = extraPortY(tgtNode, e.tgtFieldPath, 0);
+      }
+
+      const d = makeBezier(sx2, sy2, tx2, ty2);
+      g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
+    }
+  }, []);
+
+  /** Updates SVG path `d` attributes for all extra edges connected to a dragged op node. */
+  const updateDraggedOpNodeEdges = useCallback((opNodeId: string, pos: { x: number; y: number }) => {
+    const opNode = opNodesRef.current.find(n => n.id === opNodeId);
+    if (!opNode) return;
+    const moved = { ...opNode, x: pos.x, y: pos.y };
+
+    for (const e of extraEdgesRef.current) {
+      if (e.srcNodeId !== opNodeId && e.tgtNodeId !== opNodeId) continue;
+      const g = extraEdgeGroupRefs.current.get(e.id);
+      if (!g) continue;
+
+      let sx2: number;
+      let sy2: number;
+      if (e.srcNodeId === opNodeId) {
+        ({ sx: sx2, sy: sy2 } = opNodeSrcCoords(moved, e.srcFieldPath));
+      } else {
+        const srcOp2 = opNodesRef.current.find(n => n.id === e.srcNodeId);
+        if (srcOp2) {
+          ({ sx: sx2, sy: sy2 } = opNodeSrcCoords(srcOp2, e.srcFieldPath));
+        } else {
+          const srcNode = displayNodeMapRef.current.get(e.srcNodeId);
+          if (!srcNode) continue;
+          sx2 = srcNode.x + srcNode.w;
+          sy2 = extraPortY(srcNode, e.srcFieldPath, 0);
+        }
+      }
+
+      let tx2: number;
+      let ty2: number;
+      if (e.tgtNodeId === opNodeId) {
+        ({ tx: tx2, ty: ty2 } = opNodeTgtCoords(moved, e.tgtFieldPath));
+      } else {
+        const tgtOp2 = opNodesRef.current.find(n => n.id === e.tgtNodeId);
+        if (tgtOp2) {
+          ({ tx: tx2, ty: ty2 } = opNodeTgtCoords(tgtOp2, e.tgtFieldPath));
+        } else {
+          const tgtNode = displayNodeMapRef.current.get(e.tgtNodeId);
+          if (!tgtNode) continue;
+          tx2 = tgtNode.x;
+          ty2 = extraPortY(tgtNode, e.tgtFieldPath, 0);
+        }
+      }
+
+      const d = makeBezier(sx2, sy2, tx2, ty2);
+      g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
+    }
+  }, []);
+
   const onMouseMove = useCallback((e: MouseEvent) => {
     if (dragId.current) {
       hasDragged.current = true;
       const dx = (e.clientX - dragOrigin.current.mx) / zoomRef.current;
       const dy = (e.clientY - dragOrigin.current.my) / zoomRef.current;
-      setNodes(prev => prev.map(n => n.id === dragId.current
-        ? { ...n, x: dragOrigin.current.nx + dx, y: dragOrigin.current.ny + dy } : n));
+      dragCurrentPos.current = { x: dragOrigin.current.nx + dx, y: dragOrigin.current.ny + dy };
+      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-node-id="${dragId.current}"]`);
+      if (el) el.style.transform = `translate(${dx}px,${dy}px)`;
+      updateDraggedNodeEdges(dragId.current, dragCurrentPos.current);
     }
     if (opDragId.current) {
       opHasDragged.current = true;
       const dx = (e.clientX - opDragOrigin.current.mx) / zoomRef.current;
       const dy = (e.clientY - opDragOrigin.current.my) / zoomRef.current;
-      setOpNodes(prev => prev.map(n => n.id === opDragId.current
-        ? { ...n, x: opDragOrigin.current.nx + dx, y: opDragOrigin.current.ny + dy }
-        : n));
+      opDragCurrentPos.current = { x: opDragOrigin.current.nx + dx, y: opDragOrigin.current.ny + dy };
+      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-opnode-id="${opDragId.current}"]`);
+      if (el) el.style.transform = `translate(${dx}px,${dy}px)`;
+      updateDraggedOpNodeEdges(opDragId.current, opDragCurrentPos.current);
     }
     if (opResizeId.current) {
       const dy = (e.clientY - opResizeOrigin.current.my) / zoomRef.current;
@@ -1003,7 +1126,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       });
       setDrawingHoverNodeId(overNode?.id ?? null);
     }
-  }, [drawing, screenToCanvas, computeHoverTarget, nodes, applyTransform]);
+  }, [drawing, screenToCanvas, computeHoverTarget, nodes, applyTransform, updateDraggedNodeEdges, updateDraggedOpNodeEdges]);
 
   const onInPortClick = useCallback((nodeId: string, fieldPath: string) => {
     for (const ge of edges) {
@@ -1030,7 +1153,25 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     if (bgWasClean.current && !hasPanned.current) { setSelected(null); }
     bgWasClean.current = false;
     isPanDragging.current = false;
+
+    // Commit node drag: clear DOM transform, write final position to React state once.
+    const upDragId = dragId.current;
+    if (upDragId && hasDragged.current) {
+      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-node-id="${upDragId}"]`);
+      if (el) el.style.transform = '';
+      const fp = dragCurrentPos.current;
+      setNodes(prev => prev.map(n => n.id === upDragId ? { ...n, x: fp.x, y: fp.y } : n));
+    }
+
+    // Commit op-node drag similarly.
     const upOpDragId = opDragId.current;
+    if (upOpDragId && opHasDragged.current) {
+      const el = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-opnode-id="${upOpDragId}"]`);
+      if (el) el.style.transform = '';
+      const fp = opDragCurrentPos.current;
+      setOpNodes(prev => prev.map(n => n.id === upOpDragId ? { ...n, x: fp.x, y: fp.y } : n));
+    }
+
     dragId.current = null; opDragId.current = null; opResizeId.current = null; setActive(false);
     if (upOpDragId && !opHasDragged.current) {
       setSelected(prev => prev === upOpDragId ? null : upOpDragId);
@@ -1575,7 +1716,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             const my = (sy + ty) / 2;
             const col = nodeColor(e.source);
             return (
-              <g key={e.id}>
+              <g key={e.id} ref={el => { if (el) edgeGroupRefs.current.set(e.id, el); else edgeGroupRefs.current.delete(e.id); }}>
                 <path d={d} fill="none" stroke={col}
                   strokeWidth={isLit ? 3 : 1.75}
                   strokeOpacity={isDeleted ? 0.2 : isLit ? 1 : tokenHover ? 0.25 : relatedNodeIds && (!relatedNodeIds.has(e.source) || !relatedNodeIds.has(e.target)) ? 0.08 : isHov ? 0.9 : 0.75}
@@ -1620,19 +1761,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             let sx2: number;
             let sy2: number;
             if (srcOp) {
-              sx2 = srcOp.x + OP_NODE_W;
-              if (e.srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
-                const varFieldPath = e.srcFieldPath.slice(VAR_FIELD_PREFIX.length);
-                const srcDef = EXPR_NODE_DEFS[srcOp.category];
-                const vpi = srcDef?.inputs.findIndex(p => p.name === 'var') ?? 0;
-                const srcVarFields = srcOp.varFields ?? [];
-                const vfi = Math.max(0, srcVarFields.indexOf(varFieldPath));
-                sy2 = srcOp.y + OP_NODE_HDR_H + varFieldLeafRow(srcVarFields, vpi, vfi) * OP_NODE_PORT_H + OP_NODE_PORT_H / 2;
-              } else {
-                const srcDef = EXPR_NODE_DEFS[srcOp.category];
-                const portCount = srcDef?.variadic ? (srcOp.portCount ?? srcDef.inputs.length) : (srcDef?.inputs.length ?? 1);
-                sy2 = opNodeOutputPortY(srcOp, portCount);
-              }
+              ({ sx: sx2, sy: sy2 } = opNodeSrcCoords(srcOp, e.srcFieldPath));
             } else {
               sx2 = src!.x + src!.w;
               const srcExp = !drawing && (src!.id === selected || src!.id === drawingHoverNodeId);
@@ -1641,17 +1770,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             let tx2: number;
             let ty2: number;
             if (tgtOp) {
-              const def = EXPR_NODE_DEFS[tgtOp.category];
-              // For variadic nodes, port index is letter ordinal (A=0, B=1, C=2, ...)
-              const portIdx = def?.variadic
-                ? (e.tgtFieldPath.charCodeAt(0) - 65)
-                : (def?.inputs.findIndex(p => p.name === e.tgtFieldPath) ?? 0);
-              tx2 = tgtOp.x;
-              const tgtVarPortIdx = def?.hasPredicate ? def.inputs.findIndex(p => p.name === 'var') : -1;
-              const tgtOffset = tgtVarPortIdx >= 0 && portIdx > tgtVarPortIdx
-                ? opNodeVarFieldExtraRows(tgtOp.varFields ?? []) * OP_NODE_PORT_H
-                : 0;
-              ty2 = opNodeInputPortY(tgtOp, portIdx) + tgtOffset;
+              ({ tx: tx2, ty: ty2 } = opNodeTgtCoords(tgtOp, e.tgtFieldPath));
             } else {
               tx2 = tgt!.x;
               const tgtExp = !drawing && (tgt!.id === selected || tgt!.id === drawingHoverNodeId);
@@ -1661,7 +1780,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             const markerKey = srcOp ? 'user' : (src?.type ?? 'kro-resource');
             const d = makeBezier(sx2, sy2, tx2, ty2);
             return (
-              <g key={e.id}>
+              <g key={e.id} ref={el => { if (el) extraEdgeGroupRefs.current.set(e.id, el); else extraEdgeGroupRefs.current.delete(e.id); }}>
                 <path d={d} fill="none" stroke={col2}
                   strokeWidth={isLit ? 3 : 1.75}
                   strokeOpacity={isLit ? 1 : tokenHover ? 0.25 : relatedNodeIds && (!relatedNodeIds.has(e.srcNodeId) || !relatedNodeIds.has(e.tgtNodeId)) ? 0.08 : isHov ? 0.9 : 0.75}
@@ -1679,20 +1798,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           {drawing && (() => {
             const opSrc = opNodes.find(n => n.id === drawing.srcNodeId);
             if (opSrc) {
-              const sx = opSrc.x + OP_NODE_W;
-              let sy: number;
-              if (drawing.srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
-                const varFieldPath = drawing.srcFieldPath.slice(VAR_FIELD_PREFIX.length);
-                const opSrcDef = EXPR_NODE_DEFS[opSrc.category];
-                const vpi = opSrcDef?.inputs.findIndex(p => p.name === 'var') ?? 0;
-                const drawVarFields = opSrc.varFields ?? [];
-                const vfi = Math.max(0, drawVarFields.indexOf(varFieldPath));
-                sy = opSrc.y + OP_NODE_HDR_H + varFieldLeafRow(drawVarFields, vpi, vfi) * OP_NODE_PORT_H + OP_NODE_PORT_H / 2;
-              } else {
-                const opSrcDef = EXPR_NODE_DEFS[opSrc.category];
-                const portCount = opSrcDef?.variadic ? (opSrc.portCount ?? opSrcDef.inputs.length) : (opSrcDef?.inputs.length ?? 1);
-                sy = opNodeOutputPortY(opSrc, portCount);
-              }
+              const { sx, sy } = opNodeSrcCoords(opSrc, drawing.srcFieldPath);
               return <path d={makeBezier(sx, sy, drawing.canvasX, drawing.canvasY)}
                 fill="none" stroke={userC} strokeWidth={1.5} strokeOpacity={0.55} strokeDasharray="5 4" />;
             }
