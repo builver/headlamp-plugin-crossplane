@@ -177,7 +177,7 @@ export function CompositionDetailPage({ name: nameProp }: { name?: string } = {}
   );
 
   return (
-    <>
+    <Box pb={9}>
       <MainInfoSection resource={comp} extraInfo={extraInfo} />
       {comp && <ConditionsTable resource={comp.jsonData} />}
       {pipeline.length > 0 && (
@@ -273,6 +273,6 @@ export function CompositionDetailPage({ name: nameProp }: { name?: string } = {}
       {matchingXrd && comp && (
         <ComposedXRs xrd={matchingXrd} compositionName={comp.metadata.name} />
       )}
-    </>
+    </Box>
   );
 }

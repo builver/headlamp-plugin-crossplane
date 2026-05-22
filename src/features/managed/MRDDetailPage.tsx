@@ -57,11 +57,19 @@ export function MRDListPage() {
           {
             header: 'Resource',
             accessorFn: (item: any) => item.jsonData?.spec?.names?.kind ?? '-',
-            Cell: ({ row: { original: item } }: any) => (
-              <Link routeName="crossplane-mr-list" params={{ mrdName: item.metadata.name }}>
-                {item.jsonData?.spec?.names?.kind ?? item.metadata.name}
-              </Link>
-            ),
+            Cell: ({ row: { original: item } }: any) => {
+              const isActivated =
+                item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Established')
+                  ?.status === 'True';
+              const label = item.jsonData?.spec?.names?.kind ?? item.metadata.name;
+              return isActivated ? (
+                <Link routeName="crossplane-mr-list" params={{ mrdName: item.metadata.name }}>
+                  {label}
+                </Link>
+              ) : (
+                label
+              );
+            },
           },
           {
             header: 'Definition',

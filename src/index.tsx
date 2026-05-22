@@ -99,19 +99,13 @@ function CrossplaneWatcher() {
     for (const provider of providers) {
       const providerName = provider.metadata.name;
       if (!providerName) continue;
-      const entryName = `crossplane-provider-${providerName}`;
-      if (!registeredProviders.has(entryName)) {
-        registeredProviders.add(entryName);
-        registerSidebarEntry({
-          parent: 'crossplane-providers',
-          name: entryName,
-          label: providerName,
-          url: `/crossplane/providers/${providerName}`,
-        });
+      const routeName = `crossplane-provider-detail-${providerName}`;
+      if (!registeredProviders.has(routeName)) {
+        registeredProviders.add(routeName);
         registerRoute({
           path: `/crossplane/providers/${providerName}`,
-          sidebar: entryName,
-          name: `crossplane-provider-detail-${providerName}`,
+          sidebar: 'crossplane-providers',
+          name: routeName,
           exact: true,
           component: () => <ProviderDetailPage />,
         });
@@ -123,19 +117,13 @@ function CrossplaneWatcher() {
     for (const config of configurations) {
       const configName = config.metadata.name;
       if (!configName) continue;
-      const entryName = `crossplane-configuration-${configName}`;
-      if (!registeredConfigurations.has(entryName)) {
-        registeredConfigurations.add(entryName);
-        registerSidebarEntry({
-          parent: 'crossplane-configurations',
-          name: entryName,
-          label: configName,
-          url: `/crossplane/configurations/${configName}`,
-        });
+      const routeName = `crossplane-configuration-detail-${configName}`;
+      if (!registeredConfigurations.has(routeName)) {
+        registeredConfigurations.add(routeName);
         registerRoute({
           path: `/crossplane/configurations/${configName}`,
-          sidebar: entryName,
-          name: `crossplane-configuration-detail-${configName}`,
+          sidebar: 'crossplane-configurations',
+          name: routeName,
           exact: true,
           component: () => <ConfigurationDetailPage />,
         });
@@ -147,19 +135,13 @@ function CrossplaneWatcher() {
     for (const fn of functions) {
       const fnName = fn.metadata.name;
       if (!fnName) continue;
-      const entryName = `crossplane-function-${fnName}`;
-      if (!registeredFunctions.has(entryName)) {
-        registeredFunctions.add(entryName);
-        registerSidebarEntry({
-          parent: 'crossplane-functions',
-          name: entryName,
-          label: fnName,
-          url: `/crossplane/functions/${fnName}`,
-        });
+      const routeName = `crossplane-function-detail-${fnName}`;
+      if (!registeredFunctions.has(routeName)) {
+        registeredFunctions.add(routeName);
         registerRoute({
           path: `/crossplane/functions/${fnName}`,
-          sidebar: entryName,
-          name: `crossplane-function-detail-${fnName}`,
+          sidebar: 'crossplane-functions',
+          name: routeName,
           exact: true,
           component: () => <FunctionDetailPage />,
         });

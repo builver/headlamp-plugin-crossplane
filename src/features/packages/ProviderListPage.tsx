@@ -1,17 +1,38 @@
+import { Icon } from '@iconify/react';
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   ConditionsTable,
   CreateResourceButton,
-  Link,
   MainInfoSection,
   ResourceTable,
   SectionBox,
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
+import { Box, Link as MuiLink } from '@mui/material';
 import { useLocation } from 'react-router-dom';
 import { packageResourceColumns } from '../../components/columns';
 import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
 import { Provider } from '../../resources';
+
+function ProviderNameLink({ item }: { item: any }) {
+  const launch = () => Activity.launch({
+    id: `crossplane-provider-${item.metadata.name}`,
+    title: `Provider ${item.metadata.name}`,
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster: item.cluster,
+    icon: <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />,
+    content: <ProviderDetailInner name={item.metadata.name} />,
+  });
+  return (
+    <MuiLink component="button" onClick={launch}
+      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
+    >
+      {item.metadata.name}
+    </MuiLink>
+  );
+}
 
 export function ProviderListPage() {
   const filterFunction = useFilterFunc();
@@ -42,11 +63,7 @@ export function ProviderListPage() {
           {
             label: 'Name',
             getValue: item => item.metadata.name,
-            render: item => (
-              <Link routeName={`crossplane-provider-detail-${item.metadata.name}`}>
-                {item.metadata.name}
-              </Link>
-            ),
+            render: item => <ProviderNameLink item={item} />,
           },
           ...packageResourceColumns,
         ]}
@@ -73,10 +90,10 @@ export function ProviderDetailInner({ name }: { name: string }) {
     : [];
 
   return (
-    <>
+    <Box pb={9}>
       <MainInfoSection resource={provider} extraInfo={extraInfo} />
       {provider && <ConditionsTable resource={provider.jsonData} />}
-    </>
+    </Box>
   );
 }
 

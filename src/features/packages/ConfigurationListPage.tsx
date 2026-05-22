@@ -1,3 +1,5 @@
+import { Icon } from '@iconify/react';
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   ConditionsTable,
   CreateResourceButton,
@@ -9,6 +11,7 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
+import { Box, Link as MuiLink } from '@mui/material';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { packageResourceColumns } from '../../components/columns';
@@ -44,11 +47,7 @@ export function ConfigurationListPage() {
           {
             label: 'Name',
             getValue: item => item.metadata.name,
-            render: item => (
-              <Link routeName={`crossplane-configuration-detail-${item.metadata.name}`}>
-                {item.metadata.name}
-              </Link>
-            ),
+            render: item => <ConfigurationNameLink item={item} />,
           },
           ...packageResourceColumns,
         ]}
@@ -105,9 +104,7 @@ function ObjectRefsSection({ revisionName }: { revisionName: string }) {
   );
 }
 
-export function ConfigurationDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+export function ConfigurationDetailInner({ name }: { name: string }) {
   const [config] = Configuration.useGet(name);
 
   const extraInfo = config
@@ -127,10 +124,35 @@ export function ConfigurationDetailPage() {
   const currentRevision: string | undefined = config?.jsonData?.status?.currentRevision;
 
   return (
-    <>
+    <Box pb={9}>
       <MainInfoSection resource={config} extraInfo={extraInfo} />
       {config && <ConditionsTable resource={config.jsonData} />}
       {currentRevision && <ObjectRefsSection revisionName={currentRevision} />}
-    </>
+    </Box>
+  );
+}
+
+export function ConfigurationDetailPage() {
+  const location = useLocation();
+  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  return <ConfigurationDetailInner name={name} />;
+}
+
+function ConfigurationNameLink({ item }: { item: any }) {
+  const launch = () => Activity.launch({
+    id: `crossplane-configuration-${item.metadata.name}`,
+    title: `Configuration ${item.metadata.name}`,
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster: item.cluster,
+    icon: <Icon icon="mdi:package-variant" width="100%" height="100%" />,
+    content: <ConfigurationDetailInner name={item.metadata.name} />,
+  });
+  return (
+    <MuiLink component="button" onClick={launch}
+      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
+    >
+      {item.metadata.name}
+    </MuiLink>
   );
 }
