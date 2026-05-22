@@ -8,7 +8,7 @@ import { overlayRowWithTemplate } from './celUtils';
 import {
   CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, K8S_BASE_FIELDS, K8S_MAP_PATHS,
   NODE_CFG, nodeH, nodeIdToRef, NW,
-  OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
+  OP_NODE_HDR_H, OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
   ROW_H, SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT, VAR_FIELD_PREFIX,
 } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
