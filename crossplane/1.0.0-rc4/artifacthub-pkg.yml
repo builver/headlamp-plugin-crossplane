@@ -1,0 +1,23 @@
+version: 1.0.0-rc4
+name: crossplane
+displayName: Crossplane
+createdAt: "2026-05-22T23:00:46Z"
+prerelease: true
+logoURL: "https://raw.githubusercontent.com/cncf/artwork/main/projects/crossplane/icon/color/crossplane-icon-color.svg"
+description: A Headlamp plugin for viewing and managing Crossplane resources.
+screenshots:
+  - title: Overview dashboard
+    url: https://raw.githubusercontent.com/builver/headlamp-plugin-crossplane/v1.0.0-rc4/docs/images/overview.png
+  - title: Composite Resources list
+    url: https://raw.githubusercontent.com/builver/headlamp-plugin-crossplane/v1.0.0-rc4/docs/images/composite-resources.png
+  - title: Composition map view
+    url: https://raw.githubusercontent.com/builver/headlamp-plugin-crossplane/v1.0.0-rc4/docs/images/map.png
+  - title: Composition detail page
+    url: https://raw.githubusercontent.com/builver/headlamp-plugin-crossplane/v1.0.0-rc4/docs/images/composition.png
+  - title: Composition graph editor
+    url: https://raw.githubusercontent.com/builver/headlamp-plugin-crossplane/v1.0.0-rc4/docs/images/composition-graph.png
+annotations:
+  headlamp/plugin/archive-url: "https://github.com/builver/headlamp-plugin-crossplane/releases/download/v1.0.0-rc4/headlamp-plugin-crossplane-0.1.0.tar.gz"
+  headlamp/plugin/archive-checksum: "SHA256:46d09d6e0bf6e344e6373a8833d8bd25631f3e766eb4ff974d70d1d3968a49c6"
+  headlamp/plugin/version-compat: ">=0.22"
+  headlamp/plugin/distro-compat: "in-cluster,web,docker-desktop,desktop"
