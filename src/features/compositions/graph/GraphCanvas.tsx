@@ -72,8 +72,14 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const opHasDragged   = useRef(false);
   const opResizeId   = useRef<string | null>(null);
   const opResizeOrigin = useRef({ my: 0, startH: 0 });
-  const [pan,  setPan]  = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
+  const panRef        = useRef({ x: 0, y: 0 });
+  const zoomRef       = useRef(1);
+  const canvasDivRef  = useRef<HTMLDivElement>(null);
+  const applyTransform = useCallback(() => {
+    if (canvasDivRef.current) {
+      canvasDivRef.current.style.transform = `translate(${panRef.current.x}px,${panRef.current.y}px) scale(${zoomRef.current})`;
+    }
+  }, []);
   const panOrigin     = useRef({ mx: 0, my: 0, px: 0, py: 0 });
   const isPanDragging = useRef(false);
   const hasPanned     = useRef(false);
@@ -653,8 +659,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const screenToCanvas = useCallback((sx: number, sy: number) => {
     const r = containerRef.current?.getBoundingClientRect();
     if (!r) return { x: 0, y: 0 };
-    return { x: (sx - r.left - pan.x) / zoom, y: (sy - r.top - pan.y) / zoom };
-  }, [pan, zoom]);
+    return { x: (sx - r.left - panRef.current.x) / zoomRef.current, y: (sy - r.top - panRef.current.y) / zoomRef.current };
+  }, []);
 
   // ── Add virtual field row to a node ─────────────────────────────────────────
 
@@ -897,10 +903,10 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     if (drawing) { setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); return; }
     bgWasClean.current = true;
     hasPanned.current = false;
-    panOrigin.current = { mx: e.clientX, my: e.clientY, px: pan.x, py: pan.y };
+    panOrigin.current = { mx: e.clientX, my: e.clientY, px: panRef.current.x, py: panRef.current.y };
     isPanDragging.current = true;
     setActive(true); e.preventDefault();
-  }, [drawing, pan]);
+  }, [drawing]);
 
   const onNodeDown = useCallback((e: MouseEvent, id: string) => {
     if (drawing) return;
@@ -916,15 +922,15 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const cW = containerRef.current.clientWidth;
       const cH = containerRef.current.clientHeight;
       // Clamp to screen bounds then convert back to canvas coords
-      const screenLeft = Math.max(8,  Math.min(n.x * zoom + pan.x, cW - NW - 8));
-      const screenTop  = Math.max(48, Math.min(n.y * zoom + pan.y, cH - 240));
-      nx = (screenLeft - pan.x) / zoom;
-      ny = (screenTop  - pan.y) / zoom;
+      const screenLeft = Math.max(8,  Math.min(n.x * zoomRef.current + panRef.current.x, cW - NW - 8));
+      const screenTop  = Math.max(48, Math.min(n.y * zoomRef.current + panRef.current.y, cH - 240));
+      nx = (screenLeft - panRef.current.x) / zoomRef.current;
+      ny = (screenTop  - panRef.current.y) / zoomRef.current;
       setNodes(prev => prev.map(nd => nd.id === DRAFT_NODE_ID ? { ...nd, x: nx, y: ny } : nd));
     }
     dragOrigin.current = { mx: e.clientX, my: e.clientY, nx, ny };
     setActive(true);
-  }, [nodes, drawing, zoom, pan]);
+  }, [nodes, drawing]);
 
   const hasDraggedPort = useRef(false);
 
@@ -955,21 +961,21 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const onMouseMove = useCallback((e: MouseEvent) => {
     if (dragId.current) {
       hasDragged.current = true;
-      const dx = (e.clientX - dragOrigin.current.mx) / zoom;
-      const dy = (e.clientY - dragOrigin.current.my) / zoom;
+      const dx = (e.clientX - dragOrigin.current.mx) / zoomRef.current;
+      const dy = (e.clientY - dragOrigin.current.my) / zoomRef.current;
       setNodes(prev => prev.map(n => n.id === dragId.current
         ? { ...n, x: dragOrigin.current.nx + dx, y: dragOrigin.current.ny + dy } : n));
     }
     if (opDragId.current) {
       opHasDragged.current = true;
-      const dx = (e.clientX - opDragOrigin.current.mx) / zoom;
-      const dy = (e.clientY - opDragOrigin.current.my) / zoom;
+      const dx = (e.clientX - opDragOrigin.current.mx) / zoomRef.current;
+      const dy = (e.clientY - opDragOrigin.current.my) / zoomRef.current;
       setOpNodes(prev => prev.map(n => n.id === opDragId.current
         ? { ...n, x: opDragOrigin.current.nx + dx, y: opDragOrigin.current.ny + dy }
         : n));
     }
     if (opResizeId.current) {
-      const dy = (e.clientY - opResizeOrigin.current.my) / zoom;
+      const dy = (e.clientY - opResizeOrigin.current.my) / zoomRef.current;
       const newH = Math.max(OP_NODE_HDR_H + 32, opResizeOrigin.current.startH + dy);
       setOpNodes(prev => prev.map(n => n.id === opResizeId.current ? { ...n, h: newH } : n));
     }
@@ -977,7 +983,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const dx = e.clientX - panOrigin.current.mx;
       const dy = e.clientY - panOrigin.current.my;
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) hasPanned.current = true;
-      setPan({ x: panOrigin.current.px + dx, y: panOrigin.current.py + dy });
+      panRef.current = { x: panOrigin.current.px + dx, y: panOrigin.current.py + dy };
+      applyTransform();
     }
     if (drawing) {
       hasDraggedPort.current = true;
@@ -996,7 +1003,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       });
       setDrawingHoverNodeId(overNode?.id ?? null);
     }
-  }, [drawing, screenToCanvas, computeHoverTarget, nodes, zoom]);
+  }, [drawing, screenToCanvas, computeHoverTarget, nodes, applyTransform]);
 
   const onInPortClick = useCallback((nodeId: string, fieldPath: string) => {
     for (const ge of edges) {
@@ -1109,17 +1116,19 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         // Trackpad pinch fires many small deltaY; mouse wheel fires large discrete ones.
         // Math.exp gives smooth continuous zoom for both.
         const factor = Math.exp(-e.deltaY / 200);
-        setZoom(z => {
-          const newZoom = Math.min(3, Math.max(0.15, z * factor));
-          setPan(p => ({
-            x: mx - (mx - p.x) * (newZoom / z),
-            y: my - (my - p.y) * (newZoom / z),
-          }));
-          return newZoom;
-        });
+        const z = zoomRef.current;
+        const newZoom = Math.min(3, Math.max(0.15, z * factor));
+        const p = panRef.current;
+        panRef.current = {
+          x: mx - (mx - p.x) * (newZoom / z),
+          y: my - (my - p.y) * (newZoom / z),
+        };
+        zoomRef.current = newZoom;
+        applyTransform();
       } else {
         // Two-finger scroll = pan
-        setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+        panRef.current = { x: panRef.current.x - e.deltaX, y: panRef.current.y - e.deltaY };
+        applyTransform();
       }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -1149,14 +1158,15 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         const mx = (t0.clientX + t1.clientX) / 2 - r.left;
         const my = (t0.clientY + t1.clientY) / 2 - r.top;
         const factor = dist / lastDist;
-        setZoom(z => {
-          const newZoom = Math.min(3, Math.max(0.15, z * factor));
-          setPan(p => ({
-            x: mx - (mx - p.x) * (newZoom / z),
-            y: my - (my - p.y) * (newZoom / z),
-          }));
-          return newZoom;
-        });
+        const z = zoomRef.current;
+        const newZoom = Math.min(3, Math.max(0.15, z * factor));
+        const p = panRef.current;
+        panRef.current = {
+          x: mx - (mx - p.x) * (newZoom / z),
+          y: my - (my - p.y) * (newZoom / z),
+        };
+        zoomRef.current = newZoom;
+        applyTransform();
       }
       lastDist = dist;
     };
@@ -1340,12 +1350,13 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       cW / (maxX - minX + PAD * 2),
       cH / (maxY - minY + PAD * 2),
     )));
-    setPan({
+    panRef.current = {
       x: cW / 2 - ((minX + maxX) / 2) * newZoom,
       y: cH / 2 - ((minY + maxY) / 2) * newZoom,
-    });
-    setZoom(newZoom);
-  }, [nodes, opNodes]);
+    };
+    zoomRef.current = newZoom;
+    applyTransform();
+  }, [nodes, opNodes, applyTransform]);
 
   const hasFitOnMount = useRef(false);
   useEffect(() => {
@@ -1387,8 +1398,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               if (nodes.some(n => n.id === DRAFT_NODE_ID)) return;
               const cW = containerRef.current?.clientWidth ?? 800;
               const cH = containerRef.current?.clientHeight ?? 480;
-              const cx = (cW / 2 - pan.x) / zoom - NW / 2;
-              const cy = (cH / 2 - pan.y) / zoom - 110;
+              const cx = (cW / 2 - panRef.current.x) / zoomRef.current - NW / 2;
+              const cy = (cH / 2 - panRef.current.y) / zoomRef.current - 110;
               setNodes(prev => [...prev, { id: DRAFT_NODE_ID, type: 'draft', label: '', rows: [], x: cx, y: cy, w: NW, h: 220 }]);
               setAddForm({ id: '', apiVersion: '', kind: '', mode: 'template', refLookup: 'name', refName: '', refLabels: [] });
             }}
@@ -1409,8 +1420,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onAdd={def => {
               const cW = containerRef.current?.clientWidth ?? 800;
               const cH = containerRef.current?.clientHeight ?? 480;
-              const nx = (cW * 0.6 - pan.x) / zoom;
-              const ny = (cH * 0.5 - pan.y) / zoom;
+              const nx = (cW * 0.6 - panRef.current.x) / zoomRef.current;
+              const ny = (cH * 0.5 - panRef.current.y) / zoomRef.current;
               setOpNodes(prev => [...prev, {
                 id: `op-${Date.now()}`,
                 category: def.category,
@@ -1498,8 +1509,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         const existingIds = new Set(nodes.filter(n => n.id !== DRAFT_NODE_ID).map(n => n.id));
         const cW = containerRef.current?.clientWidth  ?? 800;
         const cH = containerRef.current?.clientHeight ?? 480;
-        const screenLeft = Math.max(8,  Math.min(draftNode.x * zoom + pan.x, cW - NW - 8));
-        const screenTop  = Math.max(48, Math.min(draftNode.y * zoom + pan.y, cH - 240));
+        const screenLeft = Math.max(8,  Math.min(draftNode.x * zoomRef.current + panRef.current.x, cW - NW - 8));
+        const screenTop  = Math.max(48, Math.min(draftNode.y * zoomRef.current + panRef.current.y, cH - 240));
         return (
           <DraftNodeCard
             node={draftNode}
@@ -1529,7 +1540,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       </Box>
 
       {/* Canvas */}
-      <div style={{ position: 'absolute', width: CANVAS_SIZE, height: CANVAS_SIZE, transformOrigin: '0 0', transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}>
+      <div ref={canvasDivRef} style={{ position: 'absolute', width: CANVAS_SIZE, height: CANVAS_SIZE, transformOrigin: '0 0', transform: 'translate(0px,0px) scale(1)', willChange: 'transform' }}>
         <svg style={{ position: 'absolute', top: 0, left: 0, width: CANVAS_SIZE, height: CANVAS_SIZE, pointerEvents: 'none', overflow: 'visible', zIndex: 1 }}>
           <defs>
             {markerDefs.map(({ key, color }) => (
