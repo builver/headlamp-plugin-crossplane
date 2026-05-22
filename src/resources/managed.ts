@@ -17,6 +17,13 @@ export class EnvironmentConfig extends KubeObject {
   static isNamespaced = false;
 }
 
+export class ManagedResourceActivationPolicy extends KubeObject {
+  static kind = 'ManagedResourceActivationPolicy';
+  static apiName = 'managedresourceactivationpolicies';
+  static apiVersion = 'apiextensions.crossplane.io/v1alpha1';
+  static isNamespaced = false;
+}
+
 /**
  * Creates a dynamic KubeObject class for the Managed Resources defined by an MRD.
  */

@@ -17,7 +17,7 @@ addIcon('crossplane:mono', {
 });
 import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
 import { registerCrossplaneMapSource } from './components/mapSource';
-import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceDefinition, Provider } from './resources';
+import { CompositeResourceDefinition, Composition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceActivationPolicy, ManagedResourceDefinition, Provider } from './resources';
 
 // ── Sidebar state — updated by CrossplaneWatcher on every render cycle ────────
 // registerSidebarEntryFilter is reactive (re-evaluated when sidebar re-renders),
@@ -32,6 +32,7 @@ const registeredConfigurations = new Set<string>();
 const registeredFunctions = new Set<string>();
 const registeredCompositions = new Set<string>();
 const registeredMRDs = new Set<string>();
+const registeredMRAPs = new Set<string>();
 
 // Guard: registerCrossplaneMapSource is idempotent (Redux skips duplicate IDs),
 // but we track this ourselves to avoid re-building the sub-sources array needlessly.
@@ -48,6 +49,7 @@ function CrossplaneWatcher() {
   const [functions] = CrossplaneFunction.useList();
   const [compositions] = Composition.useList();
   const [mrds] = ManagedResourceDefinition.useList();
+  const [mraps] = ManagedResourceActivationPolicy.useList();
 
   claimsState.visible =
     xrds?.some(
@@ -206,6 +208,21 @@ function CrossplaneWatcher() {
     }
   }
 
+  if (mraps) {
+    for (const mrap of mraps) {
+      const mrapName = mrap.metadata.name;
+      if (!mrapName || registeredMRAPs.has(mrapName)) continue;
+      registeredMRAPs.add(mrapName);
+      registerRoute({
+        path: `/crossplane/mraps/${mrapName}`,
+        sidebar: 'crossplane-mraps',
+        name: `crossplane-mrap-detail-${mrapName}`,
+        exact: true,
+        component: () => <MRAPDetailPage />,
+      });
+    }
+  }
+
   // Register the Crossplane map source once xrds has loaded (even if empty), so the
   // map appears as soon as Crossplane is installed rather than waiting for the first
   // XR instance. Waiting for xrds specifically (not just any list) ensures sub-sources
@@ -245,6 +262,7 @@ import { XRDListPage } from './features/composites/XRDListPage';
 import { XRListPage } from './features/composites/XRListPage';
 import { CompositionDetailPage } from './features/compositions/CompositionDetailPage';
 import { CompositionListPage } from './features/compositions/CompositionListPage';
+import { MRAPDetailPage, MRAPListPage } from './features/managed/MRAPPage';
 import { MRDDetailPage, MRDListPage } from './features/managed/MRDDetailPage';
 import {
   MRDetailClusterPage,
@@ -325,6 +343,13 @@ registerSidebarEntry({
   url: '/crossplane/mrds',
 });
 
+registerSidebarEntry({
+  parent: 'crossplane-mrds',
+  name: 'crossplane-mraps',
+  label: 'Activation Policies',
+  url: '/crossplane/mraps',
+});
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 registerRoute({
@@ -386,6 +411,14 @@ registerRoute({
   name: 'crossplane-mrds-list',
   exact: true,
   component: () => <MRDListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/mraps',
+  sidebar: 'crossplane-mraps',
+  name: 'crossplane-mraps-list',
+  exact: true,
+  component: () => <MRAPListPage />,
 });
 
 registerRoute({

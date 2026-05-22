@@ -37,7 +37,6 @@ export function MRDDetailPage() {
 
 export function MRDListPage() {
   const [mrds] = ManagedResourceDefinition.useList();
-
   const providerNames: string[] = useMemo(() => {
     if (!mrds) return [];
     const names = new Set<string>();
@@ -101,6 +100,17 @@ export function MRDListPage() {
             accessorFn: (item: any) => item.jsonData?.spec?.scope ?? 'Cluster',
             filterVariant: 'select',
             filterSelectOptions: ['Cluster', 'Namespaced'],
+          },
+          {
+            header: 'Activated',
+            accessorFn: (item: any) => {
+              const established = item.jsonData?.status?.conditions?.find(
+                (c: any) => c.type === 'Established'
+              );
+              return established?.status === 'True' ? 'Yes' : 'No';
+            },
+            filterVariant: 'select',
+            filterSelectOptions: ['Yes', 'No'],
           },
         ]}
       />
