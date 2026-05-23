@@ -2,7 +2,7 @@ import { Icon } from '@iconify/react';
 import { Box, Paper, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { memo, MouseEvent } from 'react';
-import { buildVarFieldRows, DOT, nodeIdToRef, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refAccent, varFieldLeafRow } from './constants';
+import { buildVarFieldRows, DOT, nodeIdToRef, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, RAW_TEMPLATE_NODE_H, refAccent, varFieldLeafRow } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { PortDot } from './PortDot';
 import { NodeType, OpNode, TokenHover } from './types';
@@ -54,6 +54,9 @@ export interface ExprOpNodeCardProps {
   hasVarFieldConnection?: (varFieldPath: string) => boolean;
   opNodesById?: Map<string, OpNode>;
   selected?: boolean;
+  /** True when selected OR the cursor is hovering over this node while drawing a wire.
+   *  Controls the variadic trailing empty port (a connection target), mirroring NodeCard's isExpanded. */
+  isExpanded?: boolean;
   /** When true, the node is faded because it is not related to the selected node. */
   dimmed?: boolean;
 }
@@ -63,8 +66,9 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
   onNodeDown, onOutputPortDown, onInputPortUp, onInputPortClick, onOpChange, onLiteralChange, onResizeStart, onDelete,
   onTogglePortOptional, onTokenHover, onTokenLeave,
   onAddVarField, onRemoveVarField, onVarFieldPortDown, hasVarFieldConnection, opNodesById,
-  selected, dimmed,
+  selected, isExpanded: isExpandedProp, dimmed,
 }: ExprOpNodeCardProps) {
+  const isExpanded = isExpandedProp ?? selected;
   const def = EXPR_NODE_DEFS[node.category];
   if (!def) return null;
   const isRawTemplate = node.category === 'raw-template';
@@ -78,12 +82,12 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
       }))
     : def.inputs;
   // For variadic nodes the effect always keeps exactly one trailing empty port.
-  // Hide it when the node is not selected so only the meaningful ports are visible.
-  const activePorts = (def.variadic && !selected) ? allPorts.slice(0, -1) : allPorts;
+  // Hide it when the node is not expanded (selected or draw-hover) so only meaningful ports are visible.
+  const activePorts = (def.variadic && !isExpanded) ? allPorts.slice(0, -1) : allPorts;
   const varPortIdx = isPredicate ? activePorts.findIndex(p => p.name === 'var') : -1;
   const varFields = isPredicate ? (node.varFields ?? []) : [];
-  const extraRows = isPredicate ? opNodeVarFieldExtraRows(varFields) : 0;
-  const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(activePorts.length) + extraRows * OP_NODE_PORT_H;
+  const varFieldTreeRows = isPredicate ? buildVarFieldRows(varFields).length : 0;
+  const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(activePorts.length) + (varFieldTreeRows + (isPredicate && selected ? 1 : 0)) * OP_NODE_PORT_H;
 
   return (
     <div
@@ -101,7 +105,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
     >
       {/* Input port dots — not rendered for raw-template nodes */}
       {!isRawTemplate && activePorts.map((port, i) => {
-        const offset = isPredicate && varPortIdx >= 0 && i > varPortIdx ? extraRows * OP_NODE_PORT_H : 0;
+        const offset = isPredicate && varPortIdx >= 0 && i > varPortIdx ? varFieldTreeRows * OP_NODE_PORT_H : 0;
         return (
           <PortDot key={port.name}
             color={userC} right={false} dark={dark}
@@ -229,8 +233,10 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
         ) : null}
 
         {!isRawTemplate && (
-          /* Input port rows, with varField rows injected after the 'var' port */
-          activePorts.flatMap((port, i) => {
+          /* Input port rows, with varField rows injected after the 'var' port.
+             The "add field" row is rendered after all ports to keep port positions stable. */
+          <>
+          {activePorts.flatMap((port, i) => {
             const info = connectedPortInfo.get(port.name);
             const connected = info !== undefined;
             const portRow = (
@@ -301,7 +307,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                     }}>
                       {row.key}:
                     </Typography>
-                    {row.isExportable && (
+                    {row.isExportable && selected && (
                       <>
                         <Box component="span" role="button" tabIndex={-1}
                           onMouseDown={e => e.stopPropagation()}
@@ -321,36 +327,37 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                   </Box>
                 );
               });
-              const addFieldRow = (
-                <Box key="add-vf" sx={{
-                  height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
-                  borderTop: `1px solid ${alpha(userC, 0.07)}`,
-                  pl: '18px', pr: 1, gap: 0.5, overflow: 'hidden',
-                }}>
-                  <input
-                    placeholder="add field…"
-                    onMouseDown={e => e.stopPropagation()}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                        onAddVarField?.(node.id, e.currentTarget.value.trim());
-                        e.currentTarget.value = '';
-                      }
-                    }}
-                    style={{
-                      flex: 1, minWidth: 0, border: 'none', outline: 'none',
-                      background: 'transparent', fontFamily: 'monospace',
-                      fontSize: '0.52rem', color: dark ? '#ccc' : '#333',
-                      caretColor: userC,
-                    }}
-                  />
-                  <Icon icon="mdi:plus" width={10} style={{ color: userC, opacity: 0.5, flexShrink: 0 }} />
-                </Box>
-              );
-              return [portRow, ...varFieldRows, addFieldRow];
+              return [portRow, ...varFieldRows];
             }
 
             return [portRow];
-          })
+          })}
+          {isPredicate && selected && (
+            <Box sx={{
+              height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+              borderTop: `1px solid ${alpha(userC, 0.07)}`,
+              pl: '18px', pr: 1, gap: 0.5, overflow: 'hidden',
+            }}>
+              <input
+                placeholder="add field…"
+                onMouseDown={e => e.stopPropagation()}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                    onAddVarField?.(node.id, e.currentTarget.value.trim());
+                    e.currentTarget.value = '';
+                  }
+                }}
+                style={{
+                  flex: 1, minWidth: 0, border: 'none', outline: 'none',
+                  background: 'transparent', fontFamily: 'monospace',
+                  fontSize: '0.52rem', color: dark ? '#ccc' : '#333',
+                  caretColor: userC,
+                }}
+              />
+              <Icon icon="mdi:plus" width={10} style={{ color: userC, opacity: 0.5, flexShrink: 0 }} />
+            </Box>
+          )}
+          </>
         )}
       </Paper>
 

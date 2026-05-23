@@ -6,9 +6,9 @@ import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'r
 import { getGroupVersion } from '../../../components/map/apiPaths';
 import { overlayRowWithTemplate, shortFieldName } from './celUtils';
 import {
-  CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, K8S_BASE_FIELDS, K8S_MAP_PATHS,
+  buildVarFieldRows, CANVAS_SIZE, DRAFT_NODE_ID, HEADER_H, K8S_BASE_FIELDS, K8S_MAP_PATHS,
   NODE_CFG, nodeH, nodeIdToRef, NW,
-  OP_NODE_HDR_H, OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
+  OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H,
   ROW_H, SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT, VAR_FIELD_PREFIX,
 } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
@@ -63,7 +63,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const [active,       setActive]       = useState(false);
   const [drawing,           setDrawing]           = useState<Drawing | null>(null);
   const [hoverTarget,       setHoverTarget]       = useState<HoverTarget | null>(null);
-  const [drawingHoverNodeId, setDrawingHoverNodeId] = useState<string | null>(null);
+  const [drawingHoverNodeId,   setDrawingHoverNodeId]   = useState<string | null>(null);
+  const [drawingHoverOpNodeId, setDrawingHoverOpNodeId] = useState<string | null>(null);
   const [extraEdges,        setExtraEdges]        = useState<ExtraEdge[]>(initExtraEdges);
 
   const [saveState,     setSaveState]     = useState<SaveState>('idle');
@@ -156,7 +157,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     setNodes(initNodes);
     setExtraEdges(initExtraEdges); setFieldEdits([]); setPendingResources([]); setPendingRemovals([]);
     setAddForm(null); setConfirmDelete(null);
-    setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null);
+    setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); setDrawingHoverOpNodeId(null);
     setOpNodes(initOpNodes); setDirtyOps(false);
     setSavedOpNodeIds(new Set(initOpNodes.map(n => n.id)));
     setSavedEdgeIds(new Set(initExtraEdges.map(e => e.id)));
@@ -317,7 +318,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     if (secType !== undefined) return secType;
     if (nodeId === SCHEMA_NODE_ID) {
       const normalizedPath = fieldPath.replace(/\?/g, '');
-      return xrdAllFields.find(s => s.path === normalizedPath)?.type;
+      return xrdAllFields.find(s => s.path === normalizedPath)?.type
+        ?? K8S_BASE_FIELDS.find(s => s.path === normalizedPath)?.type;
     }
     let apiVersion: string | undefined;
     let kind: string | undefined;
@@ -332,6 +334,9 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       apiVersion = getResApiVersion(res);
       kind = getResKind(res);
     }
+    // metadata.* and other base fields are not in CRD schemas but are always valid
+    const baseField = K8S_BASE_FIELDS.find(s => s.path === fieldPath);
+    if (baseField) return baseField.type;
     const fields = mrdFieldsCache.get(`${getGroupVersion(apiVersion ?? '')[0]}/${kind ?? ''}`);
     if (!fields) return undefined;
     // Direct match first
@@ -928,7 +933,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   const onBgDown = useCallback((e: MouseEvent) => {
     if (e.button !== 0) return;
-    if (drawing) { setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); return; }
+    if (drawing) { setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); setDrawingHoverOpNodeId(null); return; }
     bgWasClean.current = true;
     hasPanned.current = false;
     panOrigin.current = { mx: e.clientX, my: e.clientY, px: panRef.current.x, py: panRef.current.y };
@@ -1139,8 +1144,19 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         return cp.y >= n.y && cp.y < displayBottom;
       });
       setDrawingHoverNodeId(overNode?.id ?? null);
+      // Track op-node hover for isExpanded (variadic trailing port visibility)
+      const overOpNode = opNodes.find(n => {
+        if (n.id === drawing.srcNodeId) return false;
+        if (cp.x < n.x || cp.x > n.x + OP_NODE_W) return false;
+        const def = EXPR_NODE_DEFS[n.category];
+        const portCount = n.portCount ?? (def?.inputs?.length ?? 2);
+        const vfRows = def?.hasPredicate ? buildVarFieldRows(n.varFields ?? []).length : 0;
+        const h = n.category === 'raw-template' ? (n.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(portCount) + vfRows * OP_NODE_PORT_H;
+        return cp.y >= n.y && cp.y < n.y + h;
+      });
+      setDrawingHoverOpNodeId(overOpNode?.id ?? null);
     }
-  }, [drawing, screenToCanvas, computeHoverTarget, nodes, applyTransform, updateDraggedNodeEdges, updateDraggedOpNodeEdges]);
+  }, [drawing, screenToCanvas, computeHoverTarget, nodes, opNodes, applyTransform, updateDraggedNodeEdges, updateDraggedOpNodeEdges]);
 
   const onInPortClick = useCallback((nodeId: string, fieldPath: string) => {
     for (const ge of edges) {
@@ -1196,7 +1212,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         // Block connecting tainted op nodes directly to resource fields
         const srcOpNode = opNodes.find(n => n.id === drawing.srcNodeId);
         if (srcOpNode?.taints?.length) {
-          setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null);
+          setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); setDrawingHoverOpNodeId(null);
           return;
         }
         const tgtNode = nodeMap.get(hoverTarget.nodeId);
@@ -1225,7 +1241,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         setExtraEdges(prev => prev.filter(e => !(e.srcNodeId === drawing.srcNodeId && e.srcFieldPath === drawing.srcFieldPath)));
         if (opNodes.some(n => n.id === drawing.srcNodeId)) setDirtyOps(true);
       }
-      setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null);
+      setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); setDrawingHoverOpNodeId(null);
     }
   }, [drawing, hoverTarget, nodeMap, addFieldToNode, edges, getEdgeTargetFieldPath, removeExistingEdge, opNodes]);
 
@@ -1531,7 +1547,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       backgroundSize: '24px 24px', userSelect: 'none',
     }}
     onMouseDown={onBgDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp}
-    onMouseLeave={() => { onMouseUp(); setHoverTarget(null); setDrawingHoverNodeId(null); }}
+    onMouseLeave={() => { onMouseUp(); setHoverTarget(null); setDrawingHoverNodeId(null); setDrawingHoverOpNodeId(null); }}
     >
       {/* Toolbar */}
       <Box sx={{ position: 'absolute', top: 8, right: 8, zIndex: 10, display: 'flex', gap: 0.5 }}>
@@ -1866,6 +1882,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             userC={userC}
             isDrawing={!!drawing}
             selected={selected === opNode.id}
+            isExpanded={selected === opNode.id || drawingHoverOpNodeId === opNode.id}
             connectedPortInfo={connectedPortInfoByOpId.get(opNode.id) ?? new Map()}
             onNodeDown={onOpNodeDown}
             onOutputPortDown={onOpNodeOutputPortDown}

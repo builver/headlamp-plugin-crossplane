@@ -1,5 +1,5 @@
 import { collectCelMatches, findCelRefs, parseSingleRefMatch, reconstructTemplate, walkTemplate } from './celUtils';
-import { EDGE_TYPE_FOR, HEADER_H, HG, NODE_MIN_H, nodeH, nodeIdToRef, NW, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refToNodeId, ROW_H, SCHEMA_NODE_ID, VAR_FIELD_PREFIX, varFieldLeafRow, VG } from './constants';
+import { buildVarFieldRows, EDGE_TYPE_FOR, HEADER_H, HG, NODE_MIN_H, nodeH, nodeIdToRef, NW, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refToNodeId, ROW_H, SCHEMA_NODE_ID, VAR_FIELD_PREFIX, varFieldLeafRow, VG } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { getDeepPath } from './pathUtils';
 import { buildKnownForRes, buildSpecialFieldRows, buildTemplateRows, forEachVarNames, insertRowAtPath, makeLeafRow, postProcessEachRefs, reconstructOpGraph } from './rowUtils';
@@ -573,7 +573,7 @@ export function opNodeTgtCoords(node: OpNode, tgtFieldPath: string): { tx: numbe
     : (def?.inputs.findIndex(p => p.name === tgtFieldPath) ?? 0);
   const tgtVarPortIdx = def?.hasPredicate ? def.inputs.findIndex(p => p.name === 'var') : -1;
   const tgtOffset = tgtVarPortIdx >= 0 && portIdx > tgtVarPortIdx
-    ? opNodeVarFieldExtraRows(node.varFields ?? []) * OP_NODE_PORT_H
+    ? buildVarFieldRows(node.varFields ?? []).length * OP_NODE_PORT_H
     : 0;
   return { tx: node.x, ty: opNodeInputPortY(node, portIdx) + tgtOffset };
 }
