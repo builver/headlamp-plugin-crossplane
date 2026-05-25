@@ -103,7 +103,7 @@ jobs:
             echo "  headlamp/plugin/version-compat: \">=0.22\""
             echo "  headlamp/plugin/distro-compat: \"in-cluster,web,docker-desktop,desktop\""
           } > "crossplane/${VERSION}/artifacthub-pkg.yml"
-          cp README.md "crossplane/${VERSION}/README.md"
+          sed "s/version: [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/version: ${VERSION}/" README.md > "crossplane/${VERSION}/README.md"
 
       - name: Commit and push
         env:
