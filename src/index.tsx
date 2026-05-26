@@ -17,21 +17,12 @@ addIcon('crossplane:mono', {
 });
 import { ReadyStatus, SyncedStatus } from './components/ConditionStatus';
 import { registerCrossplaneMapSource } from './components/mapSource';
-import { CompositeResourceDefinition, Configuration, CrossplaneFunction, getXRScope, ManagedResourceActivationPolicy, ManagedResourceDefinition, Provider } from './resources';
+import { CompositeResourceDefinition, getXRScope } from './resources';
 
 // ── Sidebar state — updated by CrossplaneWatcher on every render cycle ────────
 // registerSidebarEntryFilter is reactive (re-evaluated when sidebar re-renders),
 // so module-level state is the correct bridge between React and the filter.
 const claimsState = { visible: false };
-
-// Tracks which XRD plurals have already had a sidebar entry registered so we
-// don't call registerSidebarEntry more than once per plural (it appends).
-const registeredXRKinds = new Set<string>();
-const registeredProviders = new Set<string>();
-const registeredConfigurations = new Set<string>();
-const registeredFunctions = new Set<string>();
-const registeredMRDs = new Set<string>();
-const registeredMRAPs = new Set<string>();
 
 // Guard: registerCrossplaneMapSource is idempotent (Redux skips duplicate IDs),
 // but we track this ourselves to avoid re-building the sub-sources array needlessly.
@@ -43,141 +34,11 @@ registerSidebarEntryFilter(entry =>
 
 function CrossplaneWatcher() {
   const [xrds] = CompositeResourceDefinition.useList();
-  const [providers] = Provider.useList();
-  const [configurations] = Configuration.useList();
-  const [functions] = CrossplaneFunction.useList();
-  const [mrds] = ManagedResourceDefinition.useList();
-  const [mraps] = ManagedResourceActivationPolicy.useList();
 
   claimsState.visible =
     xrds?.some(
       xrd => getXRScope(xrd) === 'LegacyCluster' && !!xrd.jsonData?.spec?.claimNames?.kind
     ) ?? false;
-
-  if (xrds) {
-    for (const xrd of xrds) {
-      const plural = xrd.jsonData?.spec?.names?.plural as string | undefined;
-      const kind = xrd.jsonData?.spec?.names?.kind as string | undefined;
-      if (!plural || !kind) continue;
-
-      const entryName = `crossplane-xr-kind-${plural}`;
-      if (!registeredXRKinds.has(entryName)) {
-        registeredXRKinds.add(entryName);
-        registerSidebarEntry({
-          parent: 'crossplane-xrs',
-          name: entryName,
-          label: kind,
-          url: `/crossplane/xrs/${plural}`,
-        });
-        registerRoute({
-          path: `/crossplane/xrs/${plural}`,
-          sidebar: entryName,
-          name: entryName,
-          exact: true,
-          component: () => <XRListPage />,
-        });
-        registerRoute({
-          path: `/crossplane/xrs/${plural}/:name`,
-          sidebar: entryName,
-          name: `crossplane-xr-detail-cluster-${plural}`,
-          exact: true,
-          component: () => <XRDetailClusterPage />,
-        });
-        registerRoute({
-          path: `/crossplane/xrs/${plural}/:namespace/:name`,
-          sidebar: entryName,
-          name: `crossplane-xr-detail-namespaced-${plural}`,
-          exact: true,
-          component: () => <XRDetailNamespacedPage />,
-        });
-      }
-
-    }
-  }
-
-  if (providers) {
-    for (const provider of providers) {
-      const providerName = provider.metadata.name;
-      if (!providerName) continue;
-      const routeName = `crossplane-provider-detail-${providerName}`;
-      if (!registeredProviders.has(routeName)) {
-        registeredProviders.add(routeName);
-        registerRoute({
-          path: `/crossplane/providers/${providerName}`,
-          sidebar: 'crossplane-providers',
-          name: routeName,
-          exact: true,
-          component: () => <ProviderDetailPage />,
-        });
-      }
-    }
-  }
-
-  if (configurations) {
-    for (const config of configurations) {
-      const configName = config.metadata.name;
-      if (!configName) continue;
-      const routeName = `crossplane-configuration-detail-${configName}`;
-      if (!registeredConfigurations.has(routeName)) {
-        registeredConfigurations.add(routeName);
-        registerRoute({
-          path: `/crossplane/configurations/${configName}`,
-          sidebar: 'crossplane-configurations',
-          name: routeName,
-          exact: true,
-          component: () => <ConfigurationDetailPage />,
-        });
-      }
-    }
-  }
-
-  if (functions) {
-    for (const fn of functions) {
-      const fnName = fn.metadata.name;
-      if (!fnName) continue;
-      const routeName = `crossplane-function-detail-${fnName}`;
-      if (!registeredFunctions.has(routeName)) {
-        registeredFunctions.add(routeName);
-        registerRoute({
-          path: `/crossplane/functions/${fnName}`,
-          sidebar: 'crossplane-functions',
-          name: routeName,
-          exact: true,
-          component: () => <FunctionDetailPage />,
-        });
-      }
-    }
-  }
-
-  if (mrds) {
-    for (const mrd of mrds) {
-      const mrdName = mrd.metadata.name;
-      if (!mrdName || registeredMRDs.has(mrdName)) continue;
-      registeredMRDs.add(mrdName);
-      registerRoute({
-        path: `/crossplane/mrds/${mrdName}`,
-        sidebar: 'crossplane-mrds',
-        name: `crossplane-mrd-detail-${mrdName}`,
-        exact: true,
-        component: () => <MRDDetailPage />,
-      });
-    }
-  }
-
-  if (mraps) {
-    for (const mrap of mraps) {
-      const mrapName = mrap.metadata.name;
-      if (!mrapName || registeredMRAPs.has(mrapName)) continue;
-      registeredMRAPs.add(mrapName);
-      registerRoute({
-        path: `/crossplane/mraps/${mrapName}`,
-        sidebar: 'crossplane-mraps',
-        name: `crossplane-mrap-detail-${mrapName}`,
-        exact: true,
-        component: () => <MRAPDetailPage />,
-      });
-    }
-  }
 
   // Register the Crossplane map source once xrds has loaded (even if empty), so the
   // map appears as soon as Crossplane is installed rather than waiting for the first
@@ -212,12 +73,14 @@ function XRConditionGlance({ node }: { node: any }) {
 
 registerKubeObjectGlance({ id: 'crossplane-xr-condition', component: XRConditionGlance });
 import { ClaimDetailPage, ClaimsPage } from './features/composites/ClaimsPage';
+import { ClusterUsageDetailPage, UsageDetailPage, UsageListPage } from './features/composites/UsageListPage';
 import { XRDDetailPage } from './features/composites/XRDDetailPage';
 import { XRDetailClusterPage, XRDetailNamespacedPage } from './features/composites/XRDetailPage';
 import { XRDListPage } from './features/composites/XRDListPage';
 import { XRListPage } from './features/composites/XRListPage';
 import { CompositionDetailPage } from './features/compositions/CompositionDetailPage';
 import { CompositionListPage } from './features/compositions/CompositionListPage';
+import { EnvironmentConfigDetailPage, EnvironmentConfigListPage } from './features/compositions/EnvironmentConfigListPage';
 import { MRAPDetailPage, MRAPListPage } from './features/managed/MRAPPage';
 import { MRDDetailPage, MRDListPage } from './features/managed/MRDDetailPage';
 import {
@@ -225,6 +88,9 @@ import {
   MRDetailNamespacedPage,
   MRListPage,
 } from './features/managed/MRDetailPage';
+import { CronOperationDetailPage, CronOperationListPage } from './features/operations/CronOperationListPage';
+import { OperationDetailPage, OperationListPage } from './features/operations/OperationListPage';
+import { WatchOperationDetailPage, WatchOperationListPage } from './features/operations/WatchOperationListPage';
 import { OverviewPage } from './features/overview/OverviewPage';
 import {
   ConfigurationDetailPage,
@@ -257,6 +123,48 @@ registerSidebarEntry({
   name: 'crossplane-compositions',
   label: 'Compositions',
   url: '/crossplane/compositions',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-compositions',
+  name: 'crossplane-compositions-list',
+  label: 'Compositions',
+  url: '/crossplane/compositions',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-compositions',
+  name: 'crossplane-envconfigs',
+  label: 'Environment Configs',
+  url: '/crossplane/envconfigs',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane',
+  name: 'crossplane-operations',
+  label: 'Operations',
+  url: '/crossplane/operations',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-operations',
+  name: 'crossplane-operations-list',
+  label: 'Operations',
+  url: '/crossplane/operations',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-operations',
+  name: 'crossplane-cronoperations',
+  label: 'Cron Operations',
+  url: '/crossplane/cronoperations',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-operations',
+  name: 'crossplane-watchoperations',
+  label: 'Watch Operations',
+  url: '/crossplane/watchoperations',
 });
 
 registerSidebarEntry({
@@ -313,6 +221,13 @@ registerSidebarEntry({
   name: 'crossplane-runtimeconfigs',
   label: 'Runtime Configs',
   url: '/crossplane/runtimeconfigs',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-xrs',
+  name: 'crossplane-usages',
+  label: 'Usages',
+  url: '/crossplane/usages',
 });
 
 registerSidebarEntry({
@@ -373,6 +288,30 @@ registerRoute({
   component: () => <XRDListPage />,
 });
 
+registerRoute({
+  path: '/crossplane/xrs/:plural',
+  sidebar: 'crossplane-xrs',
+  name: 'crossplane-xr-list',
+  exact: true,
+  component: () => <XRListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/xrs/:plural/:name',
+  sidebar: 'crossplane-xrs',
+  name: 'crossplane-xr-detail-cluster',
+  exact: true,
+  component: () => <XRDetailClusterPage />,
+});
+
+registerRoute({
+  path: '/crossplane/xrs/:plural/:namespace/:name',
+  sidebar: 'crossplane-xrs',
+  name: 'crossplane-xr-detail-namespaced',
+  exact: true,
+  component: () => <XRDetailNamespacedPage />,
+});
+
 
 
 // Claims (LegacyCluster only)
@@ -401,11 +340,27 @@ registerRoute({
 });
 
 registerRoute({
+  path: '/crossplane/mrds/:name',
+  sidebar: 'crossplane-mrds',
+  name: 'crossplane-mrd-detail',
+  exact: true,
+  component: () => <MRDDetailPage />,
+});
+
+registerRoute({
   path: '/crossplane/mraps',
   sidebar: 'crossplane-mraps',
   name: 'crossplane-mraps-list',
   exact: true,
   component: () => <MRAPListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/mraps/:name',
+  sidebar: 'crossplane-mraps',
+  name: 'crossplane-mrap-detail',
+  exact: true,
+  component: () => <MRAPDetailPage />,
 });
 
 registerRoute({
@@ -441,6 +396,14 @@ registerRoute({
 });
 
 registerRoute({
+  path: '/crossplane/providers/:name',
+  sidebar: 'crossplane-providers',
+  name: 'crossplane-provider-detail',
+  exact: true,
+  component: () => <ProviderDetailPage />,
+});
+
+registerRoute({
   path: '/crossplane/functions',
   sidebar: 'crossplane-functions',
   name: 'crossplane-functions',
@@ -448,6 +411,13 @@ registerRoute({
   component: () => <FunctionListPage />,
 });
 
+registerRoute({
+  path: '/crossplane/functions/:name',
+  sidebar: 'crossplane-functions',
+  name: 'crossplane-function-detail',
+  exact: true,
+  component: () => <FunctionDetailPage />,
+});
 
 registerRoute({
   path: '/crossplane/configurations',
@@ -455,6 +425,14 @@ registerRoute({
   name: 'crossplane-configurations',
   exact: true,
   component: () => <ConfigurationListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/configurations/:name',
+  sidebar: 'crossplane-configurations',
+  name: 'crossplane-configuration-detail',
+  exact: true,
+  component: () => <ConfigurationDetailPage />,
 });
 
 registerRoute({
@@ -487,5 +465,93 @@ registerRoute({
   name: 'crossplane-runtimeconfig-detail',
   exact: true,
   component: () => <RuntimeConfigDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/envconfigs',
+  sidebar: 'crossplane-envconfigs',
+  name: 'crossplane-envconfigs',
+  exact: true,
+  component: () => <EnvironmentConfigListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/envconfigs/:name',
+  sidebar: 'crossplane-envconfigs',
+  name: 'crossplane-envconfig-detail',
+  exact: true,
+  component: () => <EnvironmentConfigDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/usages',
+  sidebar: 'crossplane-usages',
+  name: 'crossplane-usages',
+  exact: true,
+  component: () => <UsageListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/usages/:namespace/:name',
+  sidebar: 'crossplane-usages',
+  name: 'crossplane-usage-detail',
+  exact: true,
+  component: () => <UsageDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/usages/cluster/:name',
+  sidebar: 'crossplane-usages',
+  name: 'crossplane-cluster-usage-detail',
+  exact: true,
+  component: () => <ClusterUsageDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/operations',
+  sidebar: 'crossplane-operations-list',
+  name: 'crossplane-operations',
+  exact: true,
+  component: () => <OperationListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/operations/:name',
+  sidebar: 'crossplane-operations-list',
+  name: 'crossplane-operation-detail',
+  exact: true,
+  component: () => <OperationDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/cronoperations',
+  sidebar: 'crossplane-cronoperations',
+  name: 'crossplane-cronoperations',
+  exact: true,
+  component: () => <CronOperationListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/cronoperations/:name',
+  sidebar: 'crossplane-cronoperations',
+  name: 'crossplane-cronoperation-detail',
+  exact: true,
+  component: () => <CronOperationDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/watchoperations',
+  sidebar: 'crossplane-watchoperations',
+  name: 'crossplane-watchoperations',
+  exact: true,
+  component: () => <WatchOperationListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/watchoperations/:name',
+  sidebar: 'crossplane-watchoperations',
+  name: 'crossplane-watchoperation-detail',
+  exact: true,
+  component: () => <WatchOperationDetailPage />,
 });
 

@@ -1,20 +1,13 @@
-import { Icon } from '@iconify/react';
-import { Link, SectionBox } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { SectionBox } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
-  Box,
-  Typography,
-} from '@mui/material';
+import { Typography } from '@mui/material';
 import { CompositeResourceDefinition, getXRScope, XRScope } from '../../resources';
 import { XRTypeSection } from './XRTypeSection';
 
 const SCOPE_LABELS: Record<XRScope, string> = {
-  Namespaced: 'Namespaced Composite Resources (v2)',
-  Cluster: 'Cluster-Scoped Composite Resources (v2)',
-  LegacyCluster: 'Legacy Composite Resources (v1)',
+  Namespaced: 'Namespaced Composite Resources',
+  Cluster: 'Cluster-Scoped Composite Resources',
+  LegacyCluster: 'Legacy Composite Resources',
 };
 
 const SCOPE_DESCRIPTIONS: Record<XRScope, string> = {
@@ -38,28 +31,9 @@ function ScopeSection({ title, description, xrds, scope }: ScopeSectionProps) {
       <Typography variant="body2" color="textSecondary" sx={{ mb: 2, px: 1 }}>
         {description}
       </Typography>
-      {xrds.map(xrd => {
-        const kind = xrd.jsonData?.spec?.names?.kind ?? xrd.metadata.name;
-        const plural = xrd.jsonData?.spec?.names?.plural ?? '';
-        const group = xrd.jsonData?.spec?.group ?? '';
-        return (
-          <Accordion key={xrd.metadata.uid} defaultExpanded>
-            <AccordionSummary expandIcon={<Icon icon="mdi:chevron-down" />}>
-              <Box display="flex" alignItems="center" gap={1}>
-                <Typography fontWeight={500}>{kind}</Typography>
-                <Typography variant="body2" color="textSecondary">
-                  <Link routeName="crossplane-xrd-detail" params={{ name: xrd.metadata.name }}>
-                    {plural}.{group}
-                  </Link>
-                </Typography>
-              </Box>
-            </AccordionSummary>
-            <AccordionDetails sx={{ p: 0 }}>
-              <XRTypeSection xrd={xrd} scope={scope} />
-            </AccordionDetails>
-          </Accordion>
-        );
-      })}
+      {xrds.map(xrd => (
+        <XRTypeSection key={xrd.metadata.uid} xrd={xrd} scope={scope} />
+      ))}
     </SectionBox>
   );
 }

@@ -53,7 +53,7 @@ export function XRListPage() {
           </Link>
         </Typography>
       </Box>
-      <XRTypeSection xrd={xrd} scope={scope} />
+      <XRTypeSection xrd={xrd} scope={scope} noAccordion />
     </SectionBox>
   );
 }
