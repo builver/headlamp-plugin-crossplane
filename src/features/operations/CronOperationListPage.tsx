@@ -1,4 +1,3 @@
-import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   ConditionsTable,
   MainInfoSection,
@@ -7,31 +6,11 @@ import {
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Link as MuiLink } from '@mui/material';
-import { useLocation } from 'react-router-dom';
-import { ReadyStatus } from '../../components/ConditionStatus';
+import { Box } from '@mui/material';
+import { ActivityNameLink } from '../../components/ActivityNameLink';
+import { readyColumn } from '../../components/columns';
+import { useNameFromRoute } from '../../components/hooks';
 import { CronOperation } from '../../resources';
-
-function CronOperationNameLink({ item }: { item: any }) {
-  const launch = () =>
-    Activity.launch({
-      id: `crossplane-cronoperation-${item.metadata.name}`,
-      title: `CronOperation ${item.metadata.name}`,
-      hideTitleInHeader: true,
-      location: 'split-right',
-      cluster: item.cluster,
-      content: <CronOperationDetailInner name={item.metadata.name} />,
-    });
-  return (
-    <MuiLink
-      component="button"
-      onClick={launch}
-      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
-    >
-      {item.metadata.name}
-    </MuiLink>
-  );
-}
 
 export function CronOperationListPage() {
   const filterFunction = useFilterFunc();
@@ -46,7 +25,13 @@ export function CronOperationListPage() {
           {
             label: 'Name',
             getValue: (item: any) => item.metadata.name,
-            render: (item: any) => <CronOperationNameLink item={item} />,
+            render: (item: any) => (
+              <ActivityNameLink
+                item={item}
+                kindLabel="CronOperation"
+                content={<CronOperationDetailInner name={item.metadata.name} />}
+              />
+            ),
           },
           {
             label: 'Schedule',
@@ -62,12 +47,7 @@ export function CronOperationListPage() {
             getValue: (item: any) =>
               item.jsonData?.spec?.operationTemplate?.spec?.operation ?? '-',
           },
-          {
-            label: 'Ready',
-            getValue: (item: any) =>
-              item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Ready')?.status ?? '-',
-            render: (item: any) => <ReadyStatus item={item} />,
-          },
+          readyColumn,
           'age',
         ]}
       />
@@ -103,7 +83,6 @@ export function CronOperationDetailInner({ name }: { name: string }) {
 }
 
 export function CronOperationDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  const name = useNameFromRoute();
   return <CronOperationDetailInner name={name} />;
 }

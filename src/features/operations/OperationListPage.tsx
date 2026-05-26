@@ -1,4 +1,3 @@
-import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   ConditionsTable,
   MainInfoSection,
@@ -7,31 +6,11 @@ import {
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Link as MuiLink } from '@mui/material';
-import { useLocation } from 'react-router-dom';
-import { ReadyStatus, SyncedStatus } from '../../components/ConditionStatus';
+import { Box } from '@mui/material';
+import { ActivityNameLink } from '../../components/ActivityNameLink';
+import { readyColumn, syncedColumn } from '../../components/columns';
+import { useNameFromRoute } from '../../components/hooks';
 import { Operation } from '../../resources';
-
-function OperationNameLink({ item }: { item: any }) {
-  const launch = () =>
-    Activity.launch({
-      id: `crossplane-operation-${item.metadata.name}`,
-      title: `Operation ${item.metadata.name}`,
-      hideTitleInHeader: true,
-      location: 'split-right',
-      cluster: item.cluster,
-      content: <OperationDetailInner name={item.metadata.name} />,
-    });
-  return (
-    <MuiLink
-      component="button"
-      onClick={launch}
-      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
-    >
-      {item.metadata.name}
-    </MuiLink>
-  );
-}
 
 export function OperationListPage() {
   const filterFunction = useFilterFunc();
@@ -46,7 +25,13 @@ export function OperationListPage() {
           {
             label: 'Name',
             getValue: (item: any) => item.metadata.name,
-            render: (item: any) => <OperationNameLink item={item} />,
+            render: (item: any) => (
+              <ActivityNameLink
+                item={item}
+                kindLabel="Operation"
+                content={<OperationDetailInner name={item.metadata.name} />}
+              />
+            ),
           },
           {
             label: 'Operation',
@@ -60,18 +45,8 @@ export function OperationListPage() {
             label: 'Target Name',
             getValue: (item: any) => item.jsonData?.spec?.target?.name ?? '-',
           },
-          {
-            label: 'Ready',
-            getValue: (item: any) =>
-              item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Ready')?.status ?? '-',
-            render: (item: any) => <ReadyStatus item={item} />,
-          },
-          {
-            label: 'Synced',
-            getValue: (item: any) =>
-              item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Synced')?.status ?? '-',
-            render: (item: any) => <SyncedStatus item={item} />,
-          },
+          readyColumn,
+          syncedColumn,
           'age',
         ]}
       />
@@ -114,7 +89,6 @@ export function OperationDetailInner({ name }: { name: string }) {
 }
 
 export function OperationDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  const name = useNameFromRoute();
   return <OperationDetailInner name={name} />;
 }

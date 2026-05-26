@@ -1,5 +1,4 @@
 import { Icon } from '@iconify/react';
-import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   CreateResourceButton,
   Link,
@@ -9,9 +8,10 @@ import {
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Link as MuiLink, Tooltip } from '@mui/material';
+import { Box, Tooltip } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { Fragment } from 'react';
+import { ActivityNameLink } from '../../components/ActivityNameLink';
 import { makeCompositeTypeColumn } from '../../components/columns';
 import { CompositeResourceDefinition, Composition, CrossplaneFunction } from '../../resources';
 import { CompositionDetailPage } from './CompositionDetailPage';
@@ -101,21 +101,14 @@ function PipelineSteps({ item, knownFunctions }: { item: KubeObject; knownFuncti
 }
 
 function CompositionNameLink({ item }: { item: KubeObject }) {
-  const launch = () => Activity.launch({
-    id: `crossplane-composition-${item.metadata.name}`,
-    title: `Composition ${item.metadata.name}`,
-    hideTitleInHeader: true,
-    location: 'full',
-    cluster: item.cluster,
-    icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
-    content: <CompositionDetailPage name={item.metadata.name} />,
-  });
   return (
-    <MuiLink component="button" onClick={launch}
-      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
-    >
-      {item.metadata.name}
-    </MuiLink>
+    <ActivityNameLink
+      item={item}
+      kindLabel="Composition"
+      location="full"
+      icon={<Icon icon="mdi:layers-outline" width="100%" height="100%" />}
+      content={<CompositionDetailPage name={item.metadata.name} />}
+    />
   );
 }
 

@@ -78,7 +78,7 @@ import { XRDDetailPage } from './features/composites/XRDDetailPage';
 import { XRDetailClusterPage, XRDetailNamespacedPage } from './features/composites/XRDetailPage';
 import { XRDListPage } from './features/composites/XRDListPage';
 import { XRListPage } from './features/composites/XRListPage';
-import { CompositionDetailPage } from './features/compositions/CompositionDetailPage';
+import { CompositionDetailRoute } from './features/compositions/CompositionDetailPage';
 import { CompositionListPage } from './features/compositions/CompositionListPage';
 import { EnvironmentConfigDetailPage, EnvironmentConfigListPage } from './features/compositions/EnvironmentConfigListPage';
 import { MRAPDetailPage, MRAPListPage } from './features/managed/MRAPPage';
@@ -275,7 +275,7 @@ registerRoute({
   sidebar: 'crossplane-compositions',
   name: 'crossplane-composition-detail',
   exact: true,
-  component: () => <CompositionDetailPage />,
+  component: () => <CompositionDetailRoute />,
 });
 
 

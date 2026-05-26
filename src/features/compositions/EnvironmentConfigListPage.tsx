@@ -1,4 +1,3 @@
-import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   DataField,
   MainInfoSection,
@@ -7,31 +6,11 @@ import {
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Link as MuiLink } from '@mui/material';
-import { useLocation } from 'react-router-dom';
+import { Box } from '@mui/material';
 import { stringify as yamlStringify } from 'yaml';
+import { ActivityNameLink } from '../../components/ActivityNameLink';
+import { useNameFromRoute } from '../../components/hooks';
 import { EnvironmentConfig } from '../../resources';
-
-function EnvironmentConfigNameLink({ item }: { item: any }) {
-  const launch = () =>
-    Activity.launch({
-      id: `crossplane-envconfig-${item.metadata.name}`,
-      title: `EnvironmentConfig ${item.metadata.name}`,
-      hideTitleInHeader: true,
-      location: 'split-right',
-      cluster: item.cluster,
-      content: <EnvironmentConfigDetailInner name={item.metadata.name} />,
-    });
-  return (
-    <MuiLink
-      component="button"
-      onClick={launch}
-      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
-    >
-      {item.metadata.name}
-    </MuiLink>
-  );
-}
 
 export function EnvironmentConfigListPage() {
   const filterFunction = useFilterFunc();
@@ -54,7 +33,13 @@ export function EnvironmentConfigListPage() {
           {
             label: 'Name',
             getValue: (item: any) => item.metadata.name,
-            render: (item: any) => <EnvironmentConfigNameLink item={item} />,
+            render: (item: any) => (
+              <ActivityNameLink
+                item={item}
+                kindLabel="EnvironmentConfig"
+                content={<EnvironmentConfigDetailInner name={item.metadata.name} />}
+              />
+            ),
           },
           {
             label: 'Data Keys',
@@ -94,7 +79,6 @@ export function EnvironmentConfigDetailInner({ name }: { name: string }) {
 }
 
 export function EnvironmentConfigDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  const name = useNameFromRoute();
   return <EnvironmentConfigDetailInner name={name} />;
 }

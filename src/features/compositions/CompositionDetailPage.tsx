@@ -20,9 +20,9 @@ import {
   Typography,
 } from '@mui/material';
 import { useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
 import { stringify as yamlStringify } from 'yaml';
 import { makeXRNameColumn, readyColumn, syncedColumn } from '../../components/columns';
+import { useNameFromRoute } from '../../components/hooks';
 import { getGroupVersion } from '../../components/map/apiPaths';
 import {
   CompositeResourceDefinition,
@@ -112,9 +112,11 @@ function ComposedXRs({ xrd, compositionName }: ComposedXRsProps) {
   );
 }
 
-export function CompositionDetailPage({ name: nameProp }: { name?: string } = {}) {
-  const location = useLocation();
-  const name = nameProp ?? location.pathname.split('/').filter(Boolean).pop() ?? '';
+export function CompositionDetailRoute() {
+  return <CompositionDetailPage name={useNameFromRoute()} />;
+}
+
+export function CompositionDetailPage({ name }: { name: string }) {
   const [comp] = Composition.useGet(name);
   const [xrds] = CompositeResourceDefinition.useList();
   const [mrds] = ManagedResourceDefinition.useList();

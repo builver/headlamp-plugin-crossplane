@@ -1,4 +1,3 @@
-import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   ConditionsTable,
   MainInfoSection,
@@ -7,31 +6,11 @@ import {
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Link as MuiLink } from '@mui/material';
-import { useLocation } from 'react-router-dom';
-import { ReadyStatus } from '../../components/ConditionStatus';
+import { Box } from '@mui/material';
+import { ActivityNameLink } from '../../components/ActivityNameLink';
+import { readyColumn } from '../../components/columns';
+import { useNameFromRoute } from '../../components/hooks';
 import { WatchOperation } from '../../resources';
-
-function WatchOperationNameLink({ item }: { item: any }) {
-  const launch = () =>
-    Activity.launch({
-      id: `crossplane-watchoperation-${item.metadata.name}`,
-      title: `WatchOperation ${item.metadata.name}`,
-      hideTitleInHeader: true,
-      location: 'split-right',
-      cluster: item.cluster,
-      content: <WatchOperationDetailInner name={item.metadata.name} />,
-    });
-  return (
-    <MuiLink
-      component="button"
-      onClick={launch}
-      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
-    >
-      {item.metadata.name}
-    </MuiLink>
-  );
-}
 
 export function WatchOperationListPage() {
   const filterFunction = useFilterFunc();
@@ -46,7 +25,13 @@ export function WatchOperationListPage() {
           {
             label: 'Name',
             getValue: (item: any) => item.metadata.name,
-            render: (item: any) => <WatchOperationNameLink item={item} />,
+            render: (item: any) => (
+              <ActivityNameLink
+                item={item}
+                kindLabel="WatchOperation"
+                content={<WatchOperationDetailInner name={item.metadata.name} />}
+              />
+            ),
           },
           {
             label: 'Watch Kind',
@@ -60,12 +45,7 @@ export function WatchOperationListPage() {
             label: 'Condition Status',
             getValue: (item: any) => item.jsonData?.spec?.watch?.conditionStatus ?? '-',
           },
-          {
-            label: 'Ready',
-            getValue: (item: any) =>
-              item.jsonData?.status?.conditions?.find((c: any) => c.type === 'Ready')?.status ?? '-',
-            render: (item: any) => <ReadyStatus item={item} />,
-          },
+          readyColumn,
           'age',
         ]}
       />
@@ -108,7 +88,6 @@ export function WatchOperationDetailInner({ name }: { name: string }) {
 }
 
 export function WatchOperationDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  const name = useNameFromRoute();
   return <WatchOperationDetailInner name={name} />;
 }
