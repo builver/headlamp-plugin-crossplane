@@ -1,4 +1,5 @@
 import {
+  CreateResourceButton,
   DataField,
   MainInfoSection,
   ResourceTable,
@@ -25,10 +26,19 @@ export function EnvironmentConfigListPage() {
   }
 
   return (
-    <SectionBox title={<SectionFilterHeader title="Environment Configs" />}>
+    <SectionBox
+      title={
+        <SectionFilterHeader
+          title="Environment Configs"
+          noNamespaceFilter
+          titleSideActions={[<CreateResourceButton resourceClass={EnvironmentConfig} resourceName="EnvironmentConfig" />]}
+        />
+      }
+    >
       <ResourceTable.default
         data={items}
         filterFunction={filterFunction}
+        enableRowActions
         columns={[
           {
             label: 'Name',

@@ -15,6 +15,12 @@ export class EnvironmentConfig extends KubeObject {
   static apiName = 'environmentconfigs';
   static apiVersion = 'apiextensions.crossplane.io/v1alpha1';
   static isNamespaced = false;
+
+  static getBaseObject() {
+    const base = super.getBaseObject();
+    base.spec = { data: {} };
+    return base;
+  }
 }
 
 export class ManagedResourceActivationPolicy extends KubeObject {

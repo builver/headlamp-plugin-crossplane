@@ -127,13 +127,6 @@ registerSidebarEntry({
 
 registerSidebarEntry({
   parent: 'crossplane-compositions',
-  name: 'crossplane-compositions-list',
-  label: 'Compositions',
-  url: '/crossplane/compositions',
-});
-
-registerSidebarEntry({
-  parent: 'crossplane-compositions',
   name: 'crossplane-envconfigs',
   label: 'Environment Configs',
   url: '/crossplane/envconfigs',

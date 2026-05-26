@@ -1,5 +1,6 @@
 import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
+  CreateResourceButton,
   MainInfoSection,
   ResourceTable,
   SectionBox,
@@ -110,10 +111,18 @@ export function UsageListPage() {
 
   return (
     <>
-      <SectionBox title={<SectionFilterHeader title="Usages (Namespaced)" />}>
+      <SectionBox
+        title={
+          <SectionFilterHeader
+            title="Usages (Namespaced)"
+            titleSideActions={[<CreateResourceButton resourceClass={Usage} resourceName="Usage" />]}
+          />
+        }
+      >
         <ResourceTable.default
           data={usages}
           filterFunction={filterFunction}
+          enableRowActions
           columns={[
             ...usageColumns('usage').slice(0, 1),
             'namespace' as const,
@@ -121,10 +130,18 @@ export function UsageListPage() {
           ]}
         />
       </SectionBox>
-      <SectionBox title={<SectionFilterHeader title="Cluster Usages" />}>
+      <SectionBox
+        title={
+          <SectionFilterHeader
+            title="Cluster Usages"
+            noNamespaceFilter
+            titleSideActions={[<CreateResourceButton resourceClass={ClusterUsage} resourceName="ClusterUsage" />]}
+          />
+        }
+      >
         <ResourceTable.default
           data={clusterUsages}
-          filterFunction={filterFunction}
+          enableRowActions
           columns={usageColumns('cluster-usage')}
         />
       </SectionBox>
