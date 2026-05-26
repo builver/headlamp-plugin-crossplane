@@ -29,7 +29,7 @@ function launchCreatePanel(cluster?: string) {
     location: 'split-right',
     cluster,
     icon: MRAP_ICON,
-    content: <MRAPCreatePanel onDone={() => Activity.close(id)} />,
+    content: <MRAPCreatePanel onDone={() => Activity.close(id)} activityId={id} cluster={cluster} />,
   });
 }
 
@@ -42,7 +42,7 @@ function launchEditPanel(item: any) {
     location: 'split-right',
     cluster: item.cluster,
     icon: MRAP_ICON,
-    content: <MRAPCreatePanel existing={item} onDone={() => Activity.close(id)} />,
+    content: <MRAPCreatePanel existing={item} onDone={() => Activity.close(id)} activityId={id} cluster={item.cluster} />,
   });
 }
 

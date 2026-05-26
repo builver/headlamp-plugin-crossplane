@@ -28,7 +28,7 @@ function launchCreatePanel(cluster?: string) {
     location: 'split-right',
     cluster,
     icon: PROVIDER_ICON,
-    content: <PackageCreatePanel kind="Provider" onDone={() => Activity.close(id)} />,
+    content: <PackageCreatePanel kind="Provider" onDone={() => Activity.close(id)} activityId={id} cluster={cluster} />,
   });
 }
 
@@ -41,7 +41,7 @@ function launchEditPanel(item: any) {
     location: 'split-right',
     cluster: item.cluster,
     icon: PROVIDER_ICON,
-    content: <PackageCreatePanel kind="Provider" existing={item} onDone={() => Activity.close(id)} />,
+    content: <PackageCreatePanel kind="Provider" existing={item} onDone={() => Activity.close(id)} activityId={id} cluster={item.cluster} />,
   });
 }
 

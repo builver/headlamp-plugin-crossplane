@@ -365,9 +365,11 @@ interface PanelProps {
   kind: PackageKind;
   existing?: any;
   onDone?: () => void;
+  activityId?: string;
+  cluster?: string;
 }
 
-export function PackageCreatePanel({ kind, existing, onDone }: PanelProps) {
+export function PackageCreatePanel({ kind, existing, onDone, activityId, cluster }: PanelProps) {
   const form = usePackageForm(kind, existing, true);
   return (
     <ResourceHelperPanel
@@ -377,6 +379,8 @@ export function PackageCreatePanel({ kind, existing, onDone }: PanelProps) {
       canSubmit={form.canSubmit}
       onReset={form.resetForm}
       onDone={onDone}
+      activityId={activityId}
+      cluster={cluster}
     >
       <PackageFormFields kind={kind} existing={existing} form={form} />
     </ResourceHelperPanel>

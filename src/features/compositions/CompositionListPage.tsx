@@ -1,6 +1,7 @@
 import { Icon } from '@iconify/react';
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
-  CreateResourceButton,
+  ActionButton,
   Link,
   ResourceTable,
   SectionBox,
@@ -14,7 +15,21 @@ import { Fragment } from 'react';
 import { ActivityNameLink } from '../../components/ActivityNameLink';
 import { makeCompositeTypeColumn } from '../../components/columns';
 import { CompositeResourceDefinition, Composition, CrossplaneFunction } from '../../resources';
+import { CompositionCreatePanel } from './CompositionCreateDialog';
 import { CompositionDetailPage } from './CompositionDetailPage';
+
+function launchCreatePanel(cluster?: string) {
+  const id = `crossplane-composition-create-${Date.now()}`;
+  Activity.launch({
+    id,
+    title: 'Create Composition',
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster,
+    icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
+    content: <CompositionCreatePanel onDone={() => Activity.close(id)} activityId={id} cluster={cluster} />,
+  });
+}
 
 const MAX_VISIBLE_STEPS = 7;
 
@@ -132,7 +147,13 @@ export function CompositionListPage() {
       title={
         <SectionFilterHeader
           title="Compositions"
-          titleSideActions={[<CreateResourceButton resourceClass={Composition} resourceName="Composition" />]}
+          titleSideActions={[
+            <ActionButton
+              description="Create Composition"
+              icon="mdi:plus-circle"
+              onClick={() => launchCreatePanel(compositions?.[0]?.cluster)}
+            />,
+          ]}
         />
       }
     >

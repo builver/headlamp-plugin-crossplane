@@ -2,7 +2,7 @@ import { Icon } from '@iconify/react';
 import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import { apply } from '@kinvolk/headlamp-plugin/lib/ApiProxy';
 import {
-  DataField,
+  EditorDialog,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import {
   Alert,
@@ -14,57 +14,48 @@ import {
   DialogTitle,
 } from '@mui/material';
 import { ReactNode, useCallback, useState } from 'react';
-import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
 
-function YamlEditorPanel({ item, title, onDone }: { item: any; title: string; onDone: () => void }) {
-  const [yaml, setYaml] = useState(() => yamlStringify(item, { blockQuote: true }));
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleApply = useCallback(async () => {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const parsed = yamlParse(yaml);
-      await apply(parsed);
-      onDone();
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to apply');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [yaml, onDone]);
-
+function EditorPanel({ item, title, onDone }: { item: any; title: string; onDone: () => void }) {
+  const [errorMessage, setErrorMessage] = useState('');
   return (
-    <Box display="flex" flexDirection="column" height="100%">
-      <Box flex={1} overflow="hidden" p={1}>
-        <DataField label={`${title}.yaml`} disableLabel value={yaml} onChange={setYaml} />
-      </Box>
-      {error && (
-        <Box px={2}>
-          <Alert severity="error">{error}</Alert>
-        </Box>
-      )}
-      <Box display="flex" justifyContent="flex-end" gap={1} p={2} borderTop={1} borderColor="divider">
-        <Button onClick={onDone} disabled={submitting}>Cancel</Button>
-        <Button onClick={handleApply} variant="contained" disabled={submitting}>
-          {submitting ? 'Applying…' : 'Apply'}
-        </Button>
-      </Box>
-    </Box>
+    <EditorDialog
+      noDialog
+      item={item}
+      open
+      setOpen={() => {}}
+      onClose={onDone}
+      saveLabel="Apply"
+      errorMessage={errorMessage}
+      onEditorChanged={() => setErrorMessage('')}
+      title={title}
+      aria-label={title}
+    />
   );
 }
 
-function launchYamlEditor(item: any, title: string, location: 'split-left' | 'split-right' = 'split-right') {
-  const id = `yaml-editor-${Date.now()}`;
-  Activity.launch({
-    id,
-    title: `YAML: ${title}`,
-    hideTitleInHeader: true,
-    location,
-    icon: <Icon icon="mdi:code-braces" width="100%" height="100%" />,
-    content: <YamlEditorPanel item={item} title={title} onDone={() => Activity.close(id)} />,
-  });
+function launchYamlEditor(
+  item: any,
+  title: string,
+  options?: { activityId?: string; cluster?: string; location?: 'split-left' | 'split-right' },
+) {
+  const existingId = options?.activityId;
+  if (existingId) {
+    Activity.update(existingId, {
+      title,
+      cluster: options?.cluster,
+      content: <EditorPanel item={item} title={title} onDone={() => Activity.close(existingId)} />,
+    });
+  } else {
+    const id = `yaml-editor-${Date.now()}`;
+    Activity.launch({
+      id,
+      title,
+      hideTitleInHeader: true,
+      location: options?.location ?? 'split-right',
+      icon: <Icon icon="mdi:code-braces" width="100%" height="100%" />,
+      content: <EditorPanel item={item} title={title} onDone={() => Activity.close(id)} />,
+    });
+  }
 }
 
 interface ResourceHelperBaseProps {
@@ -124,7 +115,7 @@ export function ResourceHelperDialog({
   }, [resetAll, onClose]);
 
   const handleOpenNativeEditor = useCallback(() => {
-    launchYamlEditor(buildItem(), title, 'split-right');
+    launchYamlEditor(buildItem(), title);
   }, [buildItem, title]);
 
   const handleSubmit = useCallback(async () => {
@@ -176,6 +167,10 @@ export function ResourceHelperDialog({
 interface ResourceHelperPanelProps extends ResourceHelperBaseProps {
   /** Called after successful submit or cancel. Used to close the Activity tab. */
   onDone?: () => void;
+  /** Activity ID — when provided, the YAML editor replaces the wizard panel in the same tab. */
+  activityId?: string;
+  /** Cluster name — shown in the YAML editor tab header. */
+  cluster?: string;
 }
 
 /**
@@ -192,6 +187,8 @@ export function ResourceHelperPanel({
   children,
   submitLabel: submitLabelOverride,
   onDone,
+  activityId,
+  cluster,
 }: ResourceHelperPanelProps) {
   const isEdit = !!existing;
   const title = titleOverride ?? (isEdit ? `Edit ${resourceName}` : `Create ${resourceName}`);
@@ -200,8 +197,12 @@ export function ResourceHelperPanel({
   const [error, setError] = useState<string | null>(null);
 
   const handleOpenNativeEditor = useCallback(() => {
-    launchYamlEditor(buildItem(), title, 'split-left');
-  }, [buildItem, title]);
+    launchYamlEditor(buildItem(), title, {
+      activityId,
+      cluster,
+      location: activityId ? undefined : 'split-left',
+    });
+  }, [buildItem, title, activityId, cluster]);
 
   const handleSubmit = useCallback(async () => {
     setSubmitting(true);
@@ -260,4 +261,3 @@ export function ResourceHelperPanel({
     </Box>
   );
 }
-

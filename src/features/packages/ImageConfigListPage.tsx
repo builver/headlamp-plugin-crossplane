@@ -25,7 +25,7 @@ function launchCreatePanel(cluster?: string) {
     location: 'split-right',
     cluster,
     icon: IC_ICON,
-    content: <ImageConfigCreatePanel onDone={() => Activity.close(id)} />,
+    content: <ImageConfigCreatePanel onDone={() => Activity.close(id)} activityId={id} cluster={cluster} />,
   });
 }
 
@@ -38,7 +38,7 @@ function launchEditPanel(item: any) {
     location: 'split-right',
     cluster: item.cluster,
     icon: IC_ICON,
-    content: <ImageConfigCreatePanel existing={item} onDone={() => Activity.close(id)} />,
+    content: <ImageConfigCreatePanel existing={item} onDone={() => Activity.close(id)} activityId={id} cluster={item.cluster} />,
   });
 }
 

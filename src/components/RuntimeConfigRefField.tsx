@@ -52,6 +52,7 @@ export function RuntimeConfigRefField({
               onChange(name);
               Activity.close(id);
             }}
+            activityId={id}
           />
         ),
       });

@@ -30,7 +30,7 @@ function launchCreatePanel(cluster?: string) {
     location: 'split-right',
     cluster,
     icon: CFG_ICON,
-    content: <PackageCreatePanel kind="Configuration" onDone={() => Activity.close(id)} />,
+    content: <PackageCreatePanel kind="Configuration" onDone={() => Activity.close(id)} activityId={id} cluster={cluster} />,
   });
 }
 
@@ -43,7 +43,7 @@ function launchEditPanel(item: any) {
     location: 'split-right',
     cluster: item.cluster,
     icon: CFG_ICON,
-    content: <PackageCreatePanel kind="Configuration" existing={item} onDone={() => Activity.close(id)} />,
+    content: <PackageCreatePanel kind="Configuration" existing={item} onDone={() => Activity.close(id)} activityId={id} cluster={item.cluster} />,
   });
 }
 

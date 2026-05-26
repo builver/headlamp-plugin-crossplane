@@ -34,6 +34,24 @@ export class Composition extends KubeObject {
   static apiName = 'compositions';
   static apiVersion = ['apiextensions.crossplane.io/v1', 'apiextensions.crossplane.io/v1beta1'];
   static isNamespaced = false;
+
+  static getBaseObject() {
+    const base = super.getBaseObject();
+    base.spec = {
+      compositeTypeRef: {
+        apiVersion: '',
+        kind: '',
+      },
+      mode: 'Pipeline',
+      pipeline: [
+        {
+          step: 'render',
+          functionRef: { name: '' },
+        },
+      ],
+    };
+    return base;
+  }
 }
 
 export class CompositionRevision extends KubeObject {

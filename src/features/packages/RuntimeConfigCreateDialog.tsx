@@ -447,9 +447,11 @@ interface PanelProps {
   existing?: any;
   prefillName?: string;
   onDone?: () => void;
+  activityId?: string;
+  cluster?: string;
 }
 
-export function RuntimeConfigCreatePanel({ existing, prefillName, onDone }: PanelProps) {
+export function RuntimeConfigCreatePanel({ existing, prefillName, onDone, activityId, cluster }: PanelProps) {
   const form = useRuntimeConfigForm(existing, true, prefillName);
   return (
     <ResourceHelperPanel
@@ -459,6 +461,8 @@ export function RuntimeConfigCreatePanel({ existing, prefillName, onDone }: Pane
       canSubmit={form.canSubmit}
       onReset={form.resetForm}
       onDone={onDone}
+      activityId={activityId}
+      cluster={cluster}
     >
       <RuntimeConfigFormFields existing={existing} form={form} />
     </ResourceHelperPanel>

@@ -306,9 +306,11 @@ export function MRAPCreateDialog({ open, onClose, existing }: DialogProps) {
 interface PanelProps {
   existing?: any;
   onDone?: () => void;
+  activityId?: string;
+  cluster?: string;
 }
 
-export function MRAPCreatePanel({ existing, onDone }: PanelProps) {
+export function MRAPCreatePanel({ existing, onDone, activityId, cluster }: PanelProps) {
   const form = useMRAPForm(existing, true);
   return (
     <ResourceHelperPanel
@@ -318,6 +320,8 @@ export function MRAPCreatePanel({ existing, onDone }: PanelProps) {
       canSubmit={form.canSubmit}
       onReset={form.resetForm}
       onDone={onDone}
+      activityId={activityId}
+      cluster={cluster}
     >
       <MRAPFormFields existing={existing} form={form} />
     </ResourceHelperPanel>

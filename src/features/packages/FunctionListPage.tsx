@@ -29,7 +29,7 @@ function launchCreatePanel(cluster?: string) {
     location: 'split-right',
     cluster,
     icon: FN_ICON,
-    content: <PackageCreatePanel kind="Function" onDone={() => Activity.close(id)} />,
+    content: <PackageCreatePanel kind="Function" onDone={() => Activity.close(id)} activityId={id} cluster={cluster} />,
   });
 }
 
@@ -42,7 +42,7 @@ function launchEditPanel(item: any) {
     location: 'split-right',
     cluster: item.cluster,
     icon: FN_ICON,
-    content: <PackageCreatePanel kind="Function" existing={item} onDone={() => Activity.close(id)} />,
+    content: <PackageCreatePanel kind="Function" existing={item} onDone={() => Activity.close(id)} activityId={id} cluster={item.cluster} />,
   });
 }
 

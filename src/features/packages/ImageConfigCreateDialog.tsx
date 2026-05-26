@@ -529,9 +529,11 @@ export function ImageConfigCreateDialog({ open, onClose, existing }: DialogProps
 interface PanelProps {
   existing?: any;
   onDone?: () => void;
+  activityId?: string;
+  cluster?: string;
 }
 
-export function ImageConfigCreatePanel({ existing, onDone }: PanelProps) {
+export function ImageConfigCreatePanel({ existing, onDone, activityId, cluster }: PanelProps) {
   const form = useImageConfigForm(existing, true);
   return (
     <ResourceHelperPanel
@@ -541,6 +543,8 @@ export function ImageConfigCreatePanel({ existing, onDone }: PanelProps) {
       canSubmit={form.canSubmit}
       onReset={form.resetForm}
       onDone={onDone}
+      activityId={activityId}
+      cluster={cluster}
     >
       <ImageConfigFormFields existing={existing} form={form} />
     </ResourceHelperPanel>
