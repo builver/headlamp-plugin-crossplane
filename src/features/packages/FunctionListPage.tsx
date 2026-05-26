@@ -1,8 +1,8 @@
 import { Icon } from '@iconify/react';
 import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
+  ActionButton,
   ConditionsTable,
-  CreateResourceButton,
   Link,
   MainInfoSection,
   ResourceTable,
@@ -10,12 +10,41 @@ import {
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Link as MuiLink } from '@mui/material';
+import { Box, Link as MuiLink, ListItemIcon, ListItemText, MenuItem } from '@mui/material';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { makeCompositeTypeColumn, packageResourceColumns } from '../../components/columns';
 import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
 import { CompositeResourceDefinition, Composition, CrossplaneFunction } from '../../resources';
+import { PackageCreatePanel } from './PackageCreateDialog';
+
+const FN_ICON = <Icon icon="mdi:function" width="100%" height="100%" />;
+
+function launchCreatePanel(cluster?: string) {
+  const id = `crossplane-function-create-${Date.now()}`;
+  Activity.launch({
+    id,
+    title: 'Create Function',
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster,
+    icon: FN_ICON,
+    content: <PackageCreatePanel kind="Function" onDone={() => Activity.close(id)} />,
+  });
+}
+
+function launchEditPanel(item: any) {
+  const id = `crossplane-function-edit-${item.metadata.name}`;
+  Activity.launch({
+    id,
+    title: `Edit ${item.metadata.name}`,
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster: item.cluster,
+    icon: FN_ICON,
+    content: <PackageCreatePanel kind="Function" existing={item} onDone={() => Activity.close(id)} />,
+  });
+}
 
 function FunctionNameLink({ item }: { item: any }) {
   const launch = () => Activity.launch({
@@ -24,7 +53,7 @@ function FunctionNameLink({ item }: { item: any }) {
     hideTitleInHeader: true,
     location: 'split-right',
     cluster: item.cluster,
-    icon: <Icon icon="mdi:function" width="100%" height="100%" />,
+    icon: FN_ICON,
     content: <FunctionDetailInner name={item.metadata.name} />,
   });
   return (
@@ -40,6 +69,19 @@ export function FunctionListPage() {
   const filterFunction = useFilterFunc();
   const [functions, error] = CrossplaneFunction.useList();
 
+  const guiEditAction = useMemo(
+    () => ({
+      id: 'GUI_EDIT',
+      action: ({ item, closeMenu }: { item: any; closeMenu: () => void }) => (
+        <MenuItem key="gui-edit" onClick={() => { closeMenu(); launchEditPanel(item); }}>
+          <ListItemIcon><Icon icon="mdi:wizard-hat" /></ListItemIcon>
+          <ListItemText>GUI Edit</ListItemText>
+        </MenuItem>
+      ),
+    }),
+    []
+  );
+
   if (error?.status === 404) {
     return (
       <SectionBox title="Functions">
@@ -53,7 +95,13 @@ export function FunctionListPage() {
       title={
         <SectionFilterHeader
           title="Functions"
-          titleSideActions={[<CreateResourceButton resourceClass={CrossplaneFunction} resourceName="Function" />]}
+          titleSideActions={[
+            <ActionButton
+              description="Create Function"
+              icon="mdi:plus-circle"
+              onClick={() => launchCreatePanel(functions?.[0]?.cluster)}
+            />,
+          ]}
         />
       }
     >
@@ -61,11 +109,12 @@ export function FunctionListPage() {
         data={functions}
         filterFunction={filterFunction}
         enableRowActions
+        actions={[guiEditAction]}
         columns={[
           {
             label: 'Name',
-            getValue: item => item.metadata.name,
-            render: item => <FunctionNameLink item={item} />,
+            getValue: (item: any) => item.metadata.name,
+            render: (item: any) => <FunctionNameLink item={item} />,
           },
           ...packageResourceColumns,
         ]}
@@ -100,8 +149,8 @@ function CompositionsUsingFunction({ functionName }: { functionName: string }) {
         columns={[
           {
             label: 'Name',
-            getValue: item => item.metadata.name,
-            render: item => (
+            getValue: (item: any) => item.metadata.name,
+            render: (item: any) => (
               <Link routeName={`crossplane-composition-detail-${item.metadata.name}`}>
                 {item.metadata.name}
               </Link>
@@ -117,6 +166,18 @@ function CompositionsUsingFunction({ functionName }: { functionName: string }) {
 
 export function FunctionDetailInner({ name }: { name: string }) {
   const [fn] = CrossplaneFunction.useGet(name);
+  const actions = useMemo(
+    () => () =>
+      [
+        <ActionButton
+          key="edit"
+          description="Edit"
+          icon="mdi:pencil"
+          onClick={() => fn && launchEditPanel(fn)}
+        />,
+      ],
+    [fn]
+  );
 
   const extraInfo = fn
     ? [
@@ -134,7 +195,7 @@ export function FunctionDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={fn} extraInfo={extraInfo} />
+      <MainInfoSection resource={fn} extraInfo={extraInfo} actions={actions} noDefaultActions />
       {fn && <ConditionsTable resource={fn.jsonData} />}
       {fn && <CompositionsUsingFunction functionName={fn.metadata.name} />}
     </Box>

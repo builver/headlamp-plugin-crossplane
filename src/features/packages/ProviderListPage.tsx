@@ -1,19 +1,49 @@
 import { Icon } from '@iconify/react';
 import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
+  ActionButton,
   ConditionsTable,
-  CreateResourceButton,
   MainInfoSection,
   ResourceTable,
   SectionBox,
   SectionFilterHeader,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { Box, Link as MuiLink } from '@mui/material';
+import { Box, Link as MuiLink, ListItemIcon, ListItemText, MenuItem } from '@mui/material';
+import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { packageResourceColumns } from '../../components/columns';
 import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
 import { Provider } from '../../resources';
+import { PackageCreatePanel } from './PackageCreateDialog';
+
+const PROVIDER_ICON = <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />;
+
+function launchCreatePanel(cluster?: string) {
+  const id = `crossplane-provider-create-${Date.now()}`;
+  Activity.launch({
+    id,
+    title: 'Create Provider',
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster,
+    icon: PROVIDER_ICON,
+    content: <PackageCreatePanel kind="Provider" onDone={() => Activity.close(id)} />,
+  });
+}
+
+function launchEditPanel(item: any) {
+  const id = `crossplane-provider-edit-${item.metadata.name}`;
+  Activity.launch({
+    id,
+    title: `Edit ${item.metadata.name}`,
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster: item.cluster,
+    icon: PROVIDER_ICON,
+    content: <PackageCreatePanel kind="Provider" existing={item} onDone={() => Activity.close(id)} />,
+  });
+}
 
 function ProviderNameLink({ item }: { item: any }) {
   const launch = () => Activity.launch({
@@ -22,7 +52,7 @@ function ProviderNameLink({ item }: { item: any }) {
     hideTitleInHeader: true,
     location: 'split-right',
     cluster: item.cluster,
-    icon: <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />,
+    icon: PROVIDER_ICON,
     content: <ProviderDetailInner name={item.metadata.name} />,
   });
   return (
@@ -38,6 +68,19 @@ export function ProviderListPage() {
   const filterFunction = useFilterFunc();
   const [providers, error] = Provider.useList();
 
+  const guiEditAction = useMemo(
+    () => ({
+      id: 'GUI_EDIT',
+      action: ({ item, closeMenu }: { item: any; closeMenu: () => void }) => (
+        <MenuItem key="gui-edit" onClick={() => { closeMenu(); launchEditPanel(item); }}>
+          <ListItemIcon><Icon icon="mdi:wizard-hat" /></ListItemIcon>
+          <ListItemText>GUI Edit</ListItemText>
+        </MenuItem>
+      ),
+    }),
+    []
+  );
+
   if (error?.status === 404) {
     return (
       <SectionBox title="Providers">
@@ -51,7 +94,13 @@ export function ProviderListPage() {
       title={
         <SectionFilterHeader
           title="Providers"
-          titleSideActions={[<CreateResourceButton resourceClass={Provider} resourceName="Provider" />]}
+          titleSideActions={[
+            <ActionButton
+              description="Create Provider"
+              icon="mdi:plus-circle"
+              onClick={() => launchCreatePanel(providers?.[0]?.cluster)}
+            />,
+          ]}
         />
       }
     >
@@ -59,11 +108,12 @@ export function ProviderListPage() {
         data={providers}
         filterFunction={filterFunction}
         enableRowActions
+        actions={[guiEditAction]}
         columns={[
           {
             label: 'Name',
-            getValue: item => item.metadata.name,
-            render: item => <ProviderNameLink item={item} />,
+            getValue: (item: any) => item.metadata.name,
+            render: (item: any) => <ProviderNameLink item={item} />,
           },
           ...packageResourceColumns,
         ]}
@@ -74,6 +124,18 @@ export function ProviderListPage() {
 
 export function ProviderDetailInner({ name }: { name: string }) {
   const [provider] = Provider.useGet(name);
+  const actions = useMemo(
+    () => () =>
+      [
+        <ActionButton
+          key="edit"
+          description="Edit"
+          icon="mdi:pencil"
+          onClick={() => provider && launchEditPanel(provider)}
+        />,
+      ],
+    [provider]
+  );
 
   const extraInfo = provider
     ? [
@@ -91,7 +153,7 @@ export function ProviderDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={provider} extraInfo={extraInfo} />
+      <MainInfoSection resource={provider} extraInfo={extraInfo} actions={actions} noDefaultActions />
       {provider && <ConditionsTable resource={provider.jsonData} />}
     </Box>
   );

@@ -1,3 +1,5 @@
+import { Icon } from '@iconify/react';
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   ActionButton,
   ConditionsTable,
@@ -9,20 +11,89 @@ import {
   Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
-import { useState } from 'react';
+import { Box, Link as MuiLink, ListItemIcon, ListItemText, MenuItem } from '@mui/material';
+import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { HealthyStatus } from '../../components/ConditionStatus';
 import { ManagedResourceActivationPolicy, ManagedResourceDefinition } from '../../resources';
-import { MRAPCreateDialog } from './MRAPCreateDialog';
+import { MRAPCreatePanel } from './MRAPCreateDialog';
+
+const MRAP_ICON = <Icon icon="mdi:shield-check" width="100%" height="100%" />;
+
+function launchCreatePanel(cluster?: string) {
+  const id = `crossplane-mrap-create-${Date.now()}`;
+  Activity.launch({
+    id,
+    title: 'Create Activation Policy',
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster,
+    icon: MRAP_ICON,
+    content: <MRAPCreatePanel onDone={() => Activity.close(id)} />,
+  });
+}
+
+function launchEditPanel(item: any) {
+  const id = `crossplane-mrap-edit-${item.metadata.name}`;
+  Activity.launch({
+    id,
+    title: `Edit ${item.metadata.name}`,
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster: item.cluster,
+    icon: MRAP_ICON,
+    content: <MRAPCreatePanel existing={item} onDone={() => Activity.close(id)} />,
+  });
+}
+
+function MRAPNameLink({ item }: { item: any }) {
+  const launch = () =>
+    Activity.launch({
+      id: `crossplane-mrap-${item.metadata.name}`,
+      title: `MRAP ${item.metadata.name}`,
+      hideTitleInHeader: true,
+      location: 'split-right',
+      cluster: item.cluster,
+      icon: MRAP_ICON,
+      content: <MRAPDetailInner name={item.metadata.name} />,
+    });
+  return (
+    <MuiLink
+      component="button"
+      onClick={launch}
+      sx={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
+    >
+      {item.metadata.name}
+    </MuiLink>
+  );
+}
 
 export function MRAPListPage() {
   const [mraps] = ManagedResourceActivationPolicy.useList();
-  const [dialogOpen, setDialogOpen] = useState(false);
   const filterFunction = useFilterFunc();
 
+  const guiEditAction = useMemo(
+    () => ({
+      id: 'GUI_EDIT',
+      action: ({ item, closeMenu }: { item: any; closeMenu: () => void }) => (
+        <MenuItem
+          key="gui-edit"
+          onClick={() => {
+            closeMenu();
+            launchEditPanel(item);
+          }}
+        >
+          <ListItemIcon>
+            <Icon icon="mdi:wizard-hat" />
+          </ListItemIcon>
+          <ListItemText>GUI Edit</ListItemText>
+        </MenuItem>
+      ),
+    }),
+    []
+  );
+
   return (
-    <>
-    <MRAPCreateDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
     <SectionBox
       title={
         <SectionFilterHeader
@@ -31,7 +102,7 @@ export function MRAPListPage() {
             <ActionButton
               description="Create Activation Policy"
               icon="mdi:plus-circle"
-              onClick={() => setDialogOpen(true)}
+              onClick={() => launchCreatePanel(mraps?.[0]?.cluster)}
             />,
           ]}
         />
@@ -41,15 +112,12 @@ export function MRAPListPage() {
         data={mraps}
         filterFunction={filterFunction}
         enableRowActions
+        actions={[guiEditAction]}
         columns={[
           {
             label: 'Name',
             getValue: (item: any) => item.metadata.name,
-            render: (item: any) => (
-              <Link routeName={`crossplane-mrap-detail-${item.metadata.name}`}>
-                {item.metadata.name}
-              </Link>
-            ),
+            render: (item: any) => <MRAPNameLink item={item} />,
           },
           {
             label: 'Patterns',
@@ -84,21 +152,30 @@ export function MRAPListPage() {
         ]}
       />
     </SectionBox>
-    </>
   );
 }
 
-export function MRAPDetailPage() {
-  const location = useLocation();
-  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
-  const [mraps] = ManagedResourceActivationPolicy.useList();
+export function MRAPDetailInner({ name }: { name: string }) {
+  const [mrap] = ManagedResourceActivationPolicy.useGet(name);
   const [mrds] = ManagedResourceDefinition.useList();
 
-  const mrap = mraps?.find(m => m.metadata.name === name) ?? null;
   const patterns: string[] = mrap?.jsonData?.spec?.activate ?? [];
   const activatedNames: string[] = mrap?.jsonData?.status?.activated ?? [];
 
   const activatedMRDs = mrds?.filter(mrd => activatedNames.includes(mrd.metadata.name)) ?? [];
+
+  const actions = useMemo(
+    () => () =>
+      [
+        <ActionButton
+          key="edit"
+          description="Edit"
+          icon="mdi:pencil"
+          onClick={() => mrap && launchEditPanel(mrap)}
+        />,
+      ],
+    [mrap]
+  );
 
   const extraInfo = mrap
     ? [
@@ -123,8 +200,8 @@ export function MRAPDetailPage() {
     : [];
 
   return (
-    <>
-      <MainInfoSection resource={mrap} extraInfo={extraInfo} />
+    <Box pb={9}>
+      <MainInfoSection resource={mrap} extraInfo={extraInfo} actions={actions} noDefaultActions />
       {mrap && <ConditionsTable resource={mrap.jsonData} />}
       <SectionBox title="Activated Managed Resources">
         <Table
@@ -151,6 +228,12 @@ export function MRAPDetailPage() {
           ]}
         />
       </SectionBox>
-    </>
+    </Box>
   );
+}
+
+export function MRAPDetailPage() {
+  const location = useLocation();
+  const name = location.pathname.split('/').filter(Boolean).pop() ?? '';
+  return <MRAPDetailInner name={name} />;
 }

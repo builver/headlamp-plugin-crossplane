@@ -1,29 +1,20 @@
-import { apply } from '@kinvolk/headlamp-plugin/lib/ApiProxy';
-import { EditorDialog } from '@kinvolk/headlamp-plugin/lib/components/common';
 import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Alert,
   Box,
-  Button,
   Checkbox,
   Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   FormControlLabel,
   TextField,
   Typography,
 } from '@mui/material';
-import { useCallback, useMemo, useState } from 'react';
+import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ResourceHelperDialog,
+  ResourceHelperPanel,
+} from '../../components/ResourceHelperDialog';
 import { ManagedResourceDefinition } from '../../resources';
-
-interface Props {
-  open: boolean;
-  onClose: () => void;
-}
 
 function matchesPattern(mrdName: string, pattern: string): boolean {
   if (pattern.startsWith('*')) return mrdName.endsWith(pattern.slice(1));
@@ -46,13 +37,29 @@ function derivePatterns(selectedMRDs: Set<string>, mrdsByGroup: Map<string, any[
 
 const NAME_REGEX = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-export function MRAPCreateDialog({ open, onClose }: Props) {
+function useMRAPForm(existing: any | undefined, isOpen: boolean) {
   const [mrds] = ManagedResourceDefinition.useList();
   const [name, setName] = useState('');
   const [selectedMRDs, setSelectedMRDs] = useState<Set<string>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nativeEditorItem, setNativeEditorItem] = useState<any>(null);
+
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (!isOpen) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current || !existing || !mrds) return;
+    seededRef.current = true;
+    setName(existing.metadata?.name ?? '');
+    const existingPatterns: string[] = existing.jsonData?.spec?.activate ?? [];
+    const matched = new Set<string>();
+    for (const mrd of mrds) {
+      if (existingPatterns.some(p => matchesPattern(mrd.metadata.name, p))) {
+        matched.add(mrd.metadata.name);
+      }
+    }
+    setSelectedMRDs(matched);
+  }, [isOpen, existing, mrds]);
 
   const mrdsByGroup = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -84,7 +91,7 @@ export function MRAPCreateDialog({ open, onClose }: Props) {
   }, []);
 
   const toggleGroup = useCallback(
-    (group: string, e: React.MouseEvent) => {
+    (group: string, e: MouseEvent) => {
       e.stopPropagation();
       const groupMRDs = mrdsByGroup.get(group) ?? [];
       const allSelected = groupMRDs.every(m => selectedMRDs.has(m.metadata.name));
@@ -103,215 +110,216 @@ export function MRAPCreateDialog({ open, onClose }: Props) {
   const resetForm = useCallback(() => {
     setName('');
     setSelectedMRDs(new Set());
-    setError(null);
   }, []);
 
-  const handleClose = useCallback(() => {
-    resetForm();
-    onClose();
-  }, [resetForm, onClose]);
-
   const buildItem = useCallback(
-    () => ({
-      apiVersion: 'apiextensions.crossplane.io/v1alpha1',
-      kind: 'ManagedResourceActivationPolicy',
-      metadata: { name: name.trim() || '<name>' },
-      spec: { activate: patterns },
-    }),
-    [name, patterns]
+    () =>
+      existing
+        ? {
+            ...structuredClone(existing.jsonData),
+            spec: { ...existing.jsonData.spec, activate: patterns },
+          }
+        : {
+            apiVersion: 'apiextensions.crossplane.io/v1alpha1',
+            kind: 'ManagedResourceActivationPolicy',
+            metadata: { name: name.trim() || '<name>' },
+            spec: { activate: patterns },
+          },
+    [existing, name, patterns]
   );
 
-  const handleOpenNativeEditor = useCallback(() => {
-    const item = buildItem();
-    onClose();
-    setNativeEditorItem(item);
-  }, [buildItem, onClose]);
-
-  const handleNativeEditorClose = useCallback(() => {
-    setNativeEditorItem(null);
-    resetForm();
-  }, [resetForm]);
-
-  const handleSubmit = useCallback(async () => {
-    setSubmitting(true);
-    setError(null);
-    try {
-      await apply(buildItem() as any);
-      handleClose();
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to create policy');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [buildItem, handleClose]);
-
   const nameError = name.length > 0 && !NAME_REGEX.test(name);
-  const canSubmit = !submitting && name.length > 0 && !nameError && patterns.length > 0;
+  const canSubmit = name.length > 0 && !nameError && patterns.length > 0;
+
+  return {
+    name, setName, nameError, canSubmit, buildItem, resetForm,
+    mrdsByGroup, patterns, previewMatches, selectedMRDs, toggleMRD, toggleGroup,
+  };
+}
+
+function MRAPFormFields({
+  existing,
+  form,
+}: {
+  existing: any;
+  form: ReturnType<typeof useMRAPForm>;
+}) {
+  const {
+    name, setName, nameError,
+    mrdsByGroup, patterns, previewMatches, selectedMRDs, toggleMRD, toggleGroup,
+  } = form;
 
   return (
     <>
-      <EditorDialog
-        open={!!nativeEditorItem}
-        item={nativeEditorItem}
-        onClose={handleNativeEditorClose}
-        setOpen={v => { if (!v) handleNativeEditorClose(); }}
-        onSave="default"
-        saveLabel="Apply"
-        title="Create Activation Policy"
-        PaperProps={{ sx: { height: '80vh' } }}
+      <TextField
+        label="Name"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        error={nameError}
+        helperText={
+          nameError
+            ? 'Must be a valid Kubernetes name (lowercase alphanumeric and dashes)'
+            : ''
+        }
+        fullWidth
+        size="small"
+        required
+        disabled={!!existing}
       />
-      <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <span>Create Activation Policy</span>
-            <Button size="small" onClick={handleOpenNativeEditor}>
-              YAML ↗
-            </Button>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Box display="flex" flexDirection="column" gap={3} mt={1}>
-            <TextField
-              label="Name"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              error={nameError}
-              helperText={
-                nameError
-                  ? 'Must be a valid Kubernetes name (lowercase alphanumeric and dashes)'
-                  : ''
-              }
-              fullWidth
-              size="small"
-              required
-            />
 
-            <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                Select Managed Resources
-              </Typography>
-              {[...mrdsByGroup.entries()].map(([group, groupMRDs], idx) => {
-                const selectedCount = groupMRDs.filter(m =>
-                  selectedMRDs.has(m.metadata.name)
-                ).length;
-                const allSelected = selectedCount === groupMRDs.length;
-                const someSelected = selectedCount > 0;
+      <Box>
+        <Typography variant="subtitle2" gutterBottom>
+          Select Managed Resources
+        </Typography>
+        {[...mrdsByGroup.entries()].map(([group, groupMRDs], idx) => {
+          const selectedCount = groupMRDs.filter(m =>
+            selectedMRDs.has(m.metadata.name)
+          ).length;
+          const allSelected = selectedCount === groupMRDs.length;
+          const someSelected = selectedCount > 0;
 
-                return (
-                  <Accordion
-                    key={group}
-                    disableGutters
-                    elevation={0}
-                    variant="outlined"
-                    defaultExpanded={idx === 0}
-                  >
-                    <AccordionSummary
-                      expandIcon={
-                        <Typography sx={{ fontSize: '1rem', lineHeight: 1 }}>▾</Typography>
-                      }
-                    >
-                      <FormControlLabel
-                        onClick={e => toggleGroup(group, e as React.MouseEvent)}
-                        label={
-                          <Typography variant="body2" fontWeight="medium">
-                            {group}
-                          </Typography>
-                        }
-                        control={
-                          <Checkbox
-                            checked={allSelected}
-                            indeterminate={someSelected && !allSelected}
-                            size="small"
-                          />
-                        }
-                      />
-                      <Typography
-                        variant="caption"
-                        sx={{ mr: 1, alignSelf: 'center', color: 'text.secondary' }}
-                      >
-                        {someSelected ? `${selectedCount}/` : ''}
-                        {groupMRDs.length} MRDs
-                      </Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Box display="flex" flexDirection="column" pl={2}>
-                        {groupMRDs.map((mrd: any) => (
-                          <FormControlLabel
-                            key={mrd.metadata.name}
-                            label={
-                              <Box>
-                                <Typography variant="body2">
-                                  {mrd.jsonData?.spec?.names?.kind ?? mrd.metadata.name}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {mrd.metadata.name}
-                                </Typography>
-                              </Box>
-                            }
-                            control={
-                              <Checkbox
-                                checked={selectedMRDs.has(mrd.metadata.name)}
-                                onChange={() => toggleMRD(mrd.metadata.name)}
-                                size="small"
-                              />
-                            }
-                          />
-                        ))}
-                      </Box>
-                    </AccordionDetails>
-                  </Accordion>
-                );
-              })}
-            </Box>
-
-            {patterns.length > 0 && (
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  Derived Patterns
-                </Typography>
-                <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {patterns.map(p => (
-                    <Chip key={p} label={p} size="small" />
-                  ))}
-                </Box>
-              </Box>
-            )}
-
-            {patterns.length > 0 && (
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  Preview — {previewMatches.length} MRD
-                  {previewMatches.length !== 1 ? 's' : ''} will be activated
-                </Typography>
-                <Box display="flex" flexWrap="wrap" gap={0.5}>
-                  {previewMatches.map((mrd: any) => (
-                    <Chip
-                      key={mrd.metadata.name}
-                      label={mrd.jsonData?.spec?.names?.kind ?? mrd.metadata.name}
+          return (
+            <Accordion
+              key={group}
+              disableGutters
+              elevation={0}
+              variant="outlined"
+              defaultExpanded={idx === 0}
+            >
+              <AccordionSummary
+                expandIcon={
+                  <Typography sx={{ fontSize: '1rem', lineHeight: 1 }}>▾</Typography>
+                }
+              >
+                <FormControlLabel
+                  onClick={e => toggleGroup(group, e as MouseEvent)}
+                  label={
+                    <Typography variant="body2" fontWeight="medium">
+                      {group}
+                    </Typography>
+                  }
+                  control={
+                    <Checkbox
+                      checked={allSelected}
+                      indeterminate={someSelected && !allSelected}
                       size="small"
-                      variant="outlined"
+                    />
+                  }
+                />
+                <Typography
+                  variant="caption"
+                  sx={{ mr: 1, alignSelf: 'center', color: 'text.secondary' }}
+                >
+                  {someSelected ? `${selectedCount}/` : ''}
+                  {groupMRDs.length} MRDs
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Box display="flex" flexDirection="column" pl={2}>
+                  {groupMRDs.map((mrd: any) => (
+                    <FormControlLabel
+                      key={mrd.metadata.name}
+                      label={
+                        <Box>
+                          <Typography variant="body2">
+                            {mrd.jsonData?.spec?.names?.kind ?? mrd.metadata.name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {mrd.metadata.name}
+                          </Typography>
+                        </Box>
+                      }
+                      control={
+                        <Checkbox
+                          checked={selectedMRDs.has(mrd.metadata.name)}
+                          onChange={() => toggleMRD(mrd.metadata.name)}
+                          size="small"
+                        />
+                      }
                     />
                   ))}
                 </Box>
-              </Box>
-            )}
+              </AccordionDetails>
+            </Accordion>
+          );
+        })}
+      </Box>
 
-            {error && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {error}
-              </Alert>
-            )}
+      {patterns.length > 0 && (
+        <Box>
+          <Typography variant="subtitle2" gutterBottom>
+            Derived Patterns
+          </Typography>
+          <Box display="flex" flexWrap="wrap" gap={0.5}>
+            {patterns.map(p => (
+              <Chip key={p} label={p} size="small" />
+            ))}
           </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} variant="contained" disabled={!canSubmit}>
-            {submitting ? 'Creating…' : 'Create'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        </Box>
+      )}
+
+      {patterns.length > 0 && (
+        <Box>
+          <Typography variant="subtitle2" gutterBottom>
+            Preview — {previewMatches.length} MRD
+            {previewMatches.length !== 1 ? 's' : ''} will be activated
+          </Typography>
+          <Box display="flex" flexWrap="wrap" gap={0.5}>
+            {previewMatches.map((mrd: any) => (
+              <Chip
+                key={mrd.metadata.name}
+                label={mrd.jsonData?.spec?.names?.kind ?? mrd.metadata.name}
+                size="small"
+                variant="outlined"
+              />
+            ))}
+          </Box>
+        </Box>
+      )}
     </>
+  );
+}
+
+interface DialogProps {
+  open: boolean;
+  onClose: () => void;
+  existing?: any;
+}
+
+export function MRAPCreateDialog({ open, onClose, existing }: DialogProps) {
+  const form = useMRAPForm(existing, open);
+  return (
+    <ResourceHelperDialog
+      open={open}
+      onClose={onClose}
+      resourceName="Activation Policy"
+      existing={existing}
+      buildItem={form.buildItem}
+      canSubmit={form.canSubmit}
+      onReset={form.resetForm}
+    >
+      <MRAPFormFields existing={existing} form={form} />
+    </ResourceHelperDialog>
+  );
+}
+
+interface PanelProps {
+  existing?: any;
+  onDone?: () => void;
+}
+
+export function MRAPCreatePanel({ existing, onDone }: PanelProps) {
+  const form = useMRAPForm(existing, true);
+  return (
+    <ResourceHelperPanel
+      resourceName="Activation Policy"
+      existing={existing}
+      buildItem={form.buildItem}
+      canSubmit={form.canSubmit}
+      onReset={form.resetForm}
+      onDone={onDone}
+    >
+      <MRAPFormFields existing={existing} form={form} />
+    </ResourceHelperPanel>
   );
 }

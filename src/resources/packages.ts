@@ -55,3 +55,19 @@ export class FunctionRevision extends KubeObject {
   static apiVersion = 'pkg.crossplane.io/v1';
   static isNamespaced = false;
 }
+
+// ── pkg.crossplane.io/v1beta1 ──────────────────────────────────────────────
+
+export class ImageConfig extends KubeObject {
+  static kind = 'ImageConfig';
+  static apiName = 'imageconfigs';
+  static apiVersion = 'pkg.crossplane.io/v1beta1';
+  static isNamespaced = false;
+}
+
+export class DeploymentRuntimeConfig extends KubeObject {
+  static kind = 'DeploymentRuntimeConfig';
+  static apiName = 'deploymentruntimeconfigs';
+  static apiVersion = 'pkg.crossplane.io/v1beta1';
+  static isNamespaced = false;
+}

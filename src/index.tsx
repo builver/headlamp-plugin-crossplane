@@ -231,7 +231,9 @@ import {
   ConfigurationListPage,
 } from './features/packages/ConfigurationListPage';
 import { FunctionDetailPage, FunctionListPage } from './features/packages/FunctionListPage';
+import { ImageConfigDetailPage, ImageConfigListPage } from './features/packages/ImageConfigListPage';
 import { ProviderDetailPage, ProviderListPage } from './features/packages/ProviderListPage';
+import { RuntimeConfigDetailPage, RuntimeConfigListPage } from './features/packages/RuntimeConfigListPage';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
@@ -273,23 +275,44 @@ registerSidebarEntry({
 
 registerSidebarEntry({
   parent: 'crossplane',
+  name: 'crossplane-packages',
+  label: 'Packages',
+  url: '/crossplane/providers',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-packages',
   name: 'crossplane-providers',
   label: 'Providers',
   url: '/crossplane/providers',
 });
 
 registerSidebarEntry({
-  parent: 'crossplane',
+  parent: 'crossplane-packages',
   name: 'crossplane-functions',
   label: 'Functions',
   url: '/crossplane/functions',
 });
 
 registerSidebarEntry({
-  parent: 'crossplane',
+  parent: 'crossplane-packages',
   name: 'crossplane-configurations',
   label: 'Configurations',
   url: '/crossplane/configurations',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-packages',
+  name: 'crossplane-imageconfigs',
+  label: 'Image Configs',
+  url: '/crossplane/imageconfigs',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-packages',
+  name: 'crossplane-runtimeconfigs',
+  label: 'Runtime Configs',
+  url: '/crossplane/runtimeconfigs',
 });
 
 registerSidebarEntry({
@@ -432,5 +455,37 @@ registerRoute({
   name: 'crossplane-configurations',
   exact: true,
   component: () => <ConfigurationListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/imageconfigs',
+  sidebar: 'crossplane-imageconfigs',
+  name: 'crossplane-imageconfigs',
+  exact: true,
+  component: () => <ImageConfigListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/imageconfigs/:name',
+  sidebar: 'crossplane-imageconfigs',
+  name: 'crossplane-imageconfig-detail',
+  exact: true,
+  component: () => <ImageConfigDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/runtimeconfigs',
+  sidebar: 'crossplane-runtimeconfigs',
+  name: 'crossplane-runtimeconfigs',
+  exact: true,
+  component: () => <RuntimeConfigListPage />,
+});
+
+registerRoute({
+  path: '/crossplane/runtimeconfigs/:name',
+  sidebar: 'crossplane-runtimeconfigs',
+  name: 'crossplane-runtimeconfig-detail',
+  exact: true,
+  component: () => <RuntimeConfigDetailPage />,
 });
 
