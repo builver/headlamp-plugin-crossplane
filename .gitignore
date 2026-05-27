@@ -3,3 +3,5 @@ dist/
 .storybook-out/
 *.tar.gz
 .eslintcache
+
+.direnv
