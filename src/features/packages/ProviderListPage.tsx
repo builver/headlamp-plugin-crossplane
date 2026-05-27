@@ -14,8 +14,9 @@ import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { packageResourceColumns } from '../../components/columns';
 import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
-import { Provider } from '../../resources';
+import { Provider, ProviderRevision } from '../../resources';
 import { PackageCreatePanel } from './PackageCreateDialog';
+import { PackageRevisionsSection } from './PackageRevisionsSection';
 
 const PROVIDER_ICON = <Icon icon="mdi:puzzle-outline" width="100%" height="100%" />;
 
@@ -155,6 +156,13 @@ export function ProviderDetailInner({ name }: { name: string }) {
     <Box pb={9}>
       <MainInfoSection resource={provider} extraInfo={extraInfo} actions={actions} noDefaultActions />
       {provider && <ConditionsTable resource={provider.jsonData} />}
+      {provider && (
+        <PackageRevisionsSection
+          parentName={name}
+          RevisionClass={ProviderRevision}
+          currentRevision={provider.jsonData?.status?.currentRevision}
+        />
+      )}
     </Box>
   );
 }

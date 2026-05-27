@@ -15,8 +15,9 @@ import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { makeCompositeTypeColumn, packageResourceColumns } from '../../components/columns';
 import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
-import { CompositeResourceDefinition, Composition, CrossplaneFunction } from '../../resources';
+import { CompositeResourceDefinition, Composition, CrossplaneFunction, FunctionRevision } from '../../resources';
 import { PackageCreatePanel } from './PackageCreateDialog';
+import { PackageRevisionsSection } from './PackageRevisionsSection';
 
 const FN_ICON = <Icon icon="mdi:function" width="100%" height="100%" />;
 
@@ -197,6 +198,13 @@ export function FunctionDetailInner({ name }: { name: string }) {
     <Box pb={9}>
       <MainInfoSection resource={fn} extraInfo={extraInfo} actions={actions} noDefaultActions />
       {fn && <ConditionsTable resource={fn.jsonData} />}
+      {fn && (
+        <PackageRevisionsSection
+          parentName={name}
+          RevisionClass={FunctionRevision}
+          currentRevision={fn.jsonData?.status?.currentRevision}
+        />
+      )}
       {fn && <CompositionsUsingFunction functionName={fn.metadata.name} />}
     </Box>
   );

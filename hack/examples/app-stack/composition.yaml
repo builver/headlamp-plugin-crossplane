@@ -1,0 +1,126 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: app-stack
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1alpha1
+    kind: AppStack
+  mode: Pipeline
+  pipeline:
+  - step: kro-run
+    functionRef:
+      name: function-kro
+    input:
+      apiVersion: kro.fn.crossplane.io/v1alpha1
+      kind: ResourceGraph
+      status:
+        namespaceName: ${ns.metadata.name}
+        configMapName: ${config.metadata.name}
+        deploymentName: ${deploy.metadata.name}
+        serviceName: ${svc.metadata.name}
+      resources:
+      - id: ns
+        template:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata: {}
+          spec:
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: ${schema.spec.appName}
+                  labels:
+                    app.kubernetes.io/managed-by: crossplane
+                    app.kubernetes.io/name: ${schema.spec.appName}
+      - id: config
+        template:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata: {}
+          spec:
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: ${schema.spec.appName}-config
+                  namespace: ${schema.spec.appName}
+                data:
+                  APP_NAME: ${schema.spec.appName}
+                  REPLICAS: ${string(int(schema.spec.replicas))}
+                  IMAGE: ${schema.spec.image}
+            references:
+            - dependsOn:
+                apiVersion: v1
+                kind: Namespace
+                name: ${schema.spec.appName}
+      - id: deploy
+        template:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata: {}
+          spec:
+            forProvider:
+              manifest:
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: ${schema.spec.appName}
+                  namespace: ${schema.spec.appName}
+                  labels:
+                    app: ${schema.spec.appName}
+                spec:
+                  replicas: ${schema.spec.replicas}
+                  selector:
+                    matchLabels:
+                      app: ${schema.spec.appName}
+                  template:
+                    metadata:
+                      labels:
+                        app: ${schema.spec.appName}
+                    spec:
+                      containers:
+                      - name: app
+                        image: ${schema.spec.image}
+                        ports:
+                        - containerPort: ${schema.spec.port}
+                        envFrom:
+                        - configMapRef:
+                            name: ${schema.spec.appName}-config
+            references:
+            - dependsOn:
+                apiVersion: v1
+                kind: ConfigMap
+                name: ${schema.spec.appName}-config
+                namespace: ${schema.spec.appName}
+      - id: svc
+        template:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          metadata: {}
+          spec:
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: Service
+                metadata:
+                  name: ${schema.spec.appName}
+                  namespace: ${schema.spec.appName}
+                spec:
+                  selector:
+                    app: ${schema.spec.appName}
+                  ports:
+                  - port: 80
+                    targetPort: ${schema.spec.port}
+            references:
+            - dependsOn:
+                apiVersion: apps/v1
+                kind: Deployment
+                name: ${schema.spec.appName}
+                namespace: ${schema.spec.appName}
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready

@@ -1,0 +1,49 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: appstacks.example.crossplane.io
+spec:
+  group: example.crossplane.io
+  names:
+    kind: AppStack
+    plural: appstacks
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              appName:
+                type: string
+                description: Name of the application
+              replicas:
+                type: integer
+                default: 1
+                description: Number of replicas
+              image:
+                type: string
+                default: nginx:latest
+                description: Container image
+              port:
+                type: integer
+                default: 80
+                description: Container port
+            required:
+            - appName
+          status:
+            type: object
+            properties:
+              namespaceName:
+                type: string
+              configMapName:
+                type: string
+              deploymentName:
+                type: string
+              serviceName:
+                type: string

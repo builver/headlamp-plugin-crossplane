@@ -261,9 +261,10 @@ function buildFromCelNode(node: CelNode, nodes: ExprNode[], edges: ExprEdge[]): 
         return opNodeId;
       }
       // type-convert: string / int / bool — global calls
-      if (['string', 'int', 'bool'].includes(node.name) && node.receiver === null && node.args.length === 1) {
+      const convertCategory = ({ string: 'to-string', int: 'to-int', bool: 'to-bool' } as Record<string, string>)[node.name];
+      if (convertCategory && node.receiver === null && node.args.length === 1) {
         const opNodeId = mkExprId('op');
-        nodes.push({ id: opNodeId, kind: 'operation', category: 'type-convert', op: node.name, x: LAYER_X[1], y: 0 });
+        nodes.push({ id: opNodeId, kind: 'operation', category: convertCategory, op: node.name, x: LAYER_X[1], y: 0 });
         const valId = buildFromCelNode(node.args[0], nodes, edges);
         edges.push({ id: mkExprId('e'), srcNodeId: valId, tgtNodeId: opNodeId, tgtPort: 'val' });
         return opNodeId;

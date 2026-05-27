@@ -1,5 +1,5 @@
 import { AstCall, CelNode, celNodeToCelInner, parseCelAst } from './celAst';
-import { collectCelMatches, extractGroup, parseSegments,parseSingleRefMatch } from './celUtils';
+import { collectCelMatches, extractGroup, parseSegments, parseSingleRefMatch } from './celUtils';
 import { refToNodeId, VAR_FIELD_PREFIX } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
 import { deleteDeepPath, getDeepPath, setDeepPath } from './pathUtils';
@@ -608,6 +608,9 @@ function celAstToParseOperand(
       if (node.receiver !== null) {
         const parsed = parseAstCallOperand(node as AstCall, out, counter, knownIds);
         if (parsed) return parsed;
+      } else {
+        const parsed = parseGlobalCallOperand(node as AstCall, out, counter, knownIds);
+        if (parsed) return parsed;
       }
       return { kind: 'literal', value: celNodeToCelInner(node) };
     case 'raw':
@@ -803,6 +806,31 @@ function parseAstCallOperand(
   return null;
 }
 
+/** Maps global CEL function names to their ExprNodeDefs category + op. */
+const GLOBAL_CALL_MAP: Record<string, { category: string; op: string; input: string }> = {
+  string: { category: 'to-string', op: 'string', input: 'val' },
+  int:    { category: 'to-int',    op: 'int',    input: 'val' },
+  bool:   { category: 'to-bool',   op: 'bool',   input: 'val' },
+  size:   { category: 'size',      op: 'size',   input: 'val' },
+};
+
+function parseGlobalCallOperand(
+  ast: AstCall,
+  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  counter: { n: number },
+  knownIds?: Set<string>,
+): ParsedOperand | null {
+  const mapping = GLOBAL_CALL_MAP[ast.name];
+  if (mapping && ast.args.length === 1) {
+    return makeReconOpNode(mapping.category, mapping.op, {
+      [mapping.input]: celAstToParseOperand(ast.args[0], out, counter, knownIds),
+    }, out, counter);
+  }
+  // json.marshal / json.unmarshal — parsed as nested call: call(name='unmarshal', receiver=raw('json'))
+  // Not handled here since these have a receiver node. Fall through to null.
+  return null;
+}
+
 function addOpEdge(
   parsed: ParsedOperand, resId: string, path: string,
   out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
@@ -841,6 +869,9 @@ function walkResourceTemplate(
           const ast = parseCelAst(inner, knownIds);
           if (ast.kind === 'call' && ast.receiver !== null) {
             const parsed = parseAstCallOperand(ast, out, counter, knownIds);
+            if (parsed) addOpEdge(parsed, resId, path, out, counter);
+          } else if (ast.kind === 'call' && ast.receiver === null) {
+            const parsed = parseGlobalCallOperand(ast, out, counter, knownIds);
             if (parsed) addOpEdge(parsed, resId, path, out, counter);
           } else if (ast.kind === 'binary' || ast.kind === 'unary' || ast.kind === 'ternary') {
             const parsed = celAstToParseOperand(ast, out, counter, knownIds);
@@ -997,6 +1028,8 @@ function walkConditionString(
       const ast = parseCelAst(inner, knownIds);
       if (ast.kind === 'call' && ast.receiver !== null) {
         parsed = parseAstCallOperand(ast as AstCall, out, counter, knownIds);
+      } else if (ast.kind === 'call' && ast.receiver === null) {
+        parsed = parseGlobalCallOperand(ast as AstCall, out, counter, knownIds);
       } else if (ast.kind === 'binary' || ast.kind === 'unary' || ast.kind === 'ternary') {
         parsed = celAstToParseOperand(ast, out, counter, knownIds);
       }

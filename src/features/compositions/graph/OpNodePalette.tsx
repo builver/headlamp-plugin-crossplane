@@ -35,7 +35,7 @@ export function OpNodePalette({ userC, onAdd, onClose }: OpNodePaletteProps) {
       onMouseDown={e => e.stopPropagation()}
       sx={{
         position: 'absolute', top: 40, right: 8, zIndex: 20,
-        minWidth: 220, maxHeight: 320, overflowY: 'auto',
+        minWidth: 220, maxHeight: 400, overflowY: 'auto',
         border: `1px solid ${alpha(userC, 0.3)}`,
         display: 'flex', flexDirection: 'column',
       }}

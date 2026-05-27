@@ -18,6 +18,7 @@ import { packageResourceColumns } from '../../components/columns';
 import { HealthyStatus, InstalledStatus } from '../../components/ConditionStatus';
 import { CompositeResourceDefinition, Configuration, ConfigurationRevision } from '../../resources';
 import { PackageCreatePanel } from './PackageCreateDialog';
+import { PackageRevisionsSection } from './PackageRevisionsSection';
 
 const CFG_ICON = <Icon icon="mdi:package-variant" width="100%" height="100%" />;
 
@@ -207,6 +208,13 @@ export function ConfigurationDetailInner({ name }: { name: string }) {
     <Box pb={9}>
       <MainInfoSection resource={config} extraInfo={extraInfo} actions={actions} noDefaultActions />
       {config && <ConditionsTable resource={config.jsonData} />}
+      {config && (
+        <PackageRevisionsSection
+          parentName={name}
+          RevisionClass={ConfigurationRevision}
+          currentRevision={currentRevision}
+        />
+      )}
       {currentRevision && <ObjectRefsSection revisionName={currentRevision} />}
     </Box>
   );
