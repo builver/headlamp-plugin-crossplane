@@ -1,6 +1,9 @@
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import { Link } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
+import { Link as MuiLink } from '@mui/material';
 import { Box, Typography } from '@mui/material';
+import { XRDetailInner } from '../features/composites/XRDetailPage';
 import {
   getHealthyCondition,
   getInstalledCondition,
@@ -8,24 +11,34 @@ import {
   getSyncedCondition,
   XRScope,
 } from '../resources';
+import { linkSx } from './ActivityNameLink';
 import { HealthyStatus, InstalledStatus, ReadyStatus, SyncedStatus } from './ConditionStatus';
 
 /**
- * Name column for XR tables — links to the correct detail route based on scope.
+ * Name column for XR tables — clicking opens the detail as a right-side Activity panel.
  */
-export function makeXRNameColumn(plural: string, scope: XRScope) {
-  const isNamespaced = scope === 'Namespaced';
-  const detailRoute = isNamespaced
-    ? `crossplane-xr-detail-namespaced-${plural}`
-    : `crossplane-xr-detail-cluster-${plural}`;
+export function makeXRNameColumn(plural: string, scope: XRScope, xrd: KubeObject) {
   return {
     label: 'Name',
     getValue: (item: KubeObject) => item.metadata.name,
     render: (item: KubeObject) => {
-      const params = isNamespaced
-        ? { plural, namespace: item.metadata.namespace, name: item.metadata.name }
-        : { plural, name: item.metadata.name };
-      return <Link routeName={detailRoute} params={params}>{item.metadata.name}</Link>;
+      const launch = () => {
+        const name = item.metadata.name;
+        const namespace = item.metadata.namespace;
+        Activity.launch({
+          id: `crossplane-xr-${plural}-${name}`,
+          title: `${xrd.jsonData?.spec?.names?.kind ?? plural} ${name}`,
+          hideTitleInHeader: true,
+          location: 'split-right',
+          cluster: item.cluster,
+          content: <XRDetailInner xrd={xrd} name={name} namespace={namespace} />,
+        });
+      };
+      return (
+        <MuiLink component="button" onClick={launch} sx={linkSx}>
+          {item.metadata.name}
+        </MuiLink>
+      );
     },
   };
 }

@@ -93,12 +93,12 @@ function ComposedXRs({ xrd, compositionName }: ComposedXRsProps) {
   );
 
   const columns = useMemo(() => [
-    makeXRNameColumn(plural, scope),
+    makeXRNameColumn(plural, scope, xrd),
     ...(scope === 'Namespaced' ? ['namespace' as const] : []),
     readyColumn,
     syncedColumn,
     'age' as const,
-  ], [plural, scope]);
+  ], [plural, scope, xrd]);
 
   return (
     <SectionBox title="Composite Resources">

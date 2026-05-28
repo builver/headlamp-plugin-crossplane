@@ -100,6 +100,26 @@ export function ComposedResources({ item, scope }: ComposedResourcesProps) {
           accessorKey: 'metadata.name',
           Cell: ({ row: { original: r } }: any) => {
             if (!r._plural) return r.metadata.name;
+
+            // Native K8s resources (Deployment, Service, etc.) use their own detail route
+            const builtin = Object.values(K8s.ResourceClasses).find(
+              cls => cls.kind === r.kind && cls.apiVersion === (r.apiVersion ?? '')
+            );
+            if (builtin) {
+              return (
+                <Link
+                  routeName={builtin.kind}
+                  params={{
+                    name: r.metadata.name,
+                    namespace: r.metadata.namespace || '-',
+                  }}
+                >
+                  {r.metadata.name}
+                </Link>
+              );
+            }
+
+            // Custom resources use the CRD detail route
             const [group] = getGroupVersion(r.apiVersion ?? '');
             const crdFullName = group ? `${r._plural}.${group}` : r._plural;
             return (

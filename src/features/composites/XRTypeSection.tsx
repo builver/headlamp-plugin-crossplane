@@ -33,7 +33,7 @@ export function XRTypeSection({ xrd, scope, noAccordion }: XRTypeSectionProps) {
   const hasItems = !!(items && items.length > 0);
 
   const columns = [
-    makeXRNameColumn(plural, scope),
+    makeXRNameColumn(plural, scope, xrd),
     ...(isNamespaced ? ['namespace' as const] : []),
     {
       label: 'Composition',
