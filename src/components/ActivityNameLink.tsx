@@ -2,7 +2,7 @@ import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import { Link as MuiLink } from '@mui/material';
 import { ReactNode } from 'react';
 
-const linkSx = { background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' } as const;
+export const linkSx = { background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' } as const;
 
 interface ActivityNameLinkProps {
   item: any;

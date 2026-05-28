@@ -212,7 +212,7 @@ export function MRAPDetailInner({ name }: { name: string }) {
               header: 'Name',
               accessorFn: (item: any) => item.metadata.name,
               Cell: ({ row: { original: item } }: any) => (
-                <Link routeName={`crossplane-mrd-detail-${item.metadata.name}`}>
+                <Link routeName="crossplane-mrd-detail" params={{ name: item.metadata.name }}>
                   {item.metadata.name}
                 </Link>
               ),

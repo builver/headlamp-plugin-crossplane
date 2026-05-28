@@ -75,7 +75,7 @@ export function MRDListPage() {
             header: 'Definition',
             accessorFn: (item: any) => item.metadata.name,
             Cell: ({ row: { original: item } }: any) => (
-              <Link routeName={`crossplane-mrd-detail-${item.metadata.name}`}>
+              <Link routeName="crossplane-mrd-detail" params={{ name: item.metadata.name }}>
                 {item.metadata.name}
               </Link>
             ),
@@ -95,7 +95,7 @@ export function MRDListPage() {
                 (r: any) => r.kind === 'Provider'
               )?.name;
               return providerName ? (
-                <Link routeName={`crossplane-provider-detail-${providerName}`}>
+                <Link routeName="crossplane-provider-detail" params={{ name: providerName }}>
                   {providerName}
                 </Link>
               ) : (

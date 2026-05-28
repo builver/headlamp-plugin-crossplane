@@ -1,20 +1,23 @@
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
 import {
   ConditionsTable,
   CreateResourceButton,
-  DateLabel,
-  Link,
   MainInfoSection,
+  ResourceTable,
   SectionBox,
   SectionFilterHeader,
-  Table,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { useFilterFunc } from '@kinvolk/headlamp-plugin/lib/Utils';
+import { Link as MuiLink } from '@mui/material';
 import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { linkSx } from '../../components/ActivityNameLink';
+import { readyColumn, syncedColumn } from '../../components/columns';
 import { ReadyStatus, SyncedStatus } from '../../components/ConditionStatus';
 import { PauseAction } from '../../components/PauseAction';
 import { makeMRClass, ManagedResourceDefinition } from '../../resources';
+import { STUB_CLASS } from '../../resources/crdClassCache';
 
 // ── MR list ───────────────────────────────────────────────────────────────────
 
@@ -41,7 +44,7 @@ export function MRListPage() {
     });
     return cls;
   }, [mrd?.metadata.uid, isNamespaced]);
-  const [items] = (DynClass?.useList() ?? [null]) as [KubeObject[] | null, any];
+  const [items] = (DynClass ?? STUB_CLASS).useList() as [KubeObject[] | null, any];
 
   const kind: string = mrd?.jsonData?.spec?.names?.kind ?? mrdName;
 
@@ -62,45 +65,43 @@ export function MRListPage() {
         />
       }
     >
-      <Table
+      <ResourceTable.default
         data={items}
-        loading={items === null}
         filterFunction={filterFunction}
+        enableRowActions
         columns={[
           {
-            header: 'Name',
-            accessorKey: 'metadata.name',
-            Cell: ({ row: { original: item } }: any) => {
-              const params = isNamespaced
-                ? { mrdName, namespace: item.metadata.namespace, name: item.metadata.name }
-                : { mrdName, name: item.metadata.name };
-              const routeName = isNamespaced
-                ? 'crossplane-mr-detail-namespaced'
-                : 'crossplane-mr-detail-cluster';
-              return <Link routeName={routeName} params={params}>{item.metadata.name}</Link>;
+            label: 'Name',
+            getValue: (item: KubeObject) => item.metadata.name,
+            render: (item: KubeObject) => {
+              const launch = () => {
+                const id = `crossplane-mr-${mrdName}-${item.metadata.namespace ?? ''}-${item.metadata.name}`;
+                Activity.launch({
+                  id,
+                  title: `${kind} ${item.metadata.name}`,
+                  hideTitleInHeader: true,
+                  location: 'split-right',
+                  cluster: item.cluster,
+                  content: (
+                    <MRDetailInner
+                      mrdName={mrdName}
+                      name={item.metadata.name}
+                      namespace={item.metadata.namespace}
+                    />
+                  ),
+                });
+              };
+              return (
+                <MuiLink component="button" onClick={launch} sx={linkSx}>
+                  {item.metadata.name}
+                </MuiLink>
+              );
             },
           },
-          ...(isNamespaced
-            ? [{ header: 'Namespace', accessorKey: 'metadata.namespace' }]
-            : []),
-          {
-            header: 'Ready',
-            accessorFn: (item: KubeObject) => item,
-            Cell: ({ row: { original: item } }: any) => <ReadyStatus item={item} />,
-          },
-          {
-            header: 'Synced',
-            accessorFn: (item: KubeObject) => item,
-            Cell: ({ row: { original: item } }: any) => <SyncedStatus item={item} />,
-          },
-          {
-            header: 'Age',
-            accessorFn: (item: KubeObject) =>
-              -new Date(item.metadata.creationTimestamp).getTime(),
-            Cell: ({ row: { original: item } }: any) => (
-              <DateLabel date={item.metadata.creationTimestamp} format="mini" />
-            ),
-          },
+          ...(isNamespaced ? ['namespace' as const] : []),
+          readyColumn,
+          syncedColumn,
+          'age' as const,
         ]}
       />
     </SectionBox>
@@ -134,7 +135,7 @@ export function MRDetailInner({ mrdName, name, namespace }: MRDetailInnerProps) 
   const mrd = mrds?.find(m => m.metadata.name === mrdName) ?? null;
 
   const DynClass = useMemo(() => (mrd ? makeMRClass(mrd) : null), [mrd?.metadata.uid]);
-  const [item] = (DynClass?.useGet(name, namespace) ?? [null]) as [KubeObject | null, any];
+  const [item] = (DynClass ?? STUB_CLASS).useGet(name, namespace) as [KubeObject | null, any];
 
   const extraInfo = item
     ? [

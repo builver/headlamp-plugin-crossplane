@@ -7,7 +7,7 @@ import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { XRDetailInner } from '../../features/composites/XRDetailPage';
 import { MRDetailInner } from '../../features/managed/MRDetailPage';
 import { FunctionDetailInner } from '../../features/packages/FunctionListPage';
-import { ProviderDetailInner } from '../../features/packages/ProviderListPage';
+import { ProviderDetailInner } from '../../features/packages/ProviderDetailPage';
 import {
   CompositeResourceDefinition,
   ManagedResourceDefinition,

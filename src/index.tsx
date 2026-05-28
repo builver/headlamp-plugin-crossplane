@@ -98,7 +98,9 @@ import {
 } from './features/packages/ConfigurationListPage';
 import { FunctionDetailPage, FunctionListPage } from './features/packages/FunctionListPage';
 import { ImageConfigDetailPage, ImageConfigListPage } from './features/packages/ImageConfigListPage';
-import { ProviderDetailPage, ProviderListPage } from './features/packages/ProviderListPage';
+import { ProviderConfigListPage } from './features/packages/ProviderConfigListPage';
+import { ProviderDetailPage } from './features/packages/ProviderDetailPage';
+import { ProviderListPage } from './features/packages/ProviderListPage';
 import { RuntimeConfigDetailPage, RuntimeConfigListPage } from './features/packages/RuntimeConfigListPage';
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -186,6 +188,13 @@ registerSidebarEntry({
   name: 'crossplane-providers',
   label: 'Providers',
   url: '/crossplane/providers',
+});
+
+registerSidebarEntry({
+  parent: 'crossplane-providers',
+  name: 'crossplane-providerconfigs',
+  label: 'Provider Configs',
+  url: '/crossplane/providerconfigs',
 });
 
 registerSidebarEntry({
@@ -394,6 +403,14 @@ registerRoute({
   name: 'crossplane-provider-detail',
   exact: true,
   component: () => <ProviderDetailPage />,
+});
+
+registerRoute({
+  path: '/crossplane/providerconfigs',
+  sidebar: 'crossplane-providerconfigs',
+  name: 'crossplane-providerconfigs',
+  exact: true,
+  component: () => <ProviderConfigListPage />,
 });
 
 registerRoute({
