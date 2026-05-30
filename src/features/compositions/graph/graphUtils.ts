@@ -1,10 +1,10 @@
 import { collectCelMatches, findCelRefs, parseSingleRefMatch, reconstructTemplate, walkTemplate } from './celUtils';
-import { buildVarFieldRows, EDGE_TYPE_FOR, HEADER_H, HG, NODE_MIN_H, nodeH, nodeIdToRef, NW, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, opNodeInputPortY, opNodeOutputPortY, opNodeVarFieldExtraRows, RAW_TEMPLATE_NODE_H, refToNodeId, ROW_H, SCHEMA_NODE_ID, VAR_FIELD_PREFIX, varFieldLeafRow, VG } from './constants';
-import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
+import { buildVarFieldRows, EDGE_TYPE_FOR, EXPR_NODE_HDR_H, EXPR_NODE_PORT_H, EXPR_NODE_W, exprNodeH, exprNodeInputPortY, exprNodeOutputPortY, exprNodeVarFieldExtraRows, H_GAP, NODE_HDR_H, NODE_MIN_H, NODE_ROW_H, NODE_W, nodeH, nodeIdToRef, RAW_TEMPLATE_NODE_H, refToNodeId, SCHEMA_NODE_ID, V_GAP,VAR_FIELD_PREFIX, varFieldLeafRow } from './constants';
+import { EXPR_NODE_DEFS } from './exprGraph/exprNodeDefs';
 import { getDeepPath } from './pathUtils';
 import { buildKnownForRes, buildSpecialFieldRows, buildTemplateRows, forEachVarNames, insertRowAtPath, makeLeafRow, postProcessEachRefs, reconstructOpGraph } from './rowUtils';
 import { qualifiedPath, sectionOf, sectionRelPath } from './sectionDefs';
-import { CelRef, ExtraEdge, GEdge, GNode, NodeType, OpNode, OutPort, TRow } from './types';
+import { CelRef, ExprNode, ExtraEdge, GraphEdge, GraphNode, NodeRow,NodeType, OutputPort } from './types';
 
 // ── DAG layout ─────────────────────────────────────────────────────────────────
 
@@ -67,12 +67,12 @@ export function dagLayout(
   }
 
   // ── Position nodes ────────────────────────────────────────────────────────────
-  const colH = (ids2: string[]) => ids2.reduce((s, id) => s + (hMap.get(id) ?? NODE_MIN_H) + VG, -VG);
+  const colH = (ids2: string[]) => ids2.reduce((s, id) => s + (hMap.get(id) ?? NODE_MIN_H) + V_GAP, -V_GAP);
   const maxH = Math.max(...[...byLayer.values()].map(colH), 0);
   const pos  = new Map<string, { x: number; y: number }>();
   for (const [l, lIds] of byLayer) {
     let curY = (maxH - colH(lIds)) / 2;
-    for (const id of lIds) { pos.set(id, { x: l * (NW + HG), y: curY }); curY += (hMap.get(id) ?? NODE_MIN_H) + VG; }
+    for (const id of lIds) { pos.set(id, { x: l * (NODE_W + H_GAP), y: curY }); curY += (hMap.get(id) ?? NODE_MIN_H) + V_GAP; }
   }
   return pos;
 }
@@ -82,7 +82,7 @@ export function dagLayout(
 /**
  * Like findCelRefs but only returns refs where the entire field value is
  * exactly `${ref.simpleHath}` — no surrounding text, no operators, one ref.
- * Used to restrict GEdge arrows to direct field-to-field connections.
+ * Used to restrict GraphEdge arrows to direct field-to-field connections.
  */
 function collectSimpleRefs(template: unknown, known: Set<string>): CelRef[] {
   const out: CelRef[] = [];
@@ -104,7 +104,7 @@ type AllRef = CelRef & { targetId: string; srcNodeId: string; isForEachVarRef?: 
 
 /** Outer-scope variables captured by makeNode — passed explicitly to keep the function testable. */
 interface MakeNodeContext {
-  outPortsMap: Map<string, Map<string, OutPort>>;
+  outPortsMap: Map<string, Map<string, OutputPort>>;
   forEachVarFields: Map<string, Map<string, string[]>>;
   forEachVarFieldsFlat: Map<string, Set<string>>;
   opEdges: ExtraEdge[];
@@ -116,7 +116,7 @@ function makeNode(
   id: string, type: NodeType, label: string,
   template: any | null, sublabel: string | undefined, res: any | undefined,
   ctx: MakeNodeContext,
-): GNode {
+): GraphNode {
   const { outPortsMap, forEachVarFields, forEachVarFieldsFlat, opEdges, opNdIds, known } = ctx;
   const opArr   = [...(outPortsMap.get(id) ?? new Map()).values()]
     .sort((a, b) => a.path.localeCompare(b.path));
@@ -164,7 +164,7 @@ function makeNode(
     const selfRefs = new Set<string>(['each', ...varNames]);
     // Build outPort map for forEach KV rows from op edges. Any _forEach.<var>[.<field>] path
     // maps back to the KV row at _forEach.<var> so the KV row carries the confirmed port dot.
-    const forEachOutPorts = new Map<string, OutPort>();
+    const forEachOutPorts = new Map<string, OutputPort>();
     for (const e of opEdges) {
       if (!opNdIds.has(e.srcNodeId) && e.srcNodeId === id && sectionOf(e.srcFieldPath) === 'forEach') {
         const relPath = sectionRelPath(e.srcFieldPath);
@@ -179,13 +179,13 @@ function makeNode(
         : row
     );
     const processedSpecial = postProcessEachRefs(specialRows, id, selfRefs);
-    const templateHeader: TRow[] = (processedSpecial.length > 0 && rows.length > 0)
+    const templateHeader: NodeRow[] = (processedSpecial.length > 0 && rows.length > 0)
       ? [{ depth: 0, key: 'template', isParent: false, isSection: true, canImport: false, canExport: false }]
       : [];
     rows = [...processedSpecial, ...templateHeader, ...rows];
   }
   // For fields driven by an op node (concat, replace, etc.), replace the segments display with
-  // celExpr so NodeCard shows the raw template rather than misleading direct-ref source pills.
+  // celExpr so RowsNodeCard shows the raw template rather than misleading direct-ref source pills.
   // Runs after special rows are merged so includeWhen/readyWhen/forEach rows are also converted.
   const opTargetPaths = new Set(
     opEdges
@@ -209,7 +209,7 @@ function makeNode(
   // Build forEach sub-rows: one output-port row per ${varName.field} access in the template.
   if (res?.forEach?.length) {
     const varFieldMap = forEachVarFields.get(id) ?? new Map<string, string[]>();
-    const enriched: TRow[] = [];
+    const enriched: NodeRow[] = [];
     for (const row of rows) {
       enriched.push(row);
       if (!row.isSection && !row.isParent && row.fieldPath && sectionOf(row.fieldPath) === 'forEach') {
@@ -230,12 +230,12 @@ function makeNode(
   // Strip leading '?' from row keys produced by optional-chaining paths (e.g. '?name' → 'name').
   rows = rows.map(r => r.key.startsWith('?') ? { ...r, key: r.key.slice(1) } : r);
   const isCollection = !!(res?.forEach?.length);
-  return { id, type, label, sublabel, rows, x: 0, y: 0, w: NW, h: nodeH(rows), isCollection };
+  return { id, type, label, sublabel, rows, x: 0, y: 0, w: NODE_W, h: nodeH(rows), isCollection };
 }
 
-export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; edges: GEdge[]; opNodes: OpNode[]; extraEdges: ExtraEdge[] } {
+export function buildGraph(input: any, requirements?: any): { nodes: GraphNode[]; edges: GraphEdge[]; exprNodes: ExprNode[]; extraEdges: ExtraEdge[] } {
   const resources: any[] = input?.resources ?? [];
-  if (!resources.length) return { nodes: [], edges: [], opNodes: [], extraEdges: [] };
+  if (!resources.length) return { nodes: [], edges: [], exprNodes: [], extraEdges: [] };
   const envReqs: any[] = (requirements ?? input?.requirements)?.requiredResources ?? [];
   const reqNames = envReqs.map((r: any) => r.requirementName as string).filter(Boolean);
   const resIds = new Set(resources.map((r: any) => r.id as string));
@@ -243,7 +243,7 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
   const known  = new Set<string>([...resIds, 'schema', ...reqNames]);
 
   const allRefs: AllRef[] = [];      // all refs — drives outPortsMap and layout deps
-  const simpleRefs: AllRef[] = [];   // exact-match refs only — drives GEdge arrows
+  const simpleRefs: AllRef[] = [];   // exact-match refs only — drives GraphEdge arrows
   // forEach variable field accesses: nodeId → varName → [field, ...]
   // Collected from ${varName.field} patterns in each resource's template.
   const forEachVarFields = new Map<string, Map<string, string[]>>();
@@ -301,7 +301,7 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
     }
   }
 
-  const outPortsMap = new Map<string, Map<string, OutPort>>();
+  const outPortsMap = new Map<string, Map<string, OutputPort>>();
   for (const r of allRefs) {
     // forEach variable field refs (${varName.field}) go to forEach sub-rows, not the manifest outPortsMap.
     if (r.isForEachVarRef) continue;
@@ -311,7 +311,7 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
   }
   // Also add output ports for fields referenced through op-node chains (e.g. concat expressions).
   // findCelRefs misses these because the CEL template starts with `${(` rather than `${id.`.
-  const { extraEdges: opEdges, opNodes: opNds } = reconstructOpGraph(input, requirements);
+  const { extraEdges: opEdges, exprNodes: opNds } = reconstructOpGraph(input, requirements);
   const opNdIds = new Set(opNds.map(n => n.id));
   for (const e of opEdges) {
     if (e.srcFieldPath === 'output' || opNdIds.has(e.srcNodeId)) continue;
@@ -329,7 +329,7 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
 
   const ctx: MakeNodeContext = { outPortsMap, forEachVarFields, forEachVarFieldsFlat, opEdges, opNdIds, known };
 
-  const nodes: GNode[] = [];
+  const nodes: GraphNode[] = [];
   nodes.push(makeNode(SCHEMA_NODE_ID, 'schema', 'schema', null, undefined, undefined, ctx));
   // One node per required resource — node ID = requirementName (also the CEL identifier).
   for (const req of envReqs) {
@@ -358,19 +358,19 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
     }
   }
 
-  const edgesSeen = new Set<string>(); const edges: GEdge[] = [];
+  const edgesSeen = new Set<string>(); const edges: GraphEdge[] = [];
   const rawDeps: Array<{ source: string; target: string }> = []; const depsSeen = new Set<string>();
-  // GEdge arrows — only for exact single-ref fields (complex expressions render via op-node ExtraEdges)
+  // GraphEdge arrows — only for exact single-ref fields (complex expressions render via op-node ExtraEdges)
   for (const r of simpleRefs) {
     const eid2 = `${r.srcNodeId}::${r.srcPath}→${r.targetId}`;
     if (!edgesSeen.has(eid2)) {
       edgesSeen.add(eid2);
       edges.push({ id: eid2, source: r.srcNodeId, target: r.targetId,
         srcPortPath: r.srcPath, tgtPortKey: `${r.srcRef}::${r.srcPath}`,
-        type: (EDGE_TYPE_FOR[r.srcRef] ?? 'kro-dep') as GEdge['type'] });
+        type: (EDGE_TYPE_FOR[r.srcRef] ?? 'kro-dep') as GraphEdge['type'] });
     }
   }
-  // Self-loop GEdges: forEach var field refs → template fields on the same resource node.
+  // Self-loop GraphEdges: forEach var field refs → template fields on the same resource node.
   // These are direct connections like ${binding.namespace} → metadata.namespace where source
   // and target are the same node. collectSimpleRefs uses `known` (no forEach var names) so they
   // never enter simpleRefs; we emit them explicitly here after all nodes are built.
@@ -477,12 +477,12 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
   }
 
   // Include op nodes in the combined layout so they sit between their source and target nodes.
-  const opNdH = (n: OpNode) => {
+  const opNdH = (n: ExprNode) => {
     if (n.category === 'raw-template') return n.h ?? RAW_TEMPLATE_NODE_H;
     const def = EXPR_NODE_DEFS[n.category];
     const portCount = n.portCount ?? (def?.inputs?.length ?? 2);
-    const varFieldRows = def?.hasPredicate ? opNodeVarFieldExtraRows(n.varFields ?? []) : 0;
-    return opNodeH(portCount) + varFieldRows * OP_NODE_PORT_H;
+    const varFieldRows = def?.hasPredicate ? exprNodeVarFieldExtraRows(n.varFields ?? []) : 0;
+    return exprNodeH(portCount) + varFieldRows * EXPR_NODE_PORT_H;
   };
   const allForLayout = [
     ...nodes.map(n => ({ id: n.id, h: n.h })),
@@ -491,7 +491,7 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
 
   const pos = dagLayout(allForLayout, rawDeps);
   for (const n of nodes) { const p = pos.get(n.id); if (p) { n.x = p.x; n.y = p.y; } }
-  const positionedOpNodes = opNds.map(n => {
+  const positionedExprNodes = opNds.map(n => {
     const p = pos.get(n.id);
     const taints: string[] = [];
     if (forEachTaintedOps.has(n.id)) taints.push('forEach');
@@ -499,39 +499,39 @@ export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; ed
     if (predTaints) taints.push(...predTaints);
     return { ...(p ? { ...n, x: p.x, y: p.y } : n), ...(taints.length ? { taints } : {}) };
   });
-  return { nodes, edges, opNodes: positionedOpNodes, extraEdges: opEdges };
+  return { nodes, edges, exprNodes: positionedExprNodes, extraEdges: opEdges };
 }
 
 // ── Edge geometry ─────────────────────────────────────────────────────────────
 
-export function rowPortY(node: GNode, rowIdx: number, topOffset = 0): number {
-  return node.y + HEADER_H + topOffset + rowIdx * ROW_H + ROW_H / 2;
+export function rowPortY(node: GraphNode, rowIdx: number, topOffset = 0): number {
+  return node.y + NODE_HDR_H + topOffset + rowIdx * NODE_ROW_H + NODE_ROW_H / 2;
 }
 
-/** Returns ROW_H if this kro-resource node will show the section-add bar at the top when expanded.
+/** Returns NODE_ROW_H if this kro-resource node will show the section-add bar at the top when expanded.
  *  In read-only mode the bar is never rendered, so the offset is 0 — passing
  *  `readOnly: true` keeps edge Y-coordinates aligned with the rendered card. */
-export function sectionAddBarOffset(node: GNode, readOnly = false): number {
+export function sectionAddBarOffset(node: GraphNode, readOnly = false): number {
   if (readOnly || node.type !== 'kro-resource') return 0;
   const sections = ['forEach', 'includeWhen', 'readyWhen'] as const;
-  return sections.some(s => !node.rows.some(r => r.isSection && r.key === s)) ? ROW_H : 0;
+  return sections.some(s => !node.rows.some(r => r.isSection && r.key === s)) ? NODE_ROW_H : 0;
 }
 
-export function srcPortY(src: GNode, portPath: string, topOffset = 0): number {
+export function srcPortY(src: GraphNode, portPath: string, topOffset = 0): number {
   const idx = src.rows.findIndex(r => r.outPort?.path === portPath);
-  return idx >= 0 ? rowPortY(src, idx, topOffset) : src.y + (src.type === 'kro-resource' ? HEADER_H / 2 : src.h / 2);
+  return idx >= 0 ? rowPortY(src, idx, topOffset) : src.y + (src.type === 'kro-resource' ? NODE_HDR_H / 2 : src.h / 2);
 }
 
-export function tgtPortY(tgt: GNode, portKey: string, topOffset = 0): number {
-  // Only match inPort rows: GEdges are created only for exact single-ref fields (same condition
+export function tgtPortY(tgt: GraphNode, portKey: string, topOffset = 0): number {
+  // Only match inPort rows: GraphEdges are created only for exact single-ref fields (same condition
   // as buildTemplateRows inPort case), so there is always a matching inPort row. Matching
-  // segments rows would cause the GEdge to land on a composed/multi-segment field that uses
+  // segments rows would cause the GraphEdge to land on a composed/multi-segment field that uses
   // the same source ref — producing a spurious extra arrow alongside the correct op-node edge.
   const idx = tgt.rows.findIndex(r => r.inPort && `${r.inPort.ref}::${r.inPort.srcPath}` === portKey);
   return idx >= 0 ? rowPortY(tgt, idx, topOffset) : tgt.y + tgt.h / 2;
 }
 
-export function extraPortY(node: GNode, fieldPath: string, topOffset = 0): number {
+export function extraPortY(node: GraphNode, fieldPath: string, topOffset = 0): number {
   const idx = node.rows.findIndex(r => r.fieldPath === fieldPath);
   return idx >= 0 ? rowPortY(node, idx, topOffset) : node.y + node.h / 2;
 }
@@ -541,7 +541,7 @@ export function makeBezier(sx: number, sy: number, tx: number, ty: number): stri
   return `M ${sx} ${sy} C ${sx + d} ${sy} ${tx - d} ${ty} ${tx} ${ty}`;
 }
 
-export function bezierPath(src: GNode, tgt: GNode, edge: GEdge, srcTopOffset = 0, tgtTopOffset = 0): string {
+export function bezierPath(src: GraphNode, tgt: GraphNode, edge: GraphEdge, srcTopOffset = 0, tgtTopOffset = 0): string {
   return makeBezier(src.x + src.w, srcPortY(src, edge.srcPortPath, srcTopOffset), tgt.x, tgtPortY(tgt, edge.tgtPortKey, tgtTopOffset));
 }
 
@@ -549,19 +549,19 @@ export function bezierPath(src: GNode, tgt: GNode, edge: GEdge, srcTopOffset = 0
  * Canvas coordinates of the output port of an op node for an extra edge.
  * Handles both var-field ports and the standard output port.
  */
-export function opNodeSrcCoords(node: OpNode, srcFieldPath: string): { sx: number; sy: number } {
-  const sx = node.x + OP_NODE_W;
+export function exprNodeSrcCoords(node: ExprNode, srcFieldPath: string): { sx: number; sy: number } {
+  const sx = node.x + EXPR_NODE_W;
   let sy: number;
   if (srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
     const vp = srcFieldPath.slice(VAR_FIELD_PREFIX.length);
     const def = EXPR_NODE_DEFS[node.category];
     const vpi = def?.inputs.findIndex(p => p.name === 'var') ?? 0;
     const vfs = node.varFields ?? [];
-    sy = node.y + OP_NODE_HDR_H + varFieldLeafRow(vfs, vpi, Math.max(0, vfs.indexOf(vp))) * OP_NODE_PORT_H + OP_NODE_PORT_H / 2;
+    sy = node.y + EXPR_NODE_HDR_H + varFieldLeafRow(vfs, vpi, Math.max(0, vfs.indexOf(vp))) * EXPR_NODE_PORT_H + EXPR_NODE_PORT_H / 2;
   } else {
     const def = EXPR_NODE_DEFS[node.category];
     const pc = def?.variadic ? (node.portCount ?? def.inputs.length) : (def?.inputs.length ?? 1);
-    sy = opNodeOutputPortY(node, pc);
+    sy = exprNodeOutputPortY(node, pc);
   }
   return { sx, sy };
 }
@@ -569,14 +569,14 @@ export function opNodeSrcCoords(node: OpNode, srcFieldPath: string): { sx: numbe
 /**
  * Canvas coordinates of an input port of an op node for an extra edge.
  */
-export function opNodeTgtCoords(node: OpNode, tgtFieldPath: string): { tx: number; ty: number } {
+export function exprNodeTgtCoords(node: ExprNode, tgtFieldPath: string): { tx: number; ty: number } {
   const def = EXPR_NODE_DEFS[node.category];
   const portIdx = def?.variadic
     ? (tgtFieldPath.charCodeAt(0) - 65)
     : (def?.inputs.findIndex(p => p.name === tgtFieldPath) ?? 0);
   const tgtVarPortIdx = def?.hasPredicate ? def.inputs.findIndex(p => p.name === 'var') : -1;
   const tgtOffset = tgtVarPortIdx >= 0 && portIdx > tgtVarPortIdx
-    ? buildVarFieldRows(node.varFields ?? []).length * OP_NODE_PORT_H
+    ? buildVarFieldRows(node.varFields ?? []).length * EXPR_NODE_PORT_H
     : 0;
-  return { tx: node.x, ty: opNodeInputPortY(node, portIdx) + tgtOffset };
+  return { tx: node.x, ty: exprNodeInputPortY(node, portIdx) + tgtOffset };
 }

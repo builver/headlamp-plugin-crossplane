@@ -2,12 +2,12 @@ import { Icon } from '@iconify/react';
 import { Autocomplete, Box, Button, IconButton, Paper, TextField, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { CSSProperties, Fragment, memo, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DOT, HEADER_H, NODE_CFG, NODE_MIN_H, refAccent, refToNodeId, ROW_H, USER_C_DARK, USER_C_LIGHT } from './constants';
-import { GraphNodeDeleteButton, GraphNodeShell } from './GraphNodeShell';
+import { NODE_CFG, NODE_HDR_H, NODE_MIN_H, NODE_ROW_H, PORT_DOT_SIZE, refAccent, refToNodeId, USER_C_DARK, USER_C_LIGHT } from './constants';
+import { NodeCardDeleteButton, NodeCardShell } from './NodeCardShell';
 import { PortDot } from './PortDot';
 import { sectionOf, sectionRelPath } from './sectionDefs';
 import { SegmentedControl } from './SegmentedControl';
-import { AddForm, FieldSuggestion, GNode, KindOption, NodeType, RowSegment, TokenHover, TRow } from './types';
+import { AddForm, FieldSuggestion, GraphNode, KindOption, NodeRow,NodeType, RowSegment, TokenHover } from './types';
 import { abbrevType } from './typeUtils';
 import { VarPill } from './VarPill';
 
@@ -101,10 +101,10 @@ function composedExpr(segments: RowSegment[]): string {
     .join('');
 }
 
-// ── NodeCard ──────────────────────────────────────────────────────────────────
+// ── RowsNodeCard ──────────────────────────────────────────────────────────────────
 
-export interface NodeCardProps {
-  node: GNode;
+export interface RowsNodeCardProps {
+  node: GraphNode;
   selected: boolean;
   dark: boolean;
   isDrawing: boolean;
@@ -182,7 +182,7 @@ export interface NodeCardProps {
   collectionFannedOut?: boolean;
 }
 
-export const NodeCard = memo(function NodeCard({
+export const RowsNodeCard = memo(function RowsNodeCard({
   node, selected, dark, isDrawing, hoverRowIdx,
   onMouseDown, onClick, onPortDown, potentialFields, allSchemaFields, isExpanded,
   onPotentialFieldClick, onTokenHover, onTokenLeave, editedPaths, onDelete, onDeleteRow, mapParentPaths, arrayParentPaths, onAddArrayItem, nodeTypeByRef, unknownFieldPaths, noSchemaWarning, preserveUnknownParentPaths, onToggleInPortOptional, onAddSectionItem, onPortClick, activeInPaths, activeOutPaths, opConnectedFields, onValueEdit,
@@ -193,7 +193,7 @@ export const NodeCard = memo(function NodeCard({
   collectionFanFromDx,
   collectionFanFromDy,
   collectionFannedOut,
-}: NodeCardProps) {
+}: RowsNodeCardProps) {
   const cfg   = NODE_CFG[node.type];
   const accent = dark ? cfg.accentDark : cfg.accent;
   const userC  = dark ? USER_C_DARK : USER_C_LIGHT;
@@ -243,7 +243,7 @@ export const NodeCard = memo(function NodeCard({
   const showSectionAdd = missingSections.length > 0;
   // addingSectionKey adds a row only when showing inside an existing section header
   const addingSectionKeyInHeader = !!addingSectionKey && displayRows.some(r => r.isSection && r.key === addingSectionKey);
-  const displayH = (displayRows.length === 0 ? NODE_MIN_H : HEADER_H + displayRows.length * ROW_H + 8) + (addingToParentPath !== null ? ROW_H : 0) + (addingSectionKeyInHeader ? ROW_H : 0) + (showSectionAdd ? ROW_H : 0) + (addingForEachSubVarPath !== null ? ROW_H : 0);
+  const displayH = (displayRows.length === 0 ? NODE_MIN_H : NODE_HDR_H + displayRows.length * NODE_ROW_H + 8) + (addingToParentPath !== null ? NODE_ROW_H : 0) + (addingSectionKeyInHeader ? NODE_ROW_H : 0) + (showSectionAdd ? NODE_ROW_H : 0) + (addingForEachSubVarPath !== null ? NODE_ROW_H : 0);
 
   // Shared helper: index of the last row in displayRows that is a descendant of the row at fp.
   const lastDescendantIdx = useCallback((fp: string): number => {
@@ -364,7 +364,7 @@ export const NodeCard = memo(function NodeCard({
       : null;
 
   return (
-    <GraphNodeShell
+    <NodeCardShell
       id={node.id}
       dataAttr="node-id"
       x={node.x} y={node.y} w={node.w} h={displayH}
@@ -425,7 +425,7 @@ export const NodeCard = memo(function NodeCard({
           outer node-card div. */}
       <div style={{ opacity: collapsed ? 0 : 1, transition: 'opacity 0.2s ease-out' }}>
       {displayRows.map((row, i) => {
-        const top = HEADER_H + (showSectionAdd ? ROW_H : 0) + i * ROW_H + ROW_H / 2 - DOT / 2;
+        const top = NODE_HDR_H + (showSectionAdd ? NODE_ROW_H : 0) + i * NODE_ROW_H + NODE_ROW_H / 2 - PORT_DOT_SIZE / 2;
         // Left (inPort) dot — shown when there's a committed CEL ref OR an unsaved ExtraEdge.
         const inColor = row.inPort
           ? refAccent(row.inPort.ref, dark)
@@ -454,7 +454,7 @@ export const NodeCard = memo(function NodeCard({
       })}
 
       {displayRows.length === 0 && (
-        <PortDot color={accent} right top={node.h / 2 - DOT / 2} dark={dark}
+        <PortDot color={accent} right top={node.h / 2 - PORT_DOT_SIZE / 2} dark={dark}
           hasConnection={false} isDrawing={isDrawing} />
       )}
       </div>
@@ -477,7 +477,7 @@ export const NodeCard = memo(function NodeCard({
       }}>
         {/* Header */}
         <Box sx={{
-          px: 1.5, height: HEADER_H, flexShrink: 0,
+          px: 1.5, height: NODE_HDR_H, flexShrink: 0,
           background: dark ? alpha(accent, 0.28) : alpha(accent, 0.1),
           borderBottom: displayRows.length > 0 ? `1px solid ${alpha(accent, 0.2)}` : 'none',
           display: 'flex', alignItems: 'center', gap: 0.75,
@@ -504,7 +504,7 @@ export const NodeCard = memo(function NodeCard({
             </Tooltip>
           )}
           {(node.type === 'kro-resource' || node.type === 'kro-ref') && onDelete && (
-            <GraphNodeDeleteButton
+            <NodeCardDeleteButton
               accent={accent} selected={selected} readOnly={readOnly}
               onDelete={() => onDelete(node.id)}
             />
@@ -524,7 +524,7 @@ export const NodeCard = memo(function NodeCard({
 
         {showSectionAdd && (
           <Box sx={{
-            height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+            height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
             borderBottom: `1px dashed ${alpha(accent, 0.2)}`,
             px: 1, gap: 0.5,
           }}
@@ -580,7 +580,7 @@ export const NodeCard = memo(function NodeCard({
           const inlinePickerDepth = inlineParentRow ? inlineParentRow.depth + 1 : 0;
           const inlinePickerIndent = 8 + inlinePickerDepth * 10;
           const inlinePickerInput = addingToParentPath !== null ? (
-            <Box key="inline-picker-input" sx={{ height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
+            <Box key="inline-picker-input" sx={{ height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
               onMouseDown={e => e.stopPropagation()}
             >
               <input
@@ -609,7 +609,7 @@ export const NodeCard = memo(function NodeCard({
             </Box>
           ) : null;
           const inlineMapInput = addingToMap ? (
-            <Box key="inline-map-input" sx={{ height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
+            <Box key="inline-map-input" sx={{ height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
               onMouseDown={e => e.stopPropagation()}
             >
               <input
@@ -639,7 +639,7 @@ export const NodeCard = memo(function NodeCard({
             const varRow = displayRows.find(r => r.fieldPath === addingForEachSubVarPath);
             const subIndent = 8 + ((varRow ? varRow.depth + 1 : 2)) * 10;
             return (
-              <Box key="inline-foreach-sub-input" sx={{ height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
+              <Box key="inline-foreach-sub-input" sx={{ height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
                 onMouseDown={e => e.stopPropagation()}>
                 <input
                   // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -664,7 +664,7 @@ export const NodeCard = memo(function NodeCard({
             );
           })() : null;
 
-          const rows = displayRows.map((row: TRow, i: number) => {
+          const rows = displayRows.map((row: NodeRow, i: number) => {
           const indent     = 8 + row.depth * 10;
           const hasIn      = !!row.inPort;
           const hasOut     = !!row.outPort;
@@ -697,7 +697,7 @@ export const NodeCard = memo(function NodeCard({
             return (
               <Fragment key={`section-${i}`}>
                 <Box sx={{
-                  height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+                  height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
                   borderTop: `2px solid ${alpha(accent, 0.25)}`, px: 1,
                   bgcolor: dark ? alpha(accent, 0.08) : alpha(accent, 0.04),
                 }}>
@@ -715,7 +715,7 @@ export const NodeCard = memo(function NodeCard({
                   )}
                 </Box>
                 {inputOpen && (
-                  <Box sx={{ height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
+                  <Box sx={{ height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', borderTop: `1px dashed ${alpha(userC, 0.3)}` }}
                     onMouseDown={e => e.stopPropagation()}>
                     <input
                       // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -746,7 +746,7 @@ export const NodeCard = memo(function NodeCard({
             return (
               <Fragment key={`ghost-${i}`}>
               <Box sx={{
-                height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+                height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
                 borderTop: `1px dashed ${alpha(userC, isHov ? 0.35 : 0.12)}`,
                 bgcolor: isHov
                   ? (dark ? alpha(userC, 0.25) : alpha(userC, 0.14))
@@ -797,7 +797,7 @@ export const NodeCard = memo(function NodeCard({
           return (
             <Fragment key={i}>
             <Box sx={{
-              height: ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+              height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
               borderTop: i > 0 ? `1px solid ${alpha(isVirt ? userC : accent, 0.07)}` : 'none',
               bgcolor: isHov
                 ? (dark ? alpha(userC, 0.25) : alpha(userC, 0.14))
@@ -1031,8 +1031,8 @@ export const NodeCard = memo(function NodeCard({
         <Paper elevation={8} sx={{
           position: 'absolute',
           top: addingToParentPath === ''
-            ? HEADER_H + (showSectionAdd ? ROW_H : 0) + ROW_H
-            : HEADER_H + (showSectionAdd ? ROW_H : 0) + (addParentInputAfterIdx + 2) * ROW_H,
+            ? NODE_HDR_H + (showSectionAdd ? NODE_ROW_H : 0) + NODE_ROW_H
+            : NODE_HDR_H + (showSectionAdd ? NODE_ROW_H : 0) + (addParentInputAfterIdx + 2) * NODE_ROW_H,
           left: 0, right: 0, zIndex: 30,
           maxHeight: 160, overflowY: 'auto',
           borderRadius: '0 0 6px 6px',
@@ -1062,7 +1062,7 @@ export const NodeCard = memo(function NodeCard({
           })}
         </Paper>
       )}
-    </GraphNodeShell>
+    </NodeCardShell>
   );
 });
 
@@ -1070,7 +1070,7 @@ export const NodeCard = memo(function NodeCard({
 // ── DraftNodeCard ──────────────────────────────────────────────────────────────
 
 export interface DraftNodeCardProps {
-  node: GNode;
+  node: GraphNode;
   /** Screen-space left offset within the container (canvas coords × scale + pan.x). */
   screenLeft: number;
   /** Screen-space top offset within the container (canvas coords × scale + pan.y). */
@@ -1114,7 +1114,7 @@ export function DraftNodeCard({ node, screenLeft, screenTop, dark, addForm, kind
       }}>
         {/* Header */}
         <Box sx={{
-          px: 1.5, height: HEADER_H, flexShrink: 0,
+          px: 1.5, height: NODE_HDR_H, flexShrink: 0,
           background: dark ? alpha(accent, 0.28) : alpha(accent, 0.1),
           borderBottom: `1px solid ${alpha(accent, 0.2)}`,
           display: 'flex', alignItems: 'center', gap: 0.75,

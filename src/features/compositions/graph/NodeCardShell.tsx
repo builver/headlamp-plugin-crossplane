@@ -1,6 +1,6 @@
-// ── GraphNodeShell ────────────────────────────────────────────────────────────
+// ── NodeCardShell ────────────────────────────────────────────────────────────
 //
-// Shared outer chrome for every interactive graph node (NodeCard, ExprOpNodeCard,
+// Shared outer chrome for every interactive graph node (RowsNodeCard, ExprNodeCard,
 // and any future node type). Centralizes the standardized contract for:
 //
 //   - DOM identity:   `data-node-id` / `data-opnode-id`, role="button", tabIndex
@@ -14,25 +14,25 @@
 // IMPORTANT — readOnly contract:
 //   The shell's job is to enforce the contract for the OUTER div only:
 //     - Drag (mousedown → onNodeDown) is always allowed, even in readOnly
-//       (mirrors NodeCard's existing behavior so users can rearrange a frozen
+//       (mirrors RowsNodeCard's existing behavior so users can rearrange a frozen
 //        graph for inspection).
 //     - Keyboard Delete is GATED on !readOnly.
 //   Any mutating affordance INSIDE the card body (delete X, edit inputs,
 //   op-switch dropdown, add-field, resize handle, etc.) must be gated by the
-//   consuming card itself using its own `readOnly` prop. See `<NodeCard>` and
-//   `<ExprOpNodeCard>` for the established pattern. The shared
-//   `<GraphNodeDeleteButton>` helper exported below is the canonical
+//   consuming card itself using its own `readOnly` prop. See `<RowsNodeCard>` and
+//   `<ExprNodeCard>` for the established pattern. The shared
+//   `<NodeCardDeleteButton>` helper exported below is the canonical
 //   readOnly-aware delete affordance for headers.
 
 import { Icon } from '@iconify/react';
 import { alpha, Box, useTheme } from '@mui/material';
 import { CSSProperties, KeyboardEvent, memo, MouseEvent, ReactNode, useCallback } from 'react';
 
-export interface GraphNodeShellProps {
+export interface NodeCardShellProps {
   /** Node identity. Used for `data-{node-id|opnode-id}` and forwarded to handlers. */
   id: string;
-  /** Discriminates which data attribute the shell sets. NodeCard → 'node-id',
-   *  ExprOpNodeCard → 'opnode-id'. */
+  /** Discriminates which data attribute the shell sets. RowsNodeCard → 'node-id',
+   *  ExprNodeCard → 'opnode-id'. */
   dataAttr: 'node-id' | 'opnode-id';
 
   x: number; y: number; w: number; h: number;
@@ -74,12 +74,12 @@ export interface GraphNodeShellProps {
 }
 
 /** Shared outer chrome. See file header for the readOnly contract. */
-export const GraphNodeShell = memo(function GraphNodeShell({
+export const NodeCardShell = memo(function NodeCardShell({
   id, dataAttr, x, y, w, h,
   noHandlers, readOnly, isDrawing, dimmed,
   onNodeDown, onClick, onActivate, onDeleteKey, onHoverChange,
   extraStyle, cursor, children,
-}: GraphNodeShellProps) {
+}: NodeCardShellProps) {
   const handleMouseDown = useCallback((e: MouseEvent) => {
     if (noHandlers) return;
     e.stopPropagation();
@@ -131,20 +131,20 @@ export const GraphNodeShell = memo(function GraphNodeShell({
   );
 });
 
-// ── GraphNodeDeleteButton ─────────────────────────────────────────────────────
+// ── NodeCardDeleteButton ─────────────────────────────────────────────────────
 //
 // Canonical delete-X used inside node headers. Self-enforces the readOnly
 // contract so callers can't accidentally render a delete affordance in a
 // read-only view (the bug we just fixed for op nodes). Only renders when both
 // `readOnly` is false AND the node is selected.
 
-export interface GraphNodeDeleteButtonProps {
+export interface NodeCardDeleteButtonProps {
   /** Accent color of the host node. */
   accent: string;
   selected: boolean;
   readOnly?: boolean;
   onDelete: () => void;
-  /** Visual size. Defaults to 16 to match NodeCard; ExprOpNodeCard uses 14. */
+  /** Visual size. Defaults to 16 to match RowsNodeCard; ExprNodeCard uses 14. */
   size?: number;
   /** Icon override. Defaults to the trash can. */
   icon?: string;
@@ -152,9 +152,9 @@ export interface GraphNodeDeleteButtonProps {
   iconSize?: number;
 }
 
-export const GraphNodeDeleteButton = memo(function GraphNodeDeleteButton({
+export const NodeCardDeleteButton = memo(function NodeCardDeleteButton({
   accent, selected, readOnly, onDelete, size = 16, icon = 'mdi:trash-can-outline', iconSize,
-}: GraphNodeDeleteButtonProps) {
+}: NodeCardDeleteButtonProps) {
   const theme = useTheme();
   if (readOnly || !selected) return null;
   const glyph = iconSize ?? Math.max(9, size - 6);

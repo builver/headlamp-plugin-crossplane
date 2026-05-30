@@ -1,18 +1,18 @@
 import { Box, Divider, Paper, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { useEffect, useRef, useState } from 'react';
-import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
+import { EXPR_NODE_DEFS } from './exprGraph/exprNodeDefs';
 import { NodeDef } from './exprGraph/types';
 
 const GROUP_ORDER = ['Logic', 'String', 'Collection', 'Type / Math', 'Advanced'] as const;
 
-interface OpNodePaletteProps {
+interface ExprNodePaletteProps {
   userC: string;
   onAdd: (def: NodeDef) => void;
   onClose: () => void;
 }
 
-export function OpNodePalette({ userC, onAdd, onClose }: OpNodePaletteProps) {
+export function ExprNodePalette({ userC, onAdd, onClose }: ExprNodePaletteProps) {
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 

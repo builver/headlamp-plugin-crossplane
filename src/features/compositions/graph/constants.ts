@@ -1,4 +1,14 @@
-import { FieldSuggestion, NodeCfg, NodeType, OpNode, TRow } from './types';
+import { ExprNode, FieldSuggestion, NodeConfig, NodeRow,NodeType } from './types';
+
+// Composition-graph naming standard (see types.ts for the full rules).
+//
+// Layout constants are spelled out and family-prefixed:
+//   - `NODE_*` (e.g. NODE_W, NODE_HDR_H, NODE_ROW_H) — row-based card (the
+//     unmarked default, rendered by RowsNodeCard).
+//   - `EXPR_NODE_*` (e.g. EXPR_NODE_W, EXPR_NODE_HDR_H, EXPR_NODE_PORT_H) —
+//     operator card (rendered by ExprNodeCard).
+//   - Cross-card constants are unprefixed but spelled out (H_GAP, V_GAP,
+//     PORT_DOT_SIZE, CANVAS_SIZE). No cryptic abbreviations.
 
 // ── Node ID constants ──────────────────────────────────────────────────────────
 
@@ -9,22 +19,22 @@ export const VAR_FIELD_PREFIX = 'var:';
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
-export const NW          = 264;
-export const HEADER_H    = 30;
-export const ROW_H       = 20;
+export const NODE_W          = 264;
+export const NODE_HDR_H    = 30;
+export const NODE_ROW_H       = 20;
 export const NODE_MIN_H  = 72;
-export const HG          = 104;
-export const VG          = 32;
+export const H_GAP          = 104;
+export const V_GAP          = 32;
 export const CANVAS_SIZE = 4000;
-export const DOT         = 10;
+export const PORT_DOT_SIZE         = 10;
 
-export function nodeH(rows: TRow[]): number {
-  return rows.length === 0 ? NODE_MIN_H : HEADER_H + rows.length * ROW_H + 8;
+export function nodeH(rows: NodeRow[]): number {
+  return rows.length === 0 ? NODE_MIN_H : NODE_HDR_H + rows.length * NODE_ROW_H + 8;
 }
 
 // ── Node visual config ─────────────────────────────────────────────────────────
 
-export const NODE_CFG: Record<NodeType, NodeCfg> = {
+export const NODE_CFG: Record<NodeType, NodeConfig> = {
   schema:         { icon: 'mdi:file-tree-outline',    accent: '#1565c0', accentDark: '#90caf9', label: 'Schema'   },
   env:            { icon: 'mdi:link-variant',          accent: '#92660a', accentDark: '#fcd34d', label: 'Required' },
   'kro-ref':      { icon: 'mdi:link-box-outline',      accent: '#e65100', accentDark: '#ffb74d', label: 'External' },
@@ -61,18 +71,18 @@ export const K8S_MAP_PATHS = new Set(['metadata.labels', 'metadata.annotations']
 
 // ── Op node layout ─────────────────────────────────────────────────────────────
 
-export const OP_NODE_W      = 160;
-export const OP_NODE_HDR_H  = 28;
-export const OP_NODE_PORT_H = 24;
+export const EXPR_NODE_W      = 160;
+export const EXPR_NODE_HDR_H  = 28;
+export const EXPR_NODE_PORT_H = 24;
 
 export const RAW_TEMPLATE_NODE_H = 112;
 
-export function opNodeH(portCount: number): number {
-  return OP_NODE_HDR_H + portCount * OP_NODE_PORT_H;
+export function exprNodeH(portCount: number): number {
+  return EXPR_NODE_HDR_H + portCount * EXPR_NODE_PORT_H;
 }
 
-export function opNodeInputPortY(node: OpNode, portIdx: number): number {
-  return node.y + OP_NODE_HDR_H + portIdx * OP_NODE_PORT_H + OP_NODE_PORT_H / 2;
+export function exprNodeInputPortY(node: ExprNode, portIdx: number): number {
+  return node.y + EXPR_NODE_HDR_H + portIdx * EXPR_NODE_PORT_H + EXPR_NODE_PORT_H / 2;
 }
 
 /**
@@ -97,7 +107,7 @@ export function buildVarFieldRows(varFields: string[]): Array<{ path: string; de
  * Total extra rows consumed by the predicate varFields section:
  * one row per unique tree node across all varFields, plus 1 for the "add field" input row.
  */
-export function opNodeVarFieldExtraRows(varFields: string[]): number {
+export function exprNodeVarFieldExtraRows(varFields: string[]): number {
   return buildVarFieldRows(varFields).length + 1;
 }
 
@@ -113,8 +123,8 @@ export function varFieldLeafRow(varFields: string[], varPortIdx: number, vfi: nu
 }
 
 // eslint-disable-next-line no-unused-vars
-export function opNodeOutputPortY(node: OpNode, _portCount: number): number {
-  return node.y + OP_NODE_HDR_H / 2;
+export function exprNodeOutputPortY(node: ExprNode, _portCount: number): number {
+  return node.y + EXPR_NODE_HDR_H / 2;
 }
 
 /** Always-available source fields on every Kubernetes resource node. */

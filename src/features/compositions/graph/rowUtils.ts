@@ -1,20 +1,20 @@
-import { AstCall, CelNode, celNodeToCelInner, parseCelAst } from './celAst';
+import { AstCall, CelNode, celNodeToCelInner, parseCelAst } from './celUtils';
 import { collectCelMatches, extractGroup, parseSegments, parseSingleRefMatch } from './celUtils';
 import { refToNodeId, VAR_FIELD_PREFIX } from './constants';
-import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
+import { EXPR_NODE_DEFS } from './exprGraph/exprNodeDefs';
 import { decodePathKey, deleteDeepPath, encodePathKey, getDeepPath, setDeepPath } from './pathUtils';
 import { qualifiedPath, SECTION_DEFS, sectionOf, sectionRelPath } from './sectionDefs';
-import { ExtraEdge, FieldEdit, FieldSuggestion, OpNode, OutPort, RowSegment, TRow } from './types';
+import { ExprNode, ExtraEdge, FieldEdit, FieldSuggestion, NodeRow,OutputPort, RowSegment } from './types';
 
 // ── Scalar CEL value classifier ────────────────────────────────────────────────
 
 const BARE_VAR_RE = /^\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/;
 
-/** Classifies a scalar string value into one of the TRow CEL display modes. */
+/** Classifies a scalar string value into one of the NodeRow CEL display modes. */
 function parseScalarCelValue(
   val: string,
   knownIds: Set<string>,
-): Pick<TRow, 'inPort' | 'segments' | 'celExpr' | 'value'> {
+): Pick<NodeRow, 'inPort' | 'segments' | 'celExpr' | 'value'> {
   const matches = collectCelMatches(val, knownIds);
   const single = parseSingleRefMatch(matches, val);
   if (single) {
@@ -33,14 +33,14 @@ function parseScalarCelValue(
   return { value: val };
 }
 
-// ── TRow factory helpers ───────────────────────────────────────────────────────
+// ── NodeRow factory helpers ───────────────────────────────────────────────────────
 
 /** Leaf row. String values are auto-classified via parseScalarCelValue. */
 export function makeLeafRow(
   depth: number, key: string, fieldPath: string,
   val: unknown, knownIds: Set<string>,
-  extra?: Partial<TRow>,
-): TRow {
+  extra?: Partial<NodeRow>,
+): NodeRow {
   const cel = typeof val === 'string' ? parseScalarCelValue(val, knownIds) : {};
   const value = (typeof val !== 'string' && val !== null && val !== undefined)
     ? (Array.isArray(val) ? `[${(val as unknown[]).length}]` : String(val))
@@ -51,8 +51,8 @@ export function makeLeafRow(
 /** Parent (container) row. */
 export function makeParentRow(
   depth: number, key: string, fieldPath: string,
-  extra?: Partial<TRow>,
-): TRow {
+  extra?: Partial<NodeRow>,
+): NodeRow {
   return { depth, key, isParent: true, fieldPath, ...extra };
 }
 
@@ -61,8 +61,8 @@ export function makeParentRow(
 export function buildTemplateRows(
   obj: unknown, knownIds: Set<string>, outPortPaths: Set<string>,
   visitedOutPorts: Set<string>, depth = 0, pathSoFar = '',
-): TRow[] {
-  const rows: TRow[] = [];
+): NodeRow[] {
+  const rows: NodeRow[] = [];
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return rows;
   for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
     const segKey = encodePathKey(key);
@@ -107,7 +107,7 @@ export function buildTemplateRows(
  * Rows whose `fieldPath` is absent are skipped by the `seg &&` guard; if such a row were
  * ever positioned mid-list it would cause incorrect insertion, but this never happens today.
  */
-export function findAlphaInsertBefore(rows: TRow[], firstSeg: string): number {
+export function findAlphaInsertBefore(rows: NodeRow[], firstSeg: string): number {
   for (let i = 0; i < rows.length; i++) {
     const seg = rows[i].fieldPath?.split('.')[0];
     if (seg && seg > firstSeg) return i;
@@ -122,9 +122,9 @@ export function findAlphaInsertBefore(rows: TRow[], firstSeg: string): number {
  * Missing ancestor parent rows are injected as needed.
  */
 export function insertRowAtPath(
-  rows: TRow[], fieldPath: string,
-  leafExtra: Partial<TRow>, ghostParent = false,
-): TRow[] {
+  rows: NodeRow[], fieldPath: string,
+  leafExtra: Partial<NodeRow>, ghostParent = false,
+): NodeRow[] {
   const parts     = fieldPath.split('.');
   const leafKey   = decodePathKey(parts[parts.length - 1]);
   const leafDepth = parts.length - 1;
@@ -147,7 +147,7 @@ export function insertRowAtPath(
     insertAfterIdx = findAlphaInsertBefore(rows, parts[0]) - 1;
   }
 
-  const toInsert: TRow[] = [];
+  const toInsert: NodeRow[] = [];
   for (let d = 0; d < parts.length - 1; d++) {
     const pKey       = decodePathKey(parts[d]);
     const parentPath = parts.slice(0, d + 1).join('.');
@@ -165,7 +165,7 @@ export function insertRowAtPath(
 
 // ── Ghost field merging ────────────────────────────────────────────────────────
 
-export function insertGhostRow(rows: TRow[], fieldPath: string, fieldType: string): TRow[] {
+export function insertGhostRow(rows: NodeRow[], fieldPath: string, fieldType: string): NodeRow[] {
   return insertRowAtPath(rows, fieldPath, { isGhost: true, ghostType: fieldType }, true);
 }
 
@@ -177,7 +177,7 @@ export function insertGhostRow(rows: TRow[], fieldPath: string, fieldType: strin
  * appends new siblings after the last existing sibling in the subtree, so the final order
  * within a group reflects the iteration order.
  */
-export function mergeWithGhostFields(rows: TRow[], potFields: FieldSuggestion[]): TRow[] {
+export function mergeWithGhostFields(rows: NodeRow[], potFields: FieldSuggestion[]): NodeRow[] {
   const sorted = [...potFields].sort((a, b) => a.path.localeCompare(b.path));
   let merged = rows;
   for (const pf of sorted) {
@@ -211,52 +211,52 @@ function pruneEmptyAncestors(obj: any, dotPath: string): void {
  */
 export function buildCelFromChain(
   srcNodeId: string, srcFieldPath: string,
-  extraEdges: ExtraEdge[], opNodes: OpNode[],
+  extraEdges: ExtraEdge[], exprNodes: ExprNode[],
 ): string {
-  const opNode = opNodes.find(n => n.id === srcNodeId);
-  if (!opNode) {
+  const exprNode = exprNodes.find(n => n.id === srcNodeId);
+  if (!exprNode) {
     return SECTION_DEFS[sectionOf(srcFieldPath)].celRef(srcNodeId, sectionRelPath(srcFieldPath));
   }
   // var:fieldPath — reference to the lambda variable's sub-field
   if (srcFieldPath.startsWith(VAR_FIELD_PREFIX)) {
-    const varName = opNode.literals['var'] ?? 'x';
+    const varName = exprNode.literals['var'] ?? 'x';
     return `${varName}.${srcFieldPath.slice(VAR_FIELD_PREFIX.length)}`;
   }
-  if (opNode.category === 'raw-template') {
-    return opNode.literals['value'] ?? '';
+  if (exprNode.category === 'raw-template') {
+    return exprNode.literals['value'] ?? '';
   }
-  const def = EXPR_NODE_DEFS[opNode.category];
+  const def = EXPR_NODE_DEFS[exprNode.category];
   if (!def) return srcFieldPath;
   const ports = def.variadic
-    ? Array.from({ length: opNode.portCount ?? def.inputs.length }, (_, i) => def.inputs[0] ? { ...def.inputs[0], name: String.fromCharCode(65 + i) } : { name: String.fromCharCode(65 + i), label: String.fromCharCode(65 + i), type: 'string' })
+    ? Array.from({ length: exprNode.portCount ?? def.inputs.length }, (_, i) => def.inputs[0] ? { ...def.inputs[0], name: String.fromCharCode(65 + i) } : { name: String.fromCharCode(65 + i), label: String.fromCharCode(65 + i), type: 'string' })
     : def.inputs;
   const inputs: Record<string, string> = {};
   for (const port of ports) {
-    const edge = extraEdges.find(e => e.tgtNodeId === opNode.id && e.tgtFieldPath === port.name);
+    const edge = extraEdges.find(e => e.tgtNodeId === exprNode.id && e.tgtFieldPath === port.name);
     if (edge) {
-      inputs[port.name] = buildCelFromChain(edge.srcNodeId, edge.srcFieldPath, extraEdges, opNodes);
+      inputs[port.name] = buildCelFromChain(edge.srcNodeId, edge.srcFieldPath, extraEdges, exprNodes);
     } else {
-      const raw = opNode.literals[port.name] ?? '';
+      const raw = exprNode.literals[port.name] ?? '';
       // String-typed ports require CEL string literals — wrap in quotes automatically.
       inputs[port.name] = port.type === 'string' ? `"${raw}"` : raw;
     }
   }
-  return def.toCel(opNode.op, inputs);
+  return def.toCel(exprNode.op, inputs);
 }
 
 /**
  * Returns a deep clone of `input` with each ExtraEdge applied as a CEL expression
  * on the target resource's template field. Op node edges are traversed recursively.
  */
-export function applyExtraEdgesToInput(input: any, extraEdges: ExtraEdge[], opNodes: OpNode[] = []): any {
+export function applyExtraEdgesToInput(input: any, extraEdges: ExtraEdge[], exprNodes: ExprNode[] = []): any {
   const clone = JSON.parse(JSON.stringify(input));
-  const opNodeMap = new Map(opNodes.map(n => [n.id, n]));
-  const opNodeIds = new Set(opNodeMap.keys());
+  const exprNodeMap = new Map(exprNodes.map(n => [n.id, n]));
+  const exprNodeIds = new Set(exprNodeMap.keys());
   for (const edge of extraEdges) {
-    if (opNodeIds.has(edge.tgtNodeId)) continue; // intermediate op-node edges; captured by traversal
-    const celContent = buildCelFromChain(edge.srcNodeId, edge.srcFieldPath, extraEdges, opNodes);
+    if (exprNodeIds.has(edge.tgtNodeId)) continue; // intermediate op-node edges; captured by traversal
+    const celContent = buildCelFromChain(edge.srcNodeId, edge.srcFieldPath, extraEdges, exprNodes);
     // raw-template nodes return the full template string verbatim (already contains ${...})
-    const isRawTemplate = opNodeMap.get(edge.srcNodeId)?.category === 'raw-template';
+    const isRawTemplate = exprNodeMap.get(edge.srcNodeId)?.category === 'raw-template';
     const celExpr = isRawTemplate ? celContent : `\${${celContent}}`;
     const tgtRes = (clone.resources ?? []).find((r: any) => r.id === edge.tgtNodeId);
     if (!tgtRes) continue;
@@ -320,7 +320,7 @@ export function reindexPathAfterDelete(deletedPath: string, p: string): string {
  * siblings if the path is an array item, then prune any parent rows that become
  * childless (repeated until stable for nested empty parents).
  */
-export function removeRowAtPath(rows: TRow[], fieldPath: string): TRow[] {
+export function removeRowAtPath(rows: NodeRow[], fieldPath: string): NodeRow[] {
   // Remove target and all descendant rows (needed when deleting an array item parent)
   let result = rows.filter(r => r.fieldPath !== fieldPath && !r.fieldPath?.startsWith(fieldPath + '.'));
   // Renumber higher-indexed siblings in the same array
@@ -346,8 +346,8 @@ export function removeRowAtPath(rows: TRow[], fieldPath: string): TRow[] {
   return result;
 }
 
-// Keep OutPort exported for consumers that need it
-export type { OutPort };
+// Keep OutputPort exported for consumers that need it
+export type { OutputPort };
 
 // ── forEach / includeWhen / readyWhen helpers ──────────────────────────────────
 
@@ -371,10 +371,10 @@ export function buildKnownForRes(res: any, baseKnown: Set<string>): Set<string> 
   return new Set([...baseKnown, 'each', ...extras]);
 }
 
-/** Produce a single TRow for a scalar value from forEach / includeWhen / readyWhen. */
+/** Produce a single NodeRow for a scalar value from forEach / includeWhen / readyWhen. */
 function parseSpecialFieldValue(
   val: unknown, key: string, fieldPath: string, knownIds: Set<string>,
-): TRow {
+): NodeRow {
   return makeLeafRow(1, key, fieldPath, val, knownIds);
 }
 
@@ -382,8 +382,8 @@ function parseSpecialFieldValue(
  * Build display rows for forEach / includeWhen / readyWhen sections.
  * Returns section-header rows followed by per-item rows for each present field.
  */
-export function buildSpecialFieldRows(res: any, knownForRes: Set<string>): TRow[] {
-  const rows: TRow[] = [];
+export function buildSpecialFieldRows(res: any, knownForRes: Set<string>): NodeRow[] {
+  const rows: NodeRow[] = [];
 
   if (res.forEach?.length) {
     rows.push({ depth: 0, key: 'forEach', isParent: false, isSection: true, canImport: false, canExport: false });
@@ -423,7 +423,7 @@ export function buildSpecialFieldRows(res: any, knownForRes: Set<string>): TRow[
  * Replace 'each' and forEach variable name refs in rows with the resource's own node id,
  * producing self-loop port connections.
  */
-export function postProcessEachRefs(rows: TRow[], eachNodeId: string, selfRefs: Set<string>): TRow[] {
+export function postProcessEachRefs(rows: NodeRow[], eachNodeId: string, selfRefs: Set<string>): NodeRow[] {
   if (!selfRefs.size) return rows;
   return rows.map(row => {
     if (row.isSection) return row;
@@ -448,7 +448,7 @@ export function postProcessEachRefs(rows: TRow[], eachNodeId: string, selfRefs: 
 
 type ParsedOperand =
   | { kind: 'ref'; nodeId: string; fieldPath: string }
-  | { kind: 'opNode'; id: string }
+  | { kind: 'exprNode'; id: string }
   | { kind: 'literal'; value: string };
 
 function celBinaryOpToCategory(op: string): string | null {
@@ -459,15 +459,15 @@ function celBinaryOpToCategory(op: string): string | null {
   return null;
 }
 
-function makeReconOpNode(
+function makeReconExprNode(
   category: string, op: string,
   inputsByPort: Record<string, ParsedOperand>,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): ParsedOperand {
   const id = `op-r-${counter.n++}`;
-  const node: OpNode = { id, category, op, x: 900, y: 50 + out.opNodes.length * 80, literals: {} };
-  out.opNodes.push(node);
+  const node: ExprNode = { id, category, op, x: 900, y: 50 + out.exprNodes.length * 80, literals: {} };
+  out.exprNodes.push(node);
   const def = EXPR_NODE_DEFS[category];
   for (const port of def.inputs) {
     const operand = inputsByPort[port.name];
@@ -488,22 +488,22 @@ function makeReconOpNode(
       });
     }
   }
-  return { kind: 'opNode', id };
+  return { kind: 'exprNode', id };
 }
 
 /** Create a single variadic string-concat op node wiring all operands to ports A, B, C, … */
-function makeConcatOpNode(
+function makeConcatExprNode(
   operands: ParsedOperand[],
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): ParsedOperand {
   const id = `op-r-${counter.n++}`;
-  const node: OpNode = {
+  const node: ExprNode = {
     id, category: 'string-concat', op: '+',
-    x: 900, y: 50 + out.opNodes.length * 80,
+    x: 900, y: 50 + out.exprNodes.length * 80,
     literals: {}, portCount: operands.length,
   };
-  out.opNodes.push(node);
+  out.exprNodes.push(node);
   for (let i = 0; i < operands.length; i++) {
     const portName = String.fromCharCode(65 + i);
     const operand = operands[i];
@@ -523,12 +523,12 @@ function makeConcatOpNode(
       });
     }
   }
-  return { kind: 'opNode', id };
+  return { kind: 'exprNode', id };
 }
 
 function parseOperandStr(
   s: string, knownIds: Set<string>,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): ParsedOperand {
   const t = s.trim();
@@ -571,7 +571,7 @@ function collectConcatCelNodes(node: CelNode): CelNode[] {
  */
 function celAstToParseOperand(
   node: CelNode,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
   knownIds?: Set<string>,
 ): ParsedOperand {
@@ -583,24 +583,24 @@ function celAstToParseOperand(
     case 'binary': {
       if (node.op === '+') {
         const operands = collectConcatCelNodes(node).map(o => celAstToParseOperand(o, out, counter, knownIds));
-        return makeConcatOpNode(operands, out, counter);
+        return makeConcatExprNode(operands, out, counter);
       }
       const category = celBinaryOpToCategory(node.op);
       if (!category) return { kind: 'literal', value: celNodeToCelInner(node) };
-      return makeReconOpNode(category, node.op, {
+      return makeReconExprNode(category, node.op, {
         A: celAstToParseOperand(node.left, out, counter, knownIds),
         B: celAstToParseOperand(node.right, out, counter, knownIds),
       }, out, counter);
     }
     case 'unary':
       if (node.op === '!') {
-        return makeReconOpNode('not', '!', {
+        return makeReconExprNode('not', '!', {
           A: celAstToParseOperand(node.operand, out, counter, knownIds),
         }, out, counter);
       }
       return { kind: 'literal', value: celNodeToCelInner(node) };
     case 'ternary':
-      return makeReconOpNode('conditional', '?:', {
+      return makeReconExprNode('conditional', '?:', {
         condition: celAstToParseOperand(node.cond, out, counter, knownIds),
         then: celAstToParseOperand(node.then_, out, counter, knownIds),
         else: celAstToParseOperand(node.else_, out, counter, knownIds),
@@ -621,7 +621,7 @@ function celAstToParseOperand(
 
 function parseParenInner(
   inner: string, knownIds: Set<string>,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): ParsedOperand | null {
   const s = inner.trim();
@@ -633,25 +633,25 @@ function parseParenInner(
 }
 
 /** Create a raw-template op node that holds the complete template verbatim. */
-function makeRawTemplateOpNode(
+function makeRawTemplateExprNode(
   template: string,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): ParsedOperand {
   const id = `op-r-${counter.n++}`;
-  const node: OpNode = {
+  const node: ExprNode = {
     id, category: 'raw-template', op: 'template',
-    x: 900, y: 50 + out.opNodes.length * 80,
+    x: 900, y: 50 + out.exprNodes.length * 80,
     literals: { value: template },
   };
-  out.opNodes.push(node);
-  return { kind: 'opNode', id };
+  out.exprNodes.push(node);
+  return { kind: 'exprNode', id };
 }
 
 /** Build a single variadic string-concat op node from parsed template segments. */
 function buildSegmentConcatChain(
   segments: RowSegment[],
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): ParsedOperand | null {
   const segs = segments.filter(s => s.kind !== 'literal' || (s.text ?? '') !== '');
@@ -662,7 +662,7 @@ function buildSegmentConcatChain(
       : { kind: 'literal', value: seg.text ?? '' }
   );
   if (operands.length === 1) return operands[0];
-  return makeConcatOpNode(operands, out, counter);
+  return makeConcatExprNode(operands, out, counter);
 }
 
 function astNodeToOperand(node: CelNode): ParsedOperand {
@@ -674,7 +674,7 @@ function astNodeToOperand(node: CelNode): ParsedOperand {
 /** Like astNodeToOperand but recursively parses chained method calls into op nodes. */
 function astNodeToChainedOperand(
   node: CelNode,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
   knownIds?: Set<string>,
 ): ParsedOperand {
@@ -692,18 +692,18 @@ function astNodeToChainedOperand(
  * Re-parses the pred/expr argument with varName added to knownIds so that
  * `varName.field` patterns create graph edges instead of literals.
  * After parsing, redirects edges with srcNodeId===varName to var: paths
- * and collects them into opNode.varFields.
+ * and collects them into exprNode.varFields.
  */
 function reconstructPredicateOp(
   category: string, op: string, predPort: string,
   ast: AstCall,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
   knownIds?: Set<string>,
 ): ParsedOperand {
   const opId = `op-r-${counter.n++}`;
-  const node: OpNode = { id: opId, category, op, x: 900, y: 50 + out.opNodes.length * 80, literals: {} };
-  out.opNodes.push(node);
+  const node: ExprNode = { id: opId, category, op, x: 900, y: 50 + out.exprNodes.length * 80, literals: {} };
+  out.exprNodes.push(node);
 
   // Wire collection
   const collectionOperand = astNodeToChainedOperand(ast.receiver!, out, counter, knownIds);
@@ -746,16 +746,16 @@ function reconstructPredicateOp(
     if (varFields.length > 0) node.varFields = varFields;
   }
 
-  return { kind: 'opNode', id: opId };
+  return { kind: 'exprNode', id: opId };
 }
 
 /** Wire a parsed operand to a port on an op node (adding literal or edge). */
 function wireOperandToPort(
   operand: ParsedOperand, tgtId: string, portName: string,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): void {
-  const node = out.opNodes.find(n => n.id === tgtId);
+  const node = out.exprNodes.find(n => n.id === tgtId);
   if (!node) return;
   if (operand.kind === 'literal') {
     node.literals[portName] = operand.value;
@@ -776,25 +776,25 @@ function wireOperandToPort(
 
 function parseAstCallOperand(
   ast: AstCall,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
   knownIds?: Set<string>,
 ): ParsedOperand | null {
   if (ast.name === 'orValue' && ast.receiver !== null && ast.args.length === 1) {
-    return makeReconOpNode('optional-or-value', 'orValue', {
+    return makeReconExprNode('optional-or-value', 'orValue', {
       opt:     astNodeToChainedOperand(ast.receiver, out, counter, knownIds),
       default: astNodeToOperand(ast.args[0]),
     }, out, counter);
   }
   if (ast.name === 'replace' && ast.receiver !== null && ast.args.length === 2) {
-    return makeReconOpNode('string-replace', 'replace', {
+    return makeReconExprNode('string-replace', 'replace', {
       str:  astNodeToChainedOperand(ast.receiver, out, counter, knownIds),
       from: astNodeToOperand(ast.args[0]),
       to:   astNodeToOperand(ast.args[1]),
     }, out, counter);
   }
   if (ast.name === 'hasValue' && ast.receiver !== null && ast.args.length === 0) {
-    return makeReconOpNode('has-value', 'hasValue', {
+    return makeReconExprNode('has-value', 'hasValue', {
       opt: astNodeToChainedOperand(ast.receiver, out, counter, knownIds),
     }, out, counter);
   }
@@ -807,7 +807,7 @@ function parseAstCallOperand(
   return null;
 }
 
-/** Maps global CEL function names to their ExprNodeDefs category + op. */
+/** Maps global CEL function names to their exprNodeDefs category + op. */
 const GLOBAL_CALL_MAP: Record<string, { category: string; op: string; input: string }> = {
   string: { category: 'to-string', op: 'string', input: 'val' },
   int:    { category: 'to-int',    op: 'int',    input: 'val' },
@@ -817,13 +817,13 @@ const GLOBAL_CALL_MAP: Record<string, { category: string; op: string; input: str
 
 function parseGlobalCallOperand(
   ast: AstCall,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
   knownIds?: Set<string>,
 ): ParsedOperand | null {
   const mapping = GLOBAL_CALL_MAP[ast.name];
   if (mapping && ast.args.length === 1) {
-    return makeReconOpNode(mapping.category, mapping.op, {
+    return makeReconExprNode(mapping.category, mapping.op, {
       [mapping.input]: celAstToParseOperand(ast.args[0], out, counter, knownIds),
     }, out, counter);
   }
@@ -832,12 +832,12 @@ function parseGlobalCallOperand(
   return null;
 }
 
-function addOpEdge(
+function addExprEdge(
   parsed: ParsedOperand, resId: string, path: string,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): void {
-  if (parsed.kind === 'opNode') {
+  if (parsed.kind === 'exprNode') {
     out.extraEdges.push({
       id: `ee-r-${counter.n++}`,
       srcNodeId: parsed.id, srcFieldPath: 'output',
@@ -849,7 +849,7 @@ function addOpEdge(
 function walkResourceTemplate(
   obj: any, resId: string, fieldPath: string,
   knownIds: Set<string>,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): void {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
@@ -863,20 +863,20 @@ function walkResourceTemplate(
           const grp = extractGroup(inner, 0);
           if (grp && grp.end === inner.length) {
             const parsed = parseParenInner(grp.inner, knownIds, out, counter);
-            if (parsed) addOpEdge(parsed, resId, path, out, counter);
+            if (parsed) addExprEdge(parsed, resId, path, out, counter);
           }
         } else {
           // Try to parse as a method call, binary, unary, or ternary expression
           const ast = parseCelAst(inner, knownIds);
           if (ast.kind === 'call' && ast.receiver !== null) {
             const parsed = parseAstCallOperand(ast, out, counter, knownIds);
-            if (parsed) addOpEdge(parsed, resId, path, out, counter);
+            if (parsed) addExprEdge(parsed, resId, path, out, counter);
           } else if (ast.kind === 'call' && ast.receiver === null) {
             const parsed = parseGlobalCallOperand(ast, out, counter, knownIds);
-            if (parsed) addOpEdge(parsed, resId, path, out, counter);
+            if (parsed) addExprEdge(parsed, resId, path, out, counter);
           } else if (ast.kind === 'binary' || ast.kind === 'unary' || ast.kind === 'ternary') {
             const parsed = celAstToParseOperand(ast, out, counter, knownIds);
-            addOpEdge(parsed, resId, path, out, counter);
+            addExprEdge(parsed, resId, path, out, counter);
           } else if (ast.kind === 'ref' && !ast.fieldPath && knownIds.has(ast.nodeRef)) {
             // Bare forEach var ref ${varName} with no field path — generate a direct ExtraEdge.
             // The caller's redirect loop will convert srcNodeId/srcFieldPath to _forEach.<varName>.
@@ -887,14 +887,14 @@ function walkResourceTemplate(
         // Case 2: multi-part template like "${ref.a}.${ref.b}" or "${ref.a}suffix"
         if (val.includes('\n')) {
           // Multiline template — preserve verbatim, do not wrap in CEL concat
-          const parsed = makeRawTemplateOpNode(val, out, counter);
-          addOpEdge(parsed, resId, path, out, counter);
+          const parsed = makeRawTemplateExprNode(val, out, counter);
+          addExprEdge(parsed, resId, path, out, counter);
         } else {
           const segments = parseSegments(val, knownIds);
           const hasCel = segments.some(s => s.kind === 'cel');
           if (hasCel && segments.length > 1) {
             const parsed = buildSegmentConcatChain(segments, out, counter);
-            if (parsed) addOpEdge(parsed, resId, path, out, counter);
+            if (parsed) addExprEdge(parsed, resId, path, out, counter);
           }
         }
       }
@@ -906,16 +906,16 @@ function walkResourceTemplate(
 
 /** De-duplicate structurally identical op nodes and merge their output edges. */
 function deduplicateOpGraph(
-  opNodes: OpNode[],
+  exprNodes: ExprNode[],
   extraEdges: ExtraEdge[],
-): { opNodes: OpNode[]; extraEdges: ExtraEdge[] } {
-  if (opNodes.length === 0) return { opNodes, extraEdges };
+): { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] } {
+  if (exprNodes.length === 0) return { exprNodes, extraEdges };
 
-  const opIds = new Set(opNodes.map(n => n.id));
+  const opIds = new Set(exprNodes.map(n => n.id));
 
   // Map: op node id → (port name → incoming edge source)
   const inputEdgeMap = new Map<string, Map<string, { srcNodeId: string; srcFieldPath: string }>>();
-  for (const node of opNodes) inputEdgeMap.set(node.id, new Map());
+  for (const node of exprNodes) inputEdgeMap.set(node.id, new Map());
   for (const edge of extraEdges) {
     if (opIds.has(edge.tgtNodeId)) {
       inputEdgeMap.get(edge.tgtNodeId)!.set(edge.tgtFieldPath, {
@@ -926,7 +926,7 @@ function deduplicateOpGraph(
 
   // Build dep graph for topo sort (op node → input op node IDs)
   const deps = new Map<string, string[]>();
-  for (const node of opNodes) {
+  for (const node of exprNodes) {
     deps.set(node.id, [...inputEdgeMap.get(node.id)!.values()]
       .map(e => e.srcNodeId).filter(id => opIds.has(id)));
   }
@@ -940,7 +940,7 @@ function deduplicateOpGraph(
     for (const dep of deps.get(id) ?? []) visit(dep);
     order.push(id);
   };
-  for (const node of opNodes) visit(node.id);
+  for (const node of exprNodes) visit(node.id);
 
   // Process in topo order: compute content key, dedup
   const canonicalFor = new Map<string, string>(); // opId → canonical opId
@@ -949,7 +949,7 @@ function deduplicateOpGraph(
   const resolve = (id: string): string => canonicalFor.get(id) ?? id;
 
   for (const id of order) {
-    const node = opNodes.find(n => n.id === id);
+    const node = exprNodes.find(n => n.id === id);
     if (!node) continue;
     const def = EXPR_NODE_DEFS[node.category];
     if (!def) { canonicalFor.set(id, id); continue; }
@@ -985,7 +985,7 @@ function deduplicateOpGraph(
     }
   }
 
-  if (!removed.size) return { opNodes, extraEdges };
+  if (!removed.size) return { exprNodes, extraEdges };
 
   // Remove input edges to removed nodes; redirect output edges from removed nodes to canonical
   const updated = extraEdges
@@ -1001,7 +1001,7 @@ function deduplicateOpGraph(
     return true;
   });
 
-  return { opNodes: opNodes.filter(n => !removed.has(n.id)), extraEdges: dedupedEdges };
+  return { exprNodes: exprNodes.filter(n => !removed.has(n.id)), extraEdges: dedupedEdges };
 }
 
 /**
@@ -1011,7 +1011,7 @@ function deduplicateOpGraph(
 function walkConditionString(
   val: string, resId: string, fieldPath: string,
   knownIds: Set<string>, selfRefIds: Set<string>,
-  out: { opNodes: OpNode[]; extraEdges: ExtraEdge[] },
+  out: { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] },
   counter: { n: number },
 ): void {
   if (!val.includes('${')) return;
@@ -1035,16 +1035,16 @@ function walkConditionString(
         parsed = celAstToParseOperand(ast, out, counter, knownIds);
       }
     }
-    if (parsed) addOpEdge(parsed, resId, fieldPath, out, counter);
+    if (parsed) addExprEdge(parsed, resId, fieldPath, out, counter);
   } else if (!val.includes('\n')) {
     const segments = parseSegments(val, knownIds);
     if (segments.some(s => s.kind === 'cel') && segments.length > 1) {
       const parsed = buildSegmentConcatChain(segments, out, counter);
-      if (parsed) addOpEdge(parsed, resId, fieldPath, out, counter);
+      if (parsed) addExprEdge(parsed, resId, fieldPath, out, counter);
     }
   } else {
-    const parsed = makeRawTemplateOpNode(val, out, counter);
-    addOpEdge(parsed, resId, fieldPath, out, counter);
+    const parsed = makeRawTemplateExprNode(val, out, counter);
+    addExprEdge(parsed, resId, fieldPath, out, counter);
   }
 
   // Redirect self-ref source IDs (e.g. 'each', forEach var names) to the resource's own node ID
@@ -1058,14 +1058,14 @@ function walkConditionString(
   }
 }
 
-/** Reconstruct OpNodes and ExtraEdges by parsing complex CEL expressions in the composition input. */
-export function reconstructOpGraph(input: any, requirements?: any): { opNodes: OpNode[]; extraEdges: ExtraEdge[] } {
+/** Reconstruct ExprNodes and ExtraEdges by parsing complex CEL expressions in the composition input. */
+export function reconstructOpGraph(input: any, requirements?: any): { exprNodes: ExprNode[]; extraEdges: ExtraEdge[] } {
   const resources: any[] = input?.resources ?? [];
   // 'schema' and each requirementName are valid CEL identifiers (same as buildGraph).
   const reqNames = ((requirements ?? input?.requirements)?.requiredResources ?? [])
     .map((r: any) => r.requirementName as string).filter(Boolean);
   const known = new Set<string>([...resources.map((r: any) => r.id as string), 'schema', ...reqNames]);
-  const out = { opNodes: [] as OpNode[], extraEdges: [] as ExtraEdge[] };
+  const out = { exprNodes: [] as ExprNode[], extraEdges: [] as ExtraEdge[] };
   const counter = { n: 0 };
   for (const res of resources) {
     const varNames = forEachVarNames(res);
@@ -1095,5 +1095,5 @@ export function reconstructOpGraph(input: any, requirements?: any): { opNodes: O
       for (const [varName, val] of Object.entries(entry as Record<string, unknown>))
         walkConditionString(String(val), res.id as string, qualifiedPath('forEach', varName), knownForRes, selfRefIds, out, counter);
   }
-  return deduplicateOpGraph(out.opNodes, out.extraEdges);
+  return deduplicateOpGraph(out.exprNodes, out.extraEdges);
 }

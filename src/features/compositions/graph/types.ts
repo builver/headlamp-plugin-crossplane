@@ -1,4 +1,21 @@
 // ── Types ──────────────────────────────────────────────────────────────────────
+//
+// Composition-graph naming standard (apply to every new type/identifier here):
+//
+//   1. Operator/expression nodes are called "Expr" (not "Op"). Catalogs, state,
+//      types, files, constants, and helpers use the `Expr`/`expr` term.
+//   2. Graph-domain types carry no prefix. Use full words (`GraphNode`,
+//      `GraphEdge`, `NodeRow`, `NodeConfig`, `OutputPort`) — never `G*` or `T*`.
+//   3. The two card families are siblings rendered inside `NodeCardShell`:
+//        - `RowsNodeCard` for row-based nodes (schema/env/kro-resource/kro-ref)
+//        - `ExprNodeCard`  for operator/expression nodes
+//      Don't introduce a third card without an explicit reason.
+//   4. Layout constants are spelled out and family-prefixed: `NODE_*` for the
+//      row card (the unmarked default), `EXPR_NODE_*` for the operator card.
+//      No cryptic abbreviations (`NW`/`HG`/`VG`/`DOT` were retired).
+//
+// See /Users/tim/.claude/plans/ for the rationale behind this standard if the
+// commit history doesn't make it obvious.
 
 export type NodeType = 'schema' | 'env' | 'kro-resource' | 'kro-ref' | 'draft';
 export type EdgeType = 'kro-dep' | 'kro-schema' | 'kro-env' | 'user';
@@ -12,7 +29,7 @@ export interface RowSegment {
   srcNodeId?: string;  // cel only: resolved graph node id ('__schema__', '__env__', or id)
 }
 
-export interface TRow {
+export interface NodeRow {
   depth: number;
   key: string;
   isParent: boolean;
@@ -51,12 +68,12 @@ export interface TokenHover {
   tgtNodeId: string;
 }
 
-export interface GNode {
+export interface GraphNode {
   id: string;
   type: NodeType;
   label: string;
   sublabel?: string;
-  rows: TRow[];
+  rows: NodeRow[];
   x: number; y: number; w: number; h: number;
   /** True when this node represents a kro forEach resource template. The
    *  read-only XR view renders it as a stack of cards and fans out instances
@@ -64,7 +81,7 @@ export interface GNode {
   isCollection?: boolean;
 }
 
-export interface GEdge {
+export interface GraphEdge {
   id: string;
   source: string; target: string;
   srcPortPath: string; tgtPortKey: string;
@@ -77,7 +94,7 @@ export interface ExtraEdge {
   tgtNodeId: string; tgtFieldPath: string;
 }
 
-export interface OpNode {
+export interface ExprNode {
   id: string;
   category: string;
   op: string;
@@ -121,13 +138,13 @@ export interface EditingRow {
 
 export type TypeCompat = 'ok' | 'coerce' | 'incompatible';
 
-export interface OutPort { path: string; short: string }
+export interface OutputPort { path: string; short: string }
 
 export interface CelRef { srcRef: string; srcPath: string; srcShort: string }
 
 export interface FieldSuggestion { path: string; type: string }
 
-export interface NodeCfg { icon: string; accent: string; accentDark: string; label: string }
+export interface NodeConfig { icon: string; accent: string; accentDark: string; label: string }
 
 export interface KindOption {
   kind: string;

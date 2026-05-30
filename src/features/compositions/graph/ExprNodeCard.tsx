@@ -2,11 +2,11 @@ import { Icon } from '@iconify/react';
 import { Box, Paper, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { memo, MouseEvent } from 'react';
-import { buildVarFieldRows, DOT, nodeIdToRef, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, RAW_TEMPLATE_NODE_H, refAccent, varFieldLeafRow } from './constants';
-import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
-import { GraphNodeDeleteButton, GraphNodeShell } from './GraphNodeShell';
+import { buildVarFieldRows, EXPR_NODE_HDR_H, EXPR_NODE_PORT_H, EXPR_NODE_W, exprNodeH, nodeIdToRef, PORT_DOT_SIZE, RAW_TEMPLATE_NODE_H, refAccent, varFieldLeafRow } from './constants';
+import { EXPR_NODE_DEFS } from './exprGraph/exprNodeDefs';
+import { NodeCardDeleteButton, NodeCardShell } from './NodeCardShell';
 import { PortDot } from './PortDot';
-import { NodeType, OpNode, TokenHover } from './types';
+import { ExprNode, NodeType, TokenHover } from './types';
 import { abbrevType } from './typeUtils';
 import { VarPill } from './VarPill';
 
@@ -27,8 +27,8 @@ export interface ConnectedPortInfo {
   srcNodeType: NodeType;
 }
 
-export interface ExprOpNodeCardProps {
-  node: OpNode;
+export interface ExprNodeCardProps {
+  node: ExprNode;
   dark: boolean;
   userC: string;
   isDrawing: boolean;
@@ -42,21 +42,21 @@ export interface ExprOpNodeCardProps {
   onInputPortClick?: (id: string, portName: string) => void;
   /** True when the op node's output port has at least one outgoing ExtraEdge. */
   hasOutputConnection?: boolean;
-  onOpChange: (id: string, op: string) => void;
+  onExprChange: (id: string, op: string) => void;
   onLiteralChange: (id: string, portName: string, value: string) => void;
   onResizeStart?: (e: MouseEvent, id: string) => void;
   onDelete: (id: string) => void;
-  onTogglePortOptional?: (opNodeId: string, portName: string) => void;
+  onTogglePortOptional?: (exprNodeId: string, portName: string) => void;
   onTokenHover: (th: TokenHover) => void;
   onTokenLeave: () => void;
   onAddVarField?: (id: string, fieldPath: string) => void;
   onRemoveVarField?: (id: string, fieldPath: string) => void;
   onVarFieldPortDown?: (e: MouseEvent, id: string, varFieldPath: string) => void;
   hasVarFieldConnection?: (varFieldPath: string) => boolean;
-  opNodesById?: Map<string, OpNode>;
+  exprNodesById?: Map<string, ExprNode>;
   selected?: boolean;
   /** True when selected OR the cursor is hovering over this node while drawing a wire.
-   *  Controls the variadic trailing empty port (a connection target), mirroring NodeCard's isExpanded. */
+   *  Controls the variadic trailing empty port (a connection target), mirroring RowsNodeCard's isExpanded. */
   isExpanded?: boolean;
   /** When true, the node is faded because it is not related to the selected node. */
   dimmed?: boolean;
@@ -67,13 +67,13 @@ export interface ExprOpNodeCardProps {
   readOnly?: boolean;
 }
 
-export const ExprOpNodeCard = memo(function ExprOpNodeCard({
+export const ExprNodeCard = memo(function ExprNodeCard({
   node, dark, userC, isDrawing, connectedPortInfo, dirty = false, hasOutputConnection = false,
-  onNodeDown, onOutputPortDown, onInputPortUp, onInputPortClick, onOpChange, onLiteralChange, onResizeStart, onDelete,
+  onNodeDown, onOutputPortDown, onInputPortUp, onInputPortClick, onExprChange, onLiteralChange, onResizeStart, onDelete,
   onTogglePortOptional, onTokenHover, onTokenLeave,
-  onAddVarField, onRemoveVarField, onVarFieldPortDown, hasVarFieldConnection, opNodesById,
+  onAddVarField, onRemoveVarField, onVarFieldPortDown, hasVarFieldConnection, exprNodesById,
   selected, isExpanded: isExpandedProp, dimmed, readOnly,
-}: ExprOpNodeCardProps) {
+}: ExprNodeCardProps) {
   const isExpanded = isExpandedProp ?? selected;
   const def = EXPR_NODE_DEFS[node.category];
   if (!def) return null;
@@ -93,13 +93,13 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
   const varPortIdx = isPredicate ? activePorts.findIndex(p => p.name === 'var') : -1;
   const varFields = isPredicate ? (node.varFields ?? []) : [];
   const varFieldTreeRows = isPredicate ? buildVarFieldRows(varFields).length : 0;
-  const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(activePorts.length) + (varFieldTreeRows + (isPredicate && selected ? 1 : 0)) * OP_NODE_PORT_H;
+  const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : exprNodeH(activePorts.length) + (varFieldTreeRows + (isPredicate && selected ? 1 : 0)) * EXPR_NODE_PORT_H;
 
   return (
-    <GraphNodeShell
+    <NodeCardShell
       id={node.id}
       dataAttr="opnode-id"
-      x={node.x} y={node.y} w={OP_NODE_W} h={cardH}
+      x={node.x} y={node.y} w={EXPR_NODE_W} h={cardH}
       isDrawing={isDrawing}
       dimmed={dimmed}
       readOnly={readOnly}
@@ -109,11 +109,11 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
     >
       {/* Input port dots — not rendered for raw-template nodes */}
       {!isRawTemplate && activePorts.map((port, i) => {
-        const offset = isPredicate && varPortIdx >= 0 && i > varPortIdx ? varFieldTreeRows * OP_NODE_PORT_H : 0;
+        const offset = isPredicate && varPortIdx >= 0 && i > varPortIdx ? varFieldTreeRows * EXPR_NODE_PORT_H : 0;
         return (
           <PortDot key={port.name}
             color={userC} right={false} dark={dark}
-            top={OP_NODE_HDR_H + i * OP_NODE_PORT_H + OP_NODE_PORT_H / 2 - DOT / 2 + offset}
+            top={EXPR_NODE_HDR_H + i * EXPR_NODE_PORT_H + EXPR_NODE_PORT_H / 2 - PORT_DOT_SIZE / 2 + offset}
             hasConnection={connectedPortInfo.has(port.name)} isDrawing={isDrawing}
             onMouseUp={e => onInputPortUp(e, node.id, port.name)}
             onClick={e => { e.stopPropagation(); if (!isDrawing && !readOnly) onInputPortClick?.(node.id, port.name); }}
@@ -125,7 +125,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
       {isPredicate && varFields.map((vf, vfi) => (
         <PortDot key={`vf-${vf}`}
           color={userC} right dark={dark}
-          top={OP_NODE_HDR_H + varFieldLeafRow(varFields, varPortIdx, vfi) * OP_NODE_PORT_H + OP_NODE_PORT_H / 2 - DOT / 2}
+          top={EXPR_NODE_HDR_H + varFieldLeafRow(varFields, varPortIdx, vfi) * EXPR_NODE_PORT_H + EXPR_NODE_PORT_H / 2 - PORT_DOT_SIZE / 2}
           hasConnection={hasVarFieldConnection?.(vf) ?? false}
           isDrawing={isDrawing}
           onMouseDown={e => { e.stopPropagation(); onVarFieldPortDown?.(e, node.id, vf); }}
@@ -133,7 +133,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
       ))}
 
       {/* Output port dot — in header */}
-      <PortDot color={userC} right top={OP_NODE_HDR_H / 2 - DOT / 2} dark={dark}
+      <PortDot color={userC} right top={EXPR_NODE_HDR_H / 2 - PORT_DOT_SIZE / 2} dark={dark}
         hasConnection={hasOutputConnection} isDrawing={isDrawing}
         onMouseDown={e => { e.stopPropagation(); onOutputPortDown(e, node.id); }}
       />
@@ -149,7 +149,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
       }}>
         {/* Header */}
         <Box sx={{
-          px: 0.75, height: OP_NODE_HDR_H, flexShrink: 0,
+          px: 0.75, height: EXPR_NODE_HDR_H, flexShrink: 0,
           background: dark ? alpha(userC, 0.22) : alpha(userC, 0.08),
           borderBottom: `1px solid ${alpha(userC, 0.2)}`,
           display: 'flex', alignItems: 'center', gap: 0.5,
@@ -166,7 +166,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                     <Box key={t} sx={{ fontSize: '0.65rem' }}>
                       {t === 'forEach'
                         ? 'forEach scope'
-                        : `Predicate scope: ${opNodesById?.get(t) ? (EXPR_NODE_DEFS[opNodesById.get(t)!.category]?.label ?? t) : t}`}
+                        : `Predicate scope: ${exprNodesById?.get(t) ? (EXPR_NODE_DEFS[exprNodesById.get(t)!.category]?.label ?? t) : t}`}
                     </Box>
                   ))}
                 </Box>
@@ -182,7 +182,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           {def.ops.length > 1 && (
             <select
               value={node.op ?? def.defaultOp}
-              onChange={e => { if (!readOnly) onOpChange(node.id, e.target.value); }}
+              onChange={e => { if (!readOnly) onExprChange(node.id, e.target.value); }}
               onMouseDown={e => e.stopPropagation()}
               disabled={readOnly}
               style={{
@@ -206,7 +206,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           }}>
             {abbrevType(def.outputType)}
           </Box>
-          <GraphNodeDeleteButton
+          <NodeCardDeleteButton
             accent={userC} selected={!!selected} readOnly={readOnly}
             onDelete={() => onDelete(node.id)}
             size={14} icon="mdi:close" iconSize={10}
@@ -239,7 +239,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
             const connected = info !== undefined;
             const portRow = (
               <Box key={`port-${port.name}`} sx={{
-                height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+                height: EXPR_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
                 borderTop: i > 0 ? `1px solid ${alpha(userC, 0.1)}` : 'none',
                 px: 1, gap: 0.5, overflow: 'hidden',
               }}>
@@ -295,7 +295,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                 const indent = 18 + row.depth * 10;
                 return (
                   <Box key={`vf-${row.path}`} sx={{
-                    height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+                    height: EXPR_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
                     borderTop: `1px solid ${alpha(userC, row.depth === 0 ? 0.07 : 0.04)}`,
                     pl: `${indent}px`, pr: 1, gap: 0.5, overflow: 'hidden',
                   }}>
@@ -320,7 +320,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                           <Icon icon="mdi:close" width={9} />
                         </Box>
                         {/* spacer matching the absolute PortDot outside Paper */}
-                        <Box sx={{ width: DOT, flexShrink: 0 }} />
+                        <Box sx={{ width: PORT_DOT_SIZE, flexShrink: 0 }} />
                       </>
                     )}
                   </Box>
@@ -333,7 +333,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           })}
           {isPredicate && selected && !readOnly && (
             <Box sx={{
-              height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+              height: EXPR_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
               borderTop: `1px solid ${alpha(userC, 0.07)}`,
               pl: '18px', pr: 1, gap: 0.5, overflow: 'hidden',
             }}>
@@ -372,6 +372,6 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           onMouseDown={e => { e.stopPropagation(); onResizeStart?.(e, node.id); }}
         />
       )}
-    </GraphNodeShell>
+    </NodeCardShell>
   );
 });

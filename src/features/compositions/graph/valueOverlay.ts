@@ -1,7 +1,7 @@
 import { nodeH } from './constants';
 import { decodePathKey, encodePathKey } from './pathUtils';
 import { insertRowAtPath } from './rowUtils';
-import { GNode } from './types';
+import { GraphNode } from './types';
 
 /**
  * Recursively flatten a JSON object to a Map of dot-separated paths -> string values.
@@ -124,9 +124,9 @@ function comparePaths(a: string, b: string): number {
  *   are aggregated into a single label.
  */
 export function overlayActualValues(
-  nodes: GNode[],
+  nodes: GraphNode[],
   composedValues: Map<string, any[]>
-): GNode[] {
+): GraphNode[] {
   if (composedValues.size === 0) return nodes;
 
   return nodes.map(n => {
