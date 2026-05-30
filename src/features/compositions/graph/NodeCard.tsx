@@ -3,6 +3,7 @@ import { Autocomplete, Box, Button, IconButton, Paper, TextField, Tooltip, Typog
 import { alpha } from '@mui/material/styles';
 import { CSSProperties, Fragment, memo, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DOT, HEADER_H, NODE_CFG, NODE_MIN_H, refAccent, refToNodeId, ROW_H, USER_C_DARK, USER_C_LIGHT } from './constants';
+import { GraphNodeDeleteButton, GraphNodeShell } from './GraphNodeShell';
 import { PortDot } from './PortDot';
 import { sectionOf, sectionRelPath } from './sectionDefs';
 import { SegmentedControl } from './SegmentedControl';
@@ -363,16 +364,26 @@ export const NodeCard = memo(function NodeCard({
       : null;
 
   return (
-    <div
-      role="button" tabIndex={0}
-      data-node-id={node.id}
-      style={{ position: 'absolute', left: node.x, top: node.y, width: node.w, height: displayH,
-        cursor: isInstanceCard ? 'default' : (isDrawing ? 'crosshair' : 'grab'),
+    <GraphNodeShell
+      id={node.id}
+      dataAttr="node-id"
+      x={node.x} y={node.y} w={node.w} h={displayH}
+      noHandlers={isInstanceCard}
+      isDrawing={isDrawing}
+      dimmed={dimmed}
+      cursor={isInstanceCard ? 'default' : undefined}
+      onNodeDown={onMouseDown}
+      onClick={onClick}
+      onActivate={onClick}
+      onHoverChange={setHovered}
+      extraStyle={{
         // Instance cards always sit behind base nodes — collapsed they peek
         // from the stack, fanned they slide out beside the base (no overlap).
         // Keeping them at z=1 throughout means the fan-out animation reads as
         // emerging from behind the base instead of jumping in front of it.
         zIndex: isInstanceCard ? 1 : 2,
+        // The shell's base opacity respects `dimmed`; we override here so the
+        // empty-collection 40%-faded state composes with `dimmed`.
         opacity: dimmed ? 0.25 : (isEmptyCollection ? 0.4 : 1),
         transform: (animTranslateX || animTranslateY)
           ? `translate(${animTranslateX}px, ${animTranslateY}px)` : undefined,
@@ -386,12 +397,8 @@ export const NodeCard = memo(function NodeCard({
           : 'opacity 0.15s',
         // mask-composite-based stacking — see maskStyles above for the L-shape
         // mask logic. Layer 2 size 0 0 means no mask effect, full card visible.
-        ...maskStyles }}
-      onMouseDown={isInstanceCard ? undefined : e => { e.stopPropagation(); onMouseDown(e, node.id); }}
-      onClick={isInstanceCard ? undefined : e => { e.stopPropagation(); onClick(node.id); }}
-      onKeyDown={isInstanceCard ? undefined : e => { if (e.key === 'Enter' || e.key === ' ') onClick(node.id); }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+        ...maskStyles,
+      }}
     >
       {showStack && Array.from({ length: stackShadowCount }, (_, idx) => {
         // Furthest shadow drawn first; nearest shadow nearest the Paper. Each
@@ -496,14 +503,11 @@ export const NodeCard = memo(function NodeCard({
               </span>
             </Tooltip>
           )}
-          {!readOnly && selected && (node.type === 'kro-resource' || node.type === 'kro-ref') && onDelete && (
-            <IconBtn icon="mdi:trash-can-outline" onClick={() => onDelete(node.id)}
-              sx={{
-                justifyContent: 'center',
-                width: 16, height: 16, borderRadius: 0.5, flexShrink: 0,
-                color: alpha(accent, 0.6), cursor: 'pointer',
-                '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
-              }} />
+          {(node.type === 'kro-resource' || node.type === 'kro-ref') && onDelete && (
+            <GraphNodeDeleteButton
+              accent={accent} selected={selected} readOnly={readOnly}
+              onDelete={() => onDelete(node.id)}
+            />
           )}
           {showAddButton && (
             <IconBtn icon="mdi:plus"
@@ -1058,7 +1062,7 @@ export const NodeCard = memo(function NodeCard({
           })}
         </Paper>
       )}
-    </div>
+    </GraphNodeShell>
   );
 });
 

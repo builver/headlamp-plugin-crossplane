@@ -4,6 +4,7 @@ import { alpha } from '@mui/material/styles';
 import { memo, MouseEvent } from 'react';
 import { buildVarFieldRows, DOT, nodeIdToRef, OP_NODE_HDR_H, OP_NODE_PORT_H, OP_NODE_W, opNodeH, RAW_TEMPLATE_NODE_H, refAccent, varFieldLeafRow } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
+import { GraphNodeDeleteButton, GraphNodeShell } from './GraphNodeShell';
 import { PortDot } from './PortDot';
 import { NodeType, OpNode, TokenHover } from './types';
 import { abbrevType } from './typeUtils';
@@ -59,6 +60,11 @@ export interface ExprOpNodeCardProps {
   isExpanded?: boolean;
   /** When true, the node is faded because it is not related to the selected node. */
   dimmed?: boolean;
+  /** Read-only view (e.g. XR detail graph overlay). Hides every mutating
+   *  affordance (drag, delete, op switch, literal/varField editing, resize)
+   *  and disables keyboard delete. Any new mutating prop added here MUST also
+   *  be gated below the `readOnly` checks in this component. */
+  readOnly?: boolean;
 }
 
 export const ExprOpNodeCard = memo(function ExprOpNodeCard({
@@ -66,7 +72,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
   onNodeDown, onOutputPortDown, onInputPortUp, onInputPortClick, onOpChange, onLiteralChange, onResizeStart, onDelete,
   onTogglePortOptional, onTokenHover, onTokenLeave,
   onAddVarField, onRemoveVarField, onVarFieldPortDown, hasVarFieldConnection, opNodesById,
-  selected, isExpanded: isExpandedProp, dimmed,
+  selected, isExpanded: isExpandedProp, dimmed, readOnly,
 }: ExprOpNodeCardProps) {
   const isExpanded = isExpandedProp ?? selected;
   const def = EXPR_NODE_DEFS[node.category];
@@ -90,18 +96,16 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
   const cardH = isRawTemplate ? (node.h ?? RAW_TEMPLATE_NODE_H) : opNodeH(activePorts.length) + (varFieldTreeRows + (isPredicate && selected ? 1 : 0)) * OP_NODE_PORT_H;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      data-opnode-id={node.id}
-      style={{
-        position: 'absolute', left: node.x, top: node.y,
-        width: OP_NODE_W, height: cardH,
-        cursor: isDrawing ? 'crosshair' : 'grab', zIndex: 2,
-        opacity: dimmed ? 0.25 : 1, transition: 'opacity 0.15s',
-      }}
-      onMouseDown={e => { e.stopPropagation(); onNodeDown(e, node.id); }}
-      onKeyDown={e => { if (e.key === 'Delete') onDelete(node.id); }}
+    <GraphNodeShell
+      id={node.id}
+      dataAttr="opnode-id"
+      x={node.x} y={node.y} w={OP_NODE_W} h={cardH}
+      isDrawing={isDrawing}
+      dimmed={dimmed}
+      readOnly={readOnly}
+      onNodeDown={onNodeDown}
+      onDeleteKey={onDelete}
+      extraStyle={{ zIndex: 2 }}
     >
       {/* Input port dots — not rendered for raw-template nodes */}
       {!isRawTemplate && activePorts.map((port, i) => {
@@ -112,7 +116,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
             top={OP_NODE_HDR_H + i * OP_NODE_PORT_H + OP_NODE_PORT_H / 2 - DOT / 2 + offset}
             hasConnection={connectedPortInfo.has(port.name)} isDrawing={isDrawing}
             onMouseUp={e => onInputPortUp(e, node.id, port.name)}
-            onClick={e => { e.stopPropagation(); if (!isDrawing) onInputPortClick?.(node.id, port.name); }}
+            onClick={e => { e.stopPropagation(); if (!isDrawing && !readOnly) onInputPortClick?.(node.id, port.name); }}
           />
         );
       })}
@@ -178,14 +182,15 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           {def.ops.length > 1 && (
             <select
               value={node.op ?? def.defaultOp}
-              onChange={e => onOpChange(node.id, e.target.value)}
+              onChange={e => { if (!readOnly) onOpChange(node.id, e.target.value); }}
               onMouseDown={e => e.stopPropagation()}
+              disabled={readOnly}
               style={{
                 fontFamily: 'monospace', fontSize: '0.55rem',
                 color: userC, background: 'transparent',
                 border: `1px solid ${alpha(userC, 0.35)}`,
                 borderRadius: 3, padding: '1px 2px',
-                cursor: 'pointer', flexShrink: 0,
+                cursor: readOnly ? 'default' : 'pointer', flexShrink: 0,
                 outline: 'none',
               }}
             >
@@ -201,19 +206,11 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           }}>
             {abbrevType(def.outputType)}
           </Box>
-          {selected && (
-            <Box component="span" role="button" tabIndex={-1}
-              onMouseDown={e => e.stopPropagation()}
-              onClick={e => { e.stopPropagation(); onDelete(node.id); }}
-              sx={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 14, height: 14, borderRadius: 0.4, flexShrink: 0,
-                color: alpha(userC, 0.5), cursor: 'pointer',
-                '&:hover': { color: '#ef4444', bgcolor: alpha('#ef4444', 0.12) },
-              }}>
-              <Icon icon="mdi:close" width={10} />
-            </Box>
-          )}
+          <GraphNodeDeleteButton
+            accent={userC} selected={!!selected} readOnly={readOnly}
+            onDelete={() => onDelete(node.id)}
+            size={14} icon="mdi:close" iconSize={10}
+          />
         </Box>
 
         {/* Raw-template textarea body */}
@@ -222,6 +219,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
             value={node.literals['value'] ?? ''}
             onChange={e => onLiteralChange(node.id, 'value', e.target.value)}
             onMouseDown={e => e.stopPropagation()}
+            readOnly={readOnly}
             style={{
               flex: 1, width: '100%', resize: 'none',
               padding: '4px 6px', boxSizing: 'border-box',
@@ -265,6 +263,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                     value={node.literals[port.name] ?? ''}
                     onChange={e => onLiteralChange(node.id, port.name, e.target.value)}
                     onMouseDown={e => e.stopPropagation()}
+                    readOnly={readOnly}
                     style={{
                       flex: 1, minWidth: 0, border: 'none', outline: 'none',
                       background: 'transparent', fontFamily: 'monospace',
@@ -307,7 +306,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                     }}>
                       {row.key}:
                     </Typography>
-                    {row.isExportable && selected && (
+                    {row.isExportable && selected && !readOnly && (
                       <>
                         <Box component="span" role="button" tabIndex={-1}
                           onMouseDown={e => e.stopPropagation()}
@@ -332,7 +331,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
 
             return [portRow];
           })}
-          {isPredicate && selected && (
+          {isPredicate && selected && !readOnly && (
             <Box sx={{
               height: OP_NODE_PORT_H, flexShrink: 0, display: 'flex', alignItems: 'center',
               borderTop: `1px solid ${alpha(userC, 0.07)}`,
@@ -362,7 +361,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
       </Paper>
 
       {/* Resize handle — raw-template only, sits on top of the Paper border */}
-      {isRawTemplate && (
+      {isRawTemplate && !readOnly && (
         <div
           role="button"
           tabIndex={-1}
@@ -373,6 +372,6 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
           onMouseDown={e => { e.stopPropagation(); onResizeStart?.(e, node.id); }}
         />
       )}
-    </div>
+    </GraphNodeShell>
   );
 });

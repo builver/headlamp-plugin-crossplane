@@ -2034,6 +2034,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             hasVarFieldConnection={(vf) => extraEdges.some(e => e.srcNodeId === opNode.id && e.srcFieldPath === `${VAR_FIELD_PREFIX}${vf}`)}
             opNodesById={opNodesById}
             dimmed={relatedNodeIds !== null && !relatedNodeIds.has(opNode.id)}
+            readOnly={readOnly}
           />
         ))}
       </div>
