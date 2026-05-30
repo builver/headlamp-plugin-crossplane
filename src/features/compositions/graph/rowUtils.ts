@@ -2,7 +2,7 @@ import { AstCall, CelNode, celNodeToCelInner, parseCelAst } from './celAst';
 import { collectCelMatches, extractGroup, parseSegments, parseSingleRefMatch } from './celUtils';
 import { refToNodeId, VAR_FIELD_PREFIX } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/ExprNodeDefs';
-import { deleteDeepPath, getDeepPath, setDeepPath } from './pathUtils';
+import { decodePathKey, deleteDeepPath, encodePathKey, getDeepPath, setDeepPath } from './pathUtils';
 import { qualifiedPath, SECTION_DEFS, sectionOf, sectionRelPath } from './sectionDefs';
 import { ExtraEdge, FieldEdit, FieldSuggestion, OpNode, OutPort, RowSegment, TRow } from './types';
 
@@ -65,7 +65,8 @@ export function buildTemplateRows(
   const rows: TRow[] = [];
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return rows;
   for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-    const path = pathSoFar ? `${pathSoFar}.${key}` : key;
+    const segKey = encodePathKey(key);
+    const path = pathSoFar ? `${pathSoFar}.${segKey}` : segKey;
     if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
       const children = buildTemplateRows(val, knownIds, outPortPaths, visitedOutPorts, depth + 1, path);
       if (children.length > 0) { rows.push(makeParentRow(depth, key, path)); rows.push(...children); }
@@ -125,7 +126,7 @@ export function insertRowAtPath(
   leafExtra: Partial<TRow>, ghostParent = false,
 ): TRow[] {
   const parts     = fieldPath.split('.');
-  const leafKey   = parts[parts.length - 1];
+  const leafKey   = decodePathKey(parts[parts.length - 1]);
   const leafDepth = parts.length - 1;
 
   if (rows.some(r => r.fieldPath === fieldPath)) return rows;
@@ -148,7 +149,7 @@ export function insertRowAtPath(
 
   const toInsert: TRow[] = [];
   for (let d = 0; d < parts.length - 1; d++) {
-    const pKey       = parts[d];
+    const pKey       = decodePathKey(parts[d]);
     const parentPath = parts.slice(0, d + 1).join('.');
     if (!rows.some(r => r.fieldPath === parentPath)) {
       toInsert.push(makeParentRow(d, pKey, parentPath, ghostParent ? { isGhost: true } : undefined));
@@ -327,7 +328,7 @@ export function removeRowAtPath(rows: TRow[], fieldPath: string): TRow[] {
     if (!r.fieldPath) return r;
     const newFp = reindexPathAfterDelete(fieldPath, r.fieldPath);
     if (newFp === r.fieldPath) return r;
-    const newKey = newFp.split('.').pop()!;
+    const newKey = decodePathKey(newFp.split('.').pop()!);
     return { ...r, fieldPath: newFp, key: newKey };
   });
   let changed = true;

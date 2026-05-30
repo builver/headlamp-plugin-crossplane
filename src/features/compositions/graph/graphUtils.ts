@@ -229,7 +229,8 @@ function makeNode(
   }
   // Strip leading '?' from row keys produced by optional-chaining paths (e.g. '?name' → 'name').
   rows = rows.map(r => r.key.startsWith('?') ? { ...r, key: r.key.slice(1) } : r);
-  return { id, type, label, sublabel, rows, x: 0, y: 0, w: NW, h: nodeH(rows) };
+  const isCollection = !!(res?.forEach?.length);
+  return { id, type, label, sublabel, rows, x: 0, y: 0, w: NW, h: nodeH(rows), isCollection };
 }
 
 export function buildGraph(input: any, requirements?: any): { nodes: GNode[]; edges: GEdge[]; opNodes: OpNode[]; extraEdges: ExtraEdge[] } {
@@ -507,9 +508,11 @@ export function rowPortY(node: GNode, rowIdx: number, topOffset = 0): number {
   return node.y + HEADER_H + topOffset + rowIdx * ROW_H + ROW_H / 2;
 }
 
-/** Returns ROW_H if this kro-resource node will show the section-add bar at the top when expanded. */
-export function sectionAddBarOffset(node: GNode): number {
-  if (node.type !== 'kro-resource') return 0;
+/** Returns ROW_H if this kro-resource node will show the section-add bar at the top when expanded.
+ *  In read-only mode the bar is never rendered, so the offset is 0 — passing
+ *  `readOnly: true` keeps edge Y-coordinates aligned with the rendered card. */
+export function sectionAddBarOffset(node: GNode, readOnly = false): number {
+  if (readOnly || node.type !== 'kro-resource') return 0;
   const sections = ['forEach', 'includeWhen', 'readyWhen'] as const;
   return sections.some(s => !node.rows.some(r => r.isSection && r.key === s)) ? ROW_H : 0;
 }

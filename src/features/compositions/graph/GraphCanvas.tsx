@@ -33,6 +33,16 @@ function setEdgePaths(g: SVGGElement, d: string): void {
   g.querySelectorAll<SVGPathElement>(':scope > path').forEach(p => p.setAttribute('d', d));
 }
 
+// Stable no-op references for read-only instance cards (display only).
+const NOOP_MOUSE: (e: any, id: string) => void = () => {};
+const NOOP_STR: (id: string) => void = () => {};
+const NOOP_PORT: (e: any, id: string, fp: string) => void = () => {};
+const NOOP_FP: (id: string, fp: string) => void = () => {};
+const NOOP_HOVER: (h: any) => void = () => {};
+const NOOP_VOID: () => void = () => {};
+const EMPTY_FIELDS: any[] = [];
+const EMPTY_SET: Set<string> = new Set();
+
 // ── GraphCanvas ───────────────────────────────────────────────────────────────
 
 export interface GraphCanvasProps {
@@ -452,13 +462,68 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       });
     }
     if (composedValues && composedValues.size > 0) {
-      result = overlayActualValues(result, composedValues);
+      // For forEach collection nodes, the base card shows index 0 only — the
+      // remaining instances appear as fanned-out cards when the node is
+      // selected. Trim other entries through unchanged.
+      const baseValues = new Map<string, any[]>();
+      const nodesById = new Map(nodes.map(n => [n.id, n]));
+      for (const [id, instances] of composedValues) {
+        const n = nodesById.get(id);
+        baseValues.set(id, n?.isCollection && instances.length > 1 ? [instances[0]] : instances);
+      }
+      result = overlayActualValues(result, baseValues);
     }
     return result;
   }, [nodes, fieldEdits, knownIds, schemaApiVersion, schemaKind, composedValues]);
 
   /** Node map keyed on display rows (includes injected info rows) — used for SVG edge Y calculations. */
   const displayNodeMap = useMemo(() => new Map(nodesForDisplay.map(n => [n.id, n])), [nodesForDisplay]);
+
+  /** Fanned-out instance cards for every forEach collection node. Cards are
+   *  kept mounted regardless of selection so the collapse animation can play in
+   *  both directions; visibility/position are driven by props in the render
+   *  loop. Each card carries the per-instance overlay; edges always attach to
+   *  the base (index 0). */
+  const FAN_GAP = 24;
+  const instanceCards = useMemo<Array<{
+    card: GNode; baseId: string; index: number; total: number;
+    fanFromDx: number; fanFromDy: number;
+  }>>(() => {
+    if (!composedValues || composedValues.size === 0) return [];
+    const result: Array<{
+      card: GNode; baseId: string; index: number; total: number;
+      fanFromDx: number; fanFromDy: number;
+    }> = [];
+    for (const baseTemplate of nodes) {
+      if (!baseTemplate.isCollection) continue;
+      const baseDisplay = displayNodeMap.get(baseTemplate.id);
+      if (!baseDisplay) continue;
+      const instances = composedValues.get(baseTemplate.id);
+      if (!instances || instances.length <= 1) continue;
+      instances.slice(1).forEach((inst, i) => {
+        const idx = i + 1;
+        const single = new Map<string, any[]>([[baseTemplate.id, [inst]]]);
+        const [overlaid] = overlayActualValues([baseTemplate], single);
+        // Collapsed position is the stack-shadow offset (capped at 4 levels =
+        // 16 px) so the card visually rests inside the stack when un-fanned.
+        const stackOffset = Math.min(idx, 4) * 4;
+        result.push({
+          card: {
+            ...overlaid,
+            id: `${baseTemplate.id}::instance-${idx}`,
+            x: baseDisplay.x + idx * (baseTemplate.w + FAN_GAP),
+            y: baseDisplay.y,
+          },
+          baseId: baseTemplate.id,
+          index: idx,
+          total: instances.length,
+          fanFromDx: stackOffset - idx * (baseTemplate.w + FAN_GAP),
+          fanFromDy: stackOffset,
+        });
+      });
+    }
+    return result;
+  }, [composedValues, nodes, displayNodeMap]);
 
   // Always-current refs so stable drag callbacks can read latest React state without deps.
   const displayNodeMapRef = useRef(displayNodeMap);
@@ -692,6 +757,11 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const dragOrigin      = useRef({ mx: 0, my: 0, nx: 0, ny: 0 });
   const dragCurrentPos  = useRef({ x: 0, y: 0 });
   const draggedElRef    = useRef<HTMLDivElement | null>(null);
+  // Sibling instance cards (forEach fan-out) of a dragged collection base.
+  // They're positioned from React state, so without this they'd stay parked at
+  // the pre-drag position until mouseup. Translated via CSS `translate` so the
+  // fan-in/out `transform` animation composes additively.
+  const draggedInstanceElsRef = useRef<HTMLDivElement[]>([]);
   const hasDragged      = useRef(false); // true if the current node drag moved the pointer
   const opDragCurrentPos = useRef({ x: 0, y: 0 });
   const opDraggedElRef  = useRef<HTMLDivElement | null>(null);
@@ -971,6 +1041,13 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     }
     dragOrigin.current = { mx: e.clientX, my: e.clientY, nx, ny };
     draggedElRef.current = canvasDivRef.current?.querySelector<HTMLDivElement>(`[data-node-id="${id}"]`) ?? null;
+    // If dragging a collection base, also capture its fanned/stacked instance cards
+    // so we can shift them in lockstep — they live in React state and would otherwise
+    // lag the base until mouseup.
+    const instanceEls = canvasDivRef.current
+      ? Array.from(canvasDivRef.current.querySelectorAll<HTMLDivElement>(`[data-node-id^="${id}::instance-"]`))
+      : [];
+    draggedInstanceElsRef.current = instanceEls;
     setActive(true);
   }, [nodes, drawing]);
 
@@ -1017,8 +1094,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const tgt = e.target === nodeId ? moved : displayNodeMapRef.current.get(e.target);
       if (!src || !tgt) continue;
       const sel = selectedRef.current;
-      const srcOff = src.id === sel ? sectionAddBarOffset(src) : 0;
-      const tgtOff = tgt.id === sel ? sectionAddBarOffset(tgt) : 0;
+      const srcOff = src.id === sel ? sectionAddBarOffset(src, readOnly) : 0;
+      const tgtOff = tgt.id === sel ? sectionAddBarOffset(tgt, readOnly) : 0;
       const sy = srcPortY(src, e.srcPortPath, srcOff);
       const ty = tgtPortY(tgt, e.tgtPortKey, tgtOff);
       const isSelfLoop = e.source === e.target;
@@ -1041,7 +1118,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         const srcNode = e.srcNodeId === nodeId ? moved : displayNodeMapRef.current.get(e.srcNodeId);
         if (!srcNode) continue;
         sx2 = srcNode.x + srcNode.w;
-        sy2 = extraPortY(srcNode, e.srcFieldPath, srcNode.id === selectedRef.current ? sectionAddBarOffset(srcNode) : 0);
+        sy2 = extraPortY(srcNode, e.srcFieldPath, srcNode.id === selectedRef.current ? sectionAddBarOffset(srcNode, readOnly) : 0);
       }
 
       let tx2: number;
@@ -1052,7 +1129,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         const tgtNode = e.tgtNodeId === nodeId ? moved : displayNodeMapRef.current.get(e.tgtNodeId);
         if (!tgtNode) continue;
         tx2 = tgtNode.x;
-        ty2 = extraPortY(tgtNode, e.tgtFieldPath, tgtNode.id === selectedRef.current ? sectionAddBarOffset(tgtNode) : 0);
+        ty2 = extraPortY(tgtNode, e.tgtFieldPath, tgtNode.id === selectedRef.current ? sectionAddBarOffset(tgtNode, readOnly) : 0);
       }
 
       const d = makeBezier(sx2, sy2, tx2, ty2);
@@ -1083,7 +1160,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           const srcNode = displayNodeMapRef.current.get(e.srcNodeId);
           if (!srcNode) continue;
           sx2 = srcNode.x + srcNode.w;
-          sy2 = extraPortY(srcNode, e.srcFieldPath, srcNode.id === selectedRef.current ? sectionAddBarOffset(srcNode) : 0);
+          sy2 = extraPortY(srcNode, e.srcFieldPath, srcNode.id === selectedRef.current ? sectionAddBarOffset(srcNode, readOnly) : 0);
         }
       }
 
@@ -1099,7 +1176,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           const tgtNode = displayNodeMapRef.current.get(e.tgtNodeId);
           if (!tgtNode) continue;
           tx2 = tgtNode.x;
-          ty2 = extraPortY(tgtNode, e.tgtFieldPath, tgtNode.id === selectedRef.current ? sectionAddBarOffset(tgtNode) : 0);
+          ty2 = extraPortY(tgtNode, e.tgtFieldPath, tgtNode.id === selectedRef.current ? sectionAddBarOffset(tgtNode, readOnly) : 0);
         }
       }
 
@@ -1115,6 +1192,11 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const dy = (e.clientY - dragOrigin.current.my) / zoomRef.current;
       dragCurrentPos.current = { x: dragOrigin.current.nx + dx, y: dragOrigin.current.ny + dy };
       if (draggedElRef.current) draggedElRef.current.style.transform = `translate(${dx}px,${dy}px)`;
+      // Move any fanned instance cards alongside the base. We use the CSS
+      // `translate` property (not `transform`) so it composes with NodeCard's
+      // own fan-in/out transform animation.
+      const tr = `${dx}px ${dy}px`;
+      for (const el of draggedInstanceElsRef.current) el.style.translate = tr;
       updateDraggedNodeEdges(dragId.current, dragCurrentPos.current);
     }
     if (opDragId.current) {
@@ -1198,6 +1280,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     if (upDragId && hasDragged.current) {
       if (draggedElRef.current) draggedElRef.current.style.transform = '';
       draggedElRef.current = null;
+      for (const el of draggedInstanceElsRef.current) el.style.translate = '';
+      draggedInstanceElsRef.current = [];
       const fp = dragCurrentPos.current;
       setNodes(prev => prev.map(n => n.id === upDragId ? { ...n, x: fp.x, y: fp.y } : n));
     }
@@ -1745,8 +1829,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               fieldEdits.some(fe => fe.nodeId === e.target && fe.fieldPath === edgeTargetFp && fe.template === '');
             const srcExpanded = !drawing && (src.id === selected || src.id === drawingHoverNodeId);
             const tgtExpanded = !drawing && (tgt.id === selected || tgt.id === drawingHoverNodeId);
-            const srcOff = srcExpanded ? sectionAddBarOffset(src) : 0;
-            const tgtOff = tgtExpanded ? sectionAddBarOffset(tgt) : 0;
+            const srcOff = srcExpanded ? sectionAddBarOffset(src, readOnly) : 0;
+            const tgtOff = tgtExpanded ? sectionAddBarOffset(tgt, readOnly) : 0;
             const sy = srcPortY(src, e.srcPortPath, srcOff);
             const ty = tgtPortY(tgt, e.tgtPortKey, tgtOff);
             const isSelfLoop = e.source === e.target;
@@ -1806,7 +1890,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             } else {
               sx2 = src!.x + src!.w;
               const srcExp = !drawing && (src!.id === selected || src!.id === drawingHoverNodeId);
-              sy2 = extraPortY(src!, e.srcFieldPath, srcExp ? sectionAddBarOffset(src!) : 0);
+              sy2 = extraPortY(src!, e.srcFieldPath, srcExp ? sectionAddBarOffset(src!, readOnly) : 0);
             }
             let tx2: number;
             let ty2: number;
@@ -1815,7 +1899,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             } else {
               tx2 = tgt!.x;
               const tgtExp = !drawing && (tgt!.id === selected || tgt!.id === drawingHoverNodeId);
-              ty2 = extraPortY(tgt!, e.tgtFieldPath, tgtExp ? sectionAddBarOffset(tgt!) : 0);
+              ty2 = extraPortY(tgt!, e.tgtFieldPath, tgtExp ? sectionAddBarOffset(tgt!, readOnly) : 0);
             }
             const col2 = srcOp ? userC : nodeColor(e.srcNodeId);
             const markerKey = srcOp ? 'user' : (src?.type ?? 'kro-resource');
@@ -1882,6 +1966,41 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onValueEdit={onValueEdit}
             dimmed={relatedNodeIds !== null && !relatedNodeIds.has(n.id)}
             readOnly={readOnly}
+            collectionInstanceCount={
+              n.isCollection && composedValues && composedValues.size > 0
+                ? (composedValues.get(n.id)?.length ?? 0)
+                : undefined
+            }
+          />
+        ))}
+
+        {/* Instance cards for every forEach collection node. Always mounted so
+            both fan-out and collapse animations play; collectionFannedOut
+            toggles between the stack-origin (collapsed, hidden) and the fanned
+            position (visible). Edges always attach to the base (index 0).
+            Render order is reversed so the *closest-to-base* instance paints
+            last (on top) — that gives the proper layered-sliver stack look when
+            collapsed; order is irrelevant when fanned (no overlap). */}
+        {[...instanceCards].reverse().map(({ card, baseId, index, total, fanFromDx, fanFromDy }) => (
+          <NodeCard key={card.id} node={card}
+            selected={false} dark={dark} isDrawing={!!drawing}
+            onMouseDown={NOOP_MOUSE} onClick={NOOP_STR} onPortDown={NOOP_PORT}
+            potentialFields={EMPTY_FIELDS} isExpanded={false}
+            onPotentialFieldClick={NOOP_FP} onTokenHover={NOOP_HOVER} onTokenLeave={NOOP_VOID}
+            editedPaths={EMPTY_SET}
+            readOnly={readOnly}
+            nodeTypeByRef={nodeTypeByRef}
+            opConnectedFields={opConnectedFieldsByNode.get(baseId)}
+            unknownFieldPaths={allUnknownPathsMap.get(baseId)}
+            mapParentPaths={allMapPathsMap.get(baseId)}
+            arrayParentPaths={allArrayPathsMap.get(baseId)}
+            preserveUnknownParentPaths={allPreserveUnknownPathsMap.get(baseId)}
+            noSchemaWarning={noSchemaNodeIds.has(baseId)}
+            collectionInstanceIndex={index}
+            collectionInstanceCount={total}
+            collectionFanFromDx={fanFromDx}
+            collectionFanFromDy={fanFromDy}
+            collectionFannedOut={selected === baseId}
           />
         ))}
 

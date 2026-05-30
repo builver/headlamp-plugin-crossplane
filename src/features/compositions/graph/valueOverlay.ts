@@ -1,4 +1,5 @@
 import { nodeH } from './constants';
+import { decodePathKey, encodePathKey } from './pathUtils';
 import { insertRowAtPath } from './rowUtils';
 import { GNode } from './types';
 
@@ -11,7 +12,8 @@ export function flattenResource(obj: any, prefix = ''): Map<string, string> {
   if (obj === null || obj === undefined || typeof obj !== 'object') return result;
 
   for (const [key, val] of Object.entries(obj)) {
-    const path = prefix ? `${prefix}.${key}` : key;
+    const segKey = encodePathKey(key);
+    const path = prefix ? `${prefix}.${segKey}` : segKey;
     if (val === null || val === undefined) {
       // Treat null / undefined leaves as absent — emitting them as the literal
       // string "null" is indistinguishable from a real string value and would
@@ -77,7 +79,7 @@ function summarizeChildren(prefix: string, paths: Iterable<string>): string {
   for (const p of paths) {
     if (p.startsWith(prefix)) {
       const k = p.slice(prefix.length).split('.')[0];
-      if (k) keys.add(k);
+      if (k) keys.add(decodePathKey(k));
     }
   }
   const arr = [...keys];

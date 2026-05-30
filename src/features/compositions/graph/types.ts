@@ -58,6 +58,10 @@ export interface GNode {
   sublabel?: string;
   rows: TRow[];
   x: number; y: number; w: number; h: number;
+  /** True when this node represents a kro forEach resource template. The
+   *  read-only XR view renders it as a stack of cards and fans out instances
+   *  on selection. */
+  isCollection?: boolean;
 }
 
 export interface GEdge {

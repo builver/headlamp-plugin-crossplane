@@ -78,9 +78,15 @@ function RefFetcher({ ResourceClass, name, namespace, fetchKey, onChange }: {
   // generic typing limitation.
   const [obj, err] = (ResourceClass as any).useGet(name, namespace) as [KubeObject | null, any];
   const json = obj?.jsonData ?? null;
+  // headlamp's useGet typically yields a new KubeObject instance every poll
+  // even when the payload is unchanged, so gate onChange on resourceVersion to
+  // avoid churning the parent's setFetched Map on every tick.
+  const resourceVersion = (json as any)?.metadata?.resourceVersion ?? null;
   useEffect(() => {
     onChange(fetchKey, json);
-  }, [json, fetchKey, onChange]);
+    // json identity is intentionally excluded — resourceVersion is the change signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resourceVersion, fetchKey, onChange]);
   useEffect(() => {
     if (err) {
       // eslint-disable-next-line no-console
@@ -205,8 +211,24 @@ export function XRKroGraph({ item, xrd, scope }: XRKroGraphProps) {
       if (ids.includes(name)) {
         add(name, cr); // single resource: annotation === id
       } else {
-        const owner = ids.find(id => name.startsWith(`${id}-`));
+        // Pick the longest matching id so e.g. `config-set-prod` is attributed
+        // to `config-set` and not to `config`.
+        const owner = ids
+          .filter(id => name.startsWith(`${id}-`))
+          .reduce<string | undefined>((best, id) => (!best || id.length > best.length ? id : best), undefined);
         if (owner) add(owner, cr); // forEach collection instance
+      }
+    }
+    // Sort each collection's instances by metadata.name so the 'base' instance
+    // and per-instance fan-out order are deterministic across refetches (the
+    // initial insertion order reflects kube-API response timing).
+    for (const list of map.values()) {
+      if (list.length > 1) {
+        list.sort((a, b) => {
+          const an = a?.metadata?.name ?? '';
+          const bn = b?.metadata?.name ?? '';
+          return an < bn ? -1 : an > bn ? 1 : 0;
+        });
       }
     }
     return map;

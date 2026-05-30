@@ -161,6 +161,24 @@ export interface NodeCardProps {
   dimmed?: boolean;
   /** When true, all editing controls are hidden (read-only view for XR detail pages). */
   readOnly?: boolean;
+  /** Total number of forEach instances live in the cluster for this node. 0 for
+   *  collection nodes whose iterator resolved to an empty list. Undefined for
+   *  non-collection nodes. */
+  collectionInstanceCount?: number;
+  /** When this card represents a single fanned-out instance, its 0-based index.
+   *  Undefined for the base card. The base card carries the stack visual and
+   *  any incoming/outgoing edges; instance cards are display-only. */
+  collectionInstanceIndex?: number;
+  /** Signed dx (in pixels) the instance card collapses to when not fanned out —
+   *  the negative of the distance to its origin in the stack, so the card
+   *  visually rests inside the stack when collapsed and slides out when fanned. */
+  collectionFanFromDx?: number;
+  /** Signed dy for the collapsed position. */
+  collectionFanFromDy?: number;
+  /** True when this instance card's parent collection is currently selected
+   *  (i.e. the stack is fanned out). When false the card collapses back into
+   *  the stack via CSS transition. Defaults to false. */
+  collectionFannedOut?: boolean;
 }
 
 export const NodeCard = memo(function NodeCard({
@@ -169,6 +187,11 @@ export const NodeCard = memo(function NodeCard({
   onPotentialFieldClick, onTokenHover, onTokenLeave, editedPaths, onDelete, onDeleteRow, mapParentPaths, arrayParentPaths, onAddArrayItem, nodeTypeByRef, unknownFieldPaths, noSchemaWarning, preserveUnknownParentPaths, onToggleInPortOptional, onAddSectionItem, onPortClick, activeInPaths, activeOutPaths, opConnectedFields, onValueEdit,
   dimmed,
   readOnly,
+  collectionInstanceCount,
+  collectionInstanceIndex,
+  collectionFanFromDx,
+  collectionFanFromDy,
+  collectionFannedOut,
 }: NodeCardProps) {
   const cfg   = NODE_CFG[node.type];
   const accent = dark ? cfg.accentDark : cfg.accent;
@@ -261,22 +284,139 @@ export const NodeCard = memo(function NodeCard({
     || (addingToParentPath !== null && addingToParentPath !== '' && (preserveUnknownParentPaths?.has(addingToParentPath) ?? false))
     || inlineOptions.length === 0;
 
+  // forEach collection state. The base card carries the stack visual and any
+  // edges; instance cards are pure visual fan-outs with no interaction.
+  const isCollection = !!node.isCollection;
+  const isInstanceCard = collectionInstanceIndex !== undefined;
+  // undefined means we have no live-instance count (editor mode); 0 means the
+  // forEach iterator resolved to an empty list (ghost case).
+  const hasCount = collectionInstanceCount !== undefined;
+  const instanceCount = collectionInstanceCount ?? 0;
+  const isEmptyCollection = isCollection && !isInstanceCard && hasCount && instanceCount === 0;
+  // In read-only mode the collapsed fan-out cards (rendered as siblings by
+  // GraphCanvas) double as the stack visual themselves — their offset peek-out
+  // looks like stack shadows. So the dedicated shadow divs only render in
+  // editor mode (no live data) as a fallback indicator.
+  const showStack = isCollection && !isInstanceCard && !selected && !hasCount;
+  const stackShadowCount = 2;
+
+  // Animation: instance cards are kept mounted regardless of selection. When
+  // `collectionFannedOut` is false they translate to the stack-origin offset and
+  // fade out; when true they slide to their fanned position and fade in. CSS
+  // transitions handle both directions. Tiny one-frame delay on mount makes the
+  // initial appearance animate from the collapsed position rather than snapping.
+  const [animSettled, setAnimSettled] = useState(false);
+  useEffect(() => {
+    if (!isInstanceCard) return;
+    const raf = requestAnimationFrame(() => setAnimSettled(true));
+    return () => cancelAnimationFrame(raf);
+  }, [isInstanceCard]);
+  const collapsed = isInstanceCard && (!collectionFannedOut || !animSettled);
+  const animTranslateX = collapsed ? (collectionFanFromDx ?? 0) : 0;
+  const animTranslateY = collapsed ? (collectionFanFromDy ?? 0) : 0;
+  // Depth shading is applied via `filter: brightness(...)` instead of opacity,
+  // so cards stay fully translucent and the depth fade is per-card. Each
+  // successive collapsed instance shifts slightly darker (light theme) or
+  // lighter (dark theme) — like atmospheric haze receding into the distance.
+  const depthLevel = isInstanceCard
+    ? Math.min(1, ((collectionInstanceIndex ?? 1) - 1) / 3)
+    : 0;
+  const cardFilter = collapsed
+    ? `brightness(${dark ? 1 + depthLevel * 0.22 : 1 - depthLevel * 0.18})`
+    : undefined;
+  // Instance cards use a `mask-composite: exclude` (XOR) of two layers:
+  //   layer 1 = full card, layer 2 = the area covered by the in-front card.
+  //   XOR = L-shape sliver where only one of the two covers the card.
+  //
+  // The mask is conceptually *fixed in canvas space*: layer 2 stays parked at
+  // the in-front card's stack position. The card slides out from underneath
+  // it, so mask-size never changes — only mask-position animates inversely to
+  // the card's transform so the mask appears stationary while the card moves
+  // out of its coverage. When the card is fully fanned, layer 2 is offset so
+  // far that it no longer overlaps the card area → no mask effect.
+  // White gradient is used (not black) so this works in both alpha and
+  // luminance mask modes.
+  const fanX = collectionFanFromDx ?? 0;
+  const fanY = collectionFanFromDy ?? 0;
+  const maskPositionStr = collapsed
+    ? '0 0, 0 0'
+    : `0 0, ${fanX}px ${fanY}px`;
+  const maskStyles: React.CSSProperties = isInstanceCard ? {
+    maskImage: 'linear-gradient(white, white), linear-gradient(white, white)',
+    WebkitMaskImage: 'linear-gradient(white, white), linear-gradient(white, white)',
+    maskPosition: maskPositionStr,
+    WebkitMaskPosition: maskPositionStr,
+    maskSize: '100% 100%, calc(100% - 4px) calc(100% - 4px)',
+    WebkitMaskSize: '100% 100%, calc(100% - 4px) calc(100% - 4px)',
+    maskRepeat: 'no-repeat',
+    WebkitMaskRepeat: 'no-repeat',
+    maskComposite: 'exclude',
+    WebkitMaskComposite: 'xor',
+  } : {};
+  const collectionBadge = isInstanceCard
+    ? `[${(collectionInstanceIndex ?? 0) + 1} of ${instanceCount}]`
+    : isCollection
+      ? (!hasCount ? '[collection]'
+         : instanceCount === 0 ? '[empty]'
+         : instanceCount === 1 ? '[1 of 1]'
+         : `[1 of ${instanceCount}]`)
+      : null;
 
   return (
     <div
       role="button" tabIndex={0}
       data-node-id={node.id}
       style={{ position: 'absolute', left: node.x, top: node.y, width: node.w, height: displayH,
-        cursor: isDrawing ? 'crosshair' : 'grab', zIndex: 2,
-        opacity: dimmed ? 0.25 : 1, transition: 'opacity 0.15s' }}
-      onMouseDown={e => { e.stopPropagation(); onMouseDown(e, node.id); }}
-      onClick={e => { e.stopPropagation(); onClick(node.id); }}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onClick(node.id); }}
+        cursor: isInstanceCard ? 'default' : (isDrawing ? 'crosshair' : 'grab'),
+        // Instance cards always sit behind base nodes — collapsed they peek
+        // from the stack, fanned they slide out beside the base (no overlap).
+        // Keeping them at z=1 throughout means the fan-out animation reads as
+        // emerging from behind the base instead of jumping in front of it.
+        zIndex: isInstanceCard ? 1 : 2,
+        opacity: dimmed ? 0.25 : (isEmptyCollection ? 0.4 : 1),
+        transform: (animTranslateX || animTranslateY)
+          ? `translate(${animTranslateX}px, ${animTranslateY}px)` : undefined,
+        // Depth fade applied as a CSS filter — each stacked card has its own
+        // rendering context so successive layers shift in brightness without
+        // their alphas summing through.
+        filter: cardFilter,
+        pointerEvents: collapsed ? 'none' : undefined,
+        transition: isInstanceCard
+          ? 'transform 0.28s ease-out, opacity 0.25s ease-out, filter 0.25s ease-out, mask-position 0.28s ease-out, -webkit-mask-position 0.28s ease-out'
+          : 'opacity 0.15s',
+        // mask-composite-based stacking — see maskStyles above for the L-shape
+        // mask logic. Layer 2 size 0 0 means no mask effect, full card visible.
+        ...maskStyles }}
+      onMouseDown={isInstanceCard ? undefined : e => { e.stopPropagation(); onMouseDown(e, node.id); }}
+      onClick={isInstanceCard ? undefined : e => { e.stopPropagation(); onClick(node.id); }}
+      onKeyDown={isInstanceCard ? undefined : e => { if (e.key === 'Enter' || e.key === ' ') onClick(node.id); }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Port circles for rows */}
-      {/* Port dots — unified over displayRows (includes ghost rows in their merged position) */}
+      {showStack && Array.from({ length: stackShadowCount }, (_, idx) => {
+        // Furthest shadow drawn first; nearest shadow nearest the Paper. Each
+        // shadow offsets 4px right+down and fades a bit more. zIndex < 0 puts
+        // them behind the Paper within this absolute container's stacking ctx.
+        const j = stackShadowCount - idx; // 1 = nearest, N = furthest
+        return (
+          <div key={j} style={{
+            position: 'absolute',
+            left: j * 4, top: j * 4, width: '100%', height: '100%',
+            borderRadius: 10,
+            border: `2px solid ${alpha(accent, Math.max(0.2, 0.5 - (j - 1) * 0.08))}`,
+            background: dark ? 'rgba(0,0,0,0.55)' : '#fff',
+            opacity: Math.max(0.25, 0.85 - (j - 1) * 0.18),
+            pointerEvents: 'none',
+            zIndex: -1,
+            transition: 'opacity 0.18s ease, transform 0.25s ease',
+          }} />
+        );
+      })}
+      {/* Port circles for rows — hidden when this is a collapsed instance card
+          so they don't show through the cards in front. The wrapper is static-
+          positioned so the absolutely-placed PortDots still resolve to the
+          outer node-card div. */}
+      <div style={{ opacity: collapsed ? 0 : 1, transition: 'opacity 0.2s ease-out' }}>
       {displayRows.map((row, i) => {
         const top = HEADER_H + (showSectionAdd ? ROW_H : 0) + i * ROW_H + ROW_H / 2 - DOT / 2;
         // Left (inPort) dot — shown when there's a committed CEL ref OR an unsaved ExtraEdge.
@@ -310,6 +450,7 @@ export const NodeCard = memo(function NodeCard({
         <PortDot color={accent} right top={node.h / 2 - DOT / 2} dark={dark}
           hasConnection={false} isDrawing={isDrawing} />
       )}
+      </div>
 
       <Paper elevation={selected ? 8 : 2} sx={{
         width: '100%', height: displayH,
@@ -321,6 +462,11 @@ export const NodeCard = memo(function NodeCard({
           : `linear-gradient(140deg, ${alpha(accent, 0.07)} 0%, #fff 100%)`,
         boxShadow: selected ? `0 0 0 3px ${alpha(accent, 0.35)}` : undefined,
         transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
+        // Collapsed instance cards show only their outer shell — the inner
+        // content fades out so stacked cards underneath don't bleed through.
+        '& > *': collapsed ? {
+          opacity: 0, transition: 'opacity 0.2s ease-out',
+        } : { opacity: 1, transition: 'opacity 0.2s ease-out' },
       }}>
         {/* Header */}
         <Box sx={{
@@ -334,6 +480,15 @@ export const NodeCard = memo(function NodeCard({
             <Typography variant="caption" fontWeight={700} noWrap display="block"
               sx={{ color: accent, fontSize: '0.72rem', lineHeight: 1 }}>{node.label}</Typography>
           </Box>
+          {collectionBadge && (
+            <Box component="span" sx={{
+              fontFamily: 'monospace', fontSize: '0.55rem', lineHeight: 1, flexShrink: 0,
+              px: 0.5, py: 0.2, borderRadius: 0.5,
+              color: accent, opacity: isEmptyCollection ? 0.6 : 0.85,
+              border: `1px solid ${alpha(accent, 0.4)}`,
+              bgcolor: alpha(accent, dark ? 0.18 : 0.08),
+            }}>{collectionBadge}</Box>
+          )}
           {noSchemaWarning && (
             <Tooltip title="Schema unavailable — field validation disabled" placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
               <span style={{ display: 'inline-flex', flexShrink: 0 }}>
