@@ -21,6 +21,7 @@ import {
   XRScope,
 } from '../../resources';
 import { ComposedResources } from '../managed/ComposedResources';
+import { XRKroGraph } from './XRKroGraph';
 
 // ── Shared hook ───────────────────────────────────────────────────────────────
 
@@ -166,6 +167,7 @@ export function XRDetailInner({ xrd, name, namespace }: XRDetailInnerProps) {
           <SectionBox title="Composed Resources">
             <ComposedResources item={item} scope={scope} />
           </SectionBox>
+          <XRKroGraph item={item} xrd={xrd} scope={scope} />
           <XREventsSection item={item} kind={kind} />
         </>
       )}

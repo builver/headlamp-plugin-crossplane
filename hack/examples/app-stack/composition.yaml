@@ -15,29 +15,16 @@ spec:
       apiVersion: kro.fn.crossplane.io/v1alpha1
       kind: ResourceGraph
       status:
-        namespaceName: ${ns.metadata.name}
         configMapName: ${config.metadata.name}
         deploymentName: ${deploy.metadata.name}
         serviceName: ${svc.metadata.name}
       resources:
-      - id: ns
-        template:
-          apiVersion: kubernetes.crossplane.io/v1alpha2
-          kind: Object
-          metadata: {}
-          spec:
-            forProvider:
-              manifest:
-                apiVersion: v1
-                kind: Namespace
-                metadata:
-                  name: ${schema.spec.appName}
-                  labels:
-                    app.kubernetes.io/managed-by: crossplane
-                    app.kubernetes.io/name: ${schema.spec.appName}
+      # All resources are namespaced and land in the AppStack's own namespace
+      # (schema.metadata.namespace). A namespaced XR cannot compose
+      # cluster-scoped resources such as Namespace.
       - id: config
         template:
-          apiVersion: kubernetes.crossplane.io/v1alpha2
+          apiVersion: kubernetes.m.crossplane.io/v1alpha1
           kind: Object
           metadata: {}
           spec:
@@ -47,19 +34,13 @@ spec:
                 kind: ConfigMap
                 metadata:
                   name: ${schema.spec.appName}-config
-                  namespace: ${schema.spec.appName}
+                  namespace: ${schema.metadata.namespace}
                 data:
                   APP_NAME: ${schema.spec.appName}
-                  REPLICAS: ${string(int(schema.spec.replicas))}
                   IMAGE: ${schema.spec.image}
-            references:
-            - dependsOn:
-                apiVersion: v1
-                kind: Namespace
-                name: ${schema.spec.appName}
       - id: deploy
         template:
-          apiVersion: kubernetes.crossplane.io/v1alpha2
+          apiVersion: kubernetes.m.crossplane.io/v1alpha1
           kind: Object
           metadata: {}
           spec:
@@ -69,11 +50,11 @@ spec:
                 kind: Deployment
                 metadata:
                   name: ${schema.spec.appName}
-                  namespace: ${schema.spec.appName}
+                  namespace: ${schema.metadata.namespace}
                   labels:
                     app: ${schema.spec.appName}
                 spec:
-                  replicas: ${schema.spec.replicas}
+                  replicas: 1
                   selector:
                     matchLabels:
                       app: ${schema.spec.appName}
@@ -86,7 +67,7 @@ spec:
                       - name: app
                         image: ${schema.spec.image}
                         ports:
-                        - containerPort: ${schema.spec.port}
+                        - containerPort: 80
                         envFrom:
                         - configMapRef:
                             name: ${schema.spec.appName}-config
@@ -95,10 +76,10 @@ spec:
                 apiVersion: v1
                 kind: ConfigMap
                 name: ${schema.spec.appName}-config
-                namespace: ${schema.spec.appName}
+                namespace: ${schema.metadata.namespace}
       - id: svc
         template:
-          apiVersion: kubernetes.crossplane.io/v1alpha2
+          apiVersion: kubernetes.m.crossplane.io/v1alpha1
           kind: Object
           metadata: {}
           spec:
@@ -108,19 +89,19 @@ spec:
                 kind: Service
                 metadata:
                   name: ${schema.spec.appName}
-                  namespace: ${schema.spec.appName}
+                  namespace: ${schema.metadata.namespace}
                 spec:
                   selector:
                     app: ${schema.spec.appName}
                   ports:
                   - port: 80
-                    targetPort: ${schema.spec.port}
+                    targetPort: 80
             references:
             - dependsOn:
                 apiVersion: apps/v1
                 kind: Deployment
                 name: ${schema.spec.appName}
-                namespace: ${schema.spec.appName}
+                namespace: ${schema.metadata.namespace}
   - step: auto-ready
     functionRef:
       name: function-auto-ready

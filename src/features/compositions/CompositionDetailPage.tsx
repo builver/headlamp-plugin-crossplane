@@ -24,56 +24,20 @@ import { stringify as yamlStringify } from 'yaml';
 import { makeXRNameColumn, readyColumn, syncedColumn } from '../../components/columns';
 import { useNameFromRoute } from '../../components/hooks';
 import { getGroupVersion } from '../../components/map/apiPaths';
+import type { PipelineStep, RequiredResource } from '../../resources';
 import {
   CompositeResourceDefinition,
   Composition,
   getCompositionRef,
+  getServedSchema,
   getXRScope,
+  isKroStep,
   makeXRClass,
   ManagedResourceDefinition,
+  useMrdSchemaMap,
   XRScope,
 } from '../../resources';
 import { KroStepGraph } from './CompositionNodeEditor';
-
-interface RequiredResource {
-  requirementName: string;
-  apiVersion: string;
-  kind: string;
-  name?: string;
-  matchLabels?: Record<string, string>;
-  namespace?: string;
-}
-
-interface RequiredSchema {
-  requirementName: string;
-  apiVersion: string;
-  kind: string;
-}
-
-interface PipelineStepRequirements {
-  requiredResources?: RequiredResource[];
-  requiredSchemas?: RequiredSchema[];
-}
-
-interface PipelineStep {
-  step: string;
-  functionRef: { name: string };
-  input?: Record<string, unknown>;
-  requirements?: PipelineStepRequirements;
-}
-
-function getServedSchema(jsonData: any): any {
-  const versions: any[] = jsonData?.spec?.versions ?? [];
-  const served = versions.find((v: any) => v.served !== false) ?? versions[0];
-  return served?.schema?.openAPIV3Schema ?? null;
-}
-
-function isKroStep(s: PipelineStep): boolean {
-  return !!(
-    s.functionRef?.name?.includes('kro') ||
-    (s.input as any)?.kind === 'ResourceGraph'
-  );
-}
 
 interface ComposedXRsProps {
   xrd: KubeObject;
@@ -134,17 +98,7 @@ export function CompositionDetailPage({ name }: { name: string }) {
   const xrdSchema = useMemo(() => getServedSchema(matchingXrd?.jsonData), [matchingXrd]);
   const xrdScope  = useMemo(() => matchingXrd ? getXRScope(matchingXrd) : undefined, [matchingXrd]);
 
-  const mrdSchemaMap = useMemo(() => {
-    const map = new Map<string, any>();
-    for (const mrd of mrds ?? []) {
-      const group: string = mrd.jsonData?.spec?.group ?? '';
-      const kind: string  = mrd.jsonData?.spec?.names?.kind ?? '';
-      if (!group || !kind) continue;
-      const schema = getServedSchema(mrd.jsonData);
-      if (schema) map.set(`${group}/${kind}`, schema);
-    }
-    return map;
-  }, [mrds]);
+  const mrdSchemaMap = useMrdSchemaMap(mrds);
 
   let compositeLink: string | JSX.Element = '-';
   if (compTypeRef) {

@@ -1,0 +1,11 @@
+apiVersion: example.crossplane.io/v1alpha1
+kind: ConfigSet
+metadata:
+  name: demo-config
+  namespace: default
+spec:
+  appName: demo
+  environments:
+  - dev
+  - staging
+  - prod

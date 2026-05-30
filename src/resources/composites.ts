@@ -12,9 +12,13 @@ export {
   getResponsiveCondition,
   getRevisionHealthyCondition,
   getRuntimeHealthyCondition,
+  getServedSchema,
   getSyncedCondition,
   getXRScope,
+  isKroStep,
 } from './helpers';
+export type { PipelineStep, PipelineStepRequirements, RequiredResource, RequiredSchema } from './helpers';
+export { useMrdSchemaMap } from './hooks';
 
 // ── apiextensions.crossplane.io/v1 + v2 ─────────────────────────────────────
 

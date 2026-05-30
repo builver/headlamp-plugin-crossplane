@@ -279,7 +279,7 @@ export const ExprOpNodeCard = memo(function ExprOpNodeCard({
                     color={refAccent(nodeIdToRef(info.srcNodeId), dark, info.srcNodeType)}
                     label={info.label}
                     tooltip={`${info.displayPath ?? (info.srcFieldPath !== 'output' ? `${nodeIdToRef(info.srcNodeId)}.${info.srcFieldPath.replace(/\?/g, '')}` : info.srcFieldPath)}${info.type ? ` · ${info.type}` : ''}`}
-                    optional={onTogglePortOptional ? info.optional : undefined}
+                    optional={info.optional}
                     onToggleOptional={onTogglePortOptional
                       ? e => { e.stopPropagation(); onTogglePortOptional(node.id, port.name); }
                       : undefined}

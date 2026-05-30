@@ -5,6 +5,4 @@ metadata:
   namespace: default
 spec:
   appName: demo-app
-  replicas: 2
   image: nginx:latest
-  port: 80

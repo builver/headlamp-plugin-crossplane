@@ -40,6 +40,8 @@ export interface TRow {
   canImport?: boolean;
   /** Can this row originate an outgoing connection (right port dot). Defaults to true for non-section rows. */
   canExport?: boolean;
+  /** Resolved value from composed resource (read-only mode). */
+  actualValue?: string;
 }
 
 /** Identifies which CEL token is being hovered, for edge + node highlight. */

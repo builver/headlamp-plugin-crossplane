@@ -1,12 +1,12 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: appstacks.example.crossplane.io
+  name: configsets.example.crossplane.io
 spec:
   group: example.crossplane.io
   names:
-    kind: AppStack
-    plural: appstacks
+    kind: ConfigSet
+    plural: configsets
   scope: Namespaced
   versions:
   - name: v1alpha1
@@ -22,18 +22,21 @@ spec:
               appName:
                 type: string
                 description: Name of the application
-              image:
-                type: string
-                default: nginx:latest
-                description: Container image
+              environments:
+                type: array
+                description: One ConfigMap is created per environment
+                items:
+                  type: string
+                default:
+                - dev
+                - staging
+                - prod
             required:
             - appName
           status:
             type: object
             properties:
-              configMapName:
-                type: string
-              deploymentName:
-                type: string
-              serviceName:
-                type: string
+              configMaps:
+                type: array
+                items:
+                  type: string

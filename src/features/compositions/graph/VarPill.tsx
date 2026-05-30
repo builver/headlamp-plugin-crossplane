@@ -35,7 +35,7 @@ export const VarPill = memo(function VarPill({
       <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {label}
       </Box>
-      {optional !== undefined && onToggleOptional && (
+      {optional !== undefined && (onToggleOptional ? (
         <Box component="span" role="button" tabIndex={-1}
           onMouseDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onToggleOptional(e); }}
@@ -44,7 +44,12 @@ export const VarPill = memo(function VarPill({
             color: optional ? color : 'action.disabled',
             '&:hover': { color },
           }}>?</Box>
-      )}
+      ) : optional ? (
+        // Read-only: static indicator that the reference is optional (not clickable).
+        <Box component="span" sx={{
+          fontFamily: 'monospace', fontSize: '0.6rem', lineHeight: 1, flexShrink: 0, color,
+        }}>?</Box>
+      ) : null)}
       {typeSuffix && (
         <Box component="span" sx={{
           fontFamily: 'monospace', fontSize: '0.5rem', lineHeight: 1,

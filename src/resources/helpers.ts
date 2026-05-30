@@ -53,3 +53,45 @@ export function getCompositionRef(item: JsonHolder, scope: XRScope): string {
   }
   return item.jsonData?.spec?.crossplane?.compositionRef?.name ?? '-';
 }
+
+// ── Pipeline / kro helpers ────────────────────────────────────────────────────
+
+export interface RequiredResource {
+  requirementName: string;
+  apiVersion: string;
+  kind: string;
+  name?: string;
+  matchLabels?: Record<string, string>;
+  namespace?: string;
+}
+
+export interface RequiredSchema {
+  requirementName: string;
+  apiVersion: string;
+  kind: string;
+}
+
+export interface PipelineStepRequirements {
+  requiredResources?: RequiredResource[];
+  requiredSchemas?: RequiredSchema[];
+}
+
+export interface PipelineStep {
+  step: string;
+  functionRef: { name: string };
+  input?: Record<string, unknown>;
+  requirements?: PipelineStepRequirements;
+}
+
+export function getServedSchema(jsonData: any): any {
+  const versions: any[] = jsonData?.spec?.versions ?? [];
+  const served = versions.find((v: any) => v.served !== false) ?? versions[0];
+  return served?.schema?.openAPIV3Schema ?? null;
+}
+
+export function isKroStep(s: PipelineStep): boolean {
+  return !!(
+    s.functionRef?.name?.includes('kro') ||
+    (s.input as any)?.kind === 'ResourceGraph'
+  );
+}

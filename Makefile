@@ -81,9 +81,13 @@ examples: ## Deploy example XRDs, Compositions, and Claims
 	@echo "--- Applying AppStack example (XRD + Composition + Claim) ---"
 	kubectl apply -f hack/examples/app-stack/xrd.yaml
 	kubectl apply -f hack/examples/app-stack/composition.yaml
+	@echo "--- Applying ConfigSet example (forEach collection) ---"
+	kubectl apply -f hack/examples/config-set/xrd.yaml
+	kubectl apply -f hack/examples/config-set/composition.yaml
 	@sleep 2
 	kubectl apply -f hack/examples/app-stack/claim.yaml
-	@echo "Examples deployed. Check with: kubectl get appstacks -A"
+	kubectl apply -f hack/examples/config-set/claim.yaml
+	@echo "Examples deployed. Check with: kubectl get appstacks,configsets -A"
 
 # ── All-in-one ──────────────────────────────────────────────────────
 .PHONY: up down

@@ -25,6 +25,7 @@
             pkgs.kubernetes-helm
             pkgs.crossplane-cli
             pkgs.kind
+            pkgs.claude-code
           ];
         };
       }

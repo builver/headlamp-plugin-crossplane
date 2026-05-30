@@ -6,7 +6,7 @@ import { DOT, HEADER_H, NODE_CFG, NODE_MIN_H, refAccent, refToNodeId, ROW_H, USE
 import { PortDot } from './PortDot';
 import { sectionOf, sectionRelPath } from './sectionDefs';
 import { SegmentedControl } from './SegmentedControl';
-import { AddForm, FieldSuggestion, GNode, KindOption, NodeType, TokenHover, TRow } from './types';
+import { AddForm, FieldSuggestion, GNode, KindOption, NodeType, RowSegment, TokenHover, TRow } from './types';
 import { abbrevType } from './typeUtils';
 import { VarPill } from './VarPill';
 
@@ -54,6 +54,50 @@ function IconBtn({ icon, onClick, width = 12, sx: extraSx }: { icon: string; onC
       <Icon icon={icon} width={width} />
     </Box>
   );
+}
+
+/** Amber warning (mirrors the "field not found" indicator) shown when the
+ *  composition's hardcoded value differs from the observed live value. */
+function ValueMismatchChip({ desired, observed }: { desired: string; observed: string }) {
+  return (
+    <Tooltip title={`Composition sets "${desired}", observed "${observed}"`} placement="top"
+      PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
+      <span style={{ display: 'inline-flex', flexShrink: 0, marginLeft: 4 }}>
+        <Icon icon="mdi:alert-circle-outline" width={10} style={{ color: '#f59e0b' }} />
+      </span>
+    </Tooltip>
+  );
+}
+
+/** Renders a plain (non-CEL) value YAML-style after the key. The observed live
+ *  value replaces the composition's hardcoded value; mismatches raise a warning. */
+function ObservedValue({ desired, observed }: { desired?: string; observed?: string }) {
+  const shown = observed !== undefined ? observed : desired;
+  if (shown === undefined) return null;
+  // Only compare genuinely hardcoded values; any `${…}` fragment in the desired
+  // string means it's CEL-derived and the resolved live value naturally differs.
+  const mismatch =
+    observed !== undefined && desired !== undefined &&
+    !/\$\{/.test(desired) && observed !== desired;
+  return (
+    <>
+      <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.75 }}>
+        {shown}
+      </Typography>
+      {mismatch && <ValueMismatchChip desired={desired!} observed={observed!} />}
+    </>
+  );
+}
+
+/** Reconstructs the composed CEL expression from row segments, for pill tooltips.
+ *  Unresolved cel segments (parser couldn't pin down a ref) degrade to `${?.?}`
+ *  rather than the literal `${undefined.undefined}`. */
+function composedExpr(segments: RowSegment[]): string {
+  return segments
+    .map(s => (s.kind === 'literal'
+      ? s.text
+      : `\${${s.srcRef ?? '?'}.${s.srcPath ?? '?'}}`))
+    .join('');
 }
 
 // ── NodeCard ──────────────────────────────────────────────────────────────────
@@ -115,6 +159,8 @@ export interface NodeCardProps {
   onValueEdit?: (nodeId: string, fieldPath: string, value: string) => void;
   /** When true, the node is faded because it is not related to the selected node. */
   dimmed?: boolean;
+  /** When true, all editing controls are hidden (read-only view for XR detail pages). */
+  readOnly?: boolean;
 }
 
 export const NodeCard = memo(function NodeCard({
@@ -122,6 +168,7 @@ export const NodeCard = memo(function NodeCard({
   onMouseDown, onClick, onPortDown, potentialFields, allSchemaFields, isExpanded,
   onPotentialFieldClick, onTokenHover, onTokenLeave, editedPaths, onDelete, onDeleteRow, mapParentPaths, arrayParentPaths, onAddArrayItem, nodeTypeByRef, unknownFieldPaths, noSchemaWarning, preserveUnknownParentPaths, onToggleInPortOptional, onAddSectionItem, onPortClick, activeInPaths, activeOutPaths, opConnectedFields, onValueEdit,
   dimmed,
+  readOnly,
 }: NodeCardProps) {
   const cfg   = NODE_CFG[node.type];
   const accent = dark ? cfg.accentDark : cfg.accent;
@@ -158,13 +205,14 @@ export const NodeCard = memo(function NodeCard({
     setAddingToParentPath(null); setAddFieldInput(''); setAddSuggIdx(-1);
   };
 
-  const showPotentialDots = hovered || isDrawing;
+  // Potential (hover) connection anchors are an editing affordance — never in read-only.
+  const showPotentialDots = !readOnly && (hovered || isDrawing);
   const displayRows = node.rows;
   // env: free-form add always; no-schema nodes: free-form add always; resource/ref: schema-autocomplete add when expanded (not during edge draw)
   const freeFormAdd = node.type === 'env' || !!noSchemaWarning;
-  const showAddButton = freeFormAdd || (isExpanded && !isDrawing && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema'));
+  const showAddButton = !readOnly && (freeFormAdd || (isExpanded && !isDrawing && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema')));
   // Sections that could be added but don't yet exist on this node
-  const canAddSections = isExpanded && !isDrawing && !!onAddSectionItem && node.type === 'kro-resource';
+  const canAddSections = !readOnly && isExpanded && !isDrawing && !!onAddSectionItem && node.type === 'kro-resource';
   const missingSections: Array<'forEach' | 'includeWhen' | 'readyWhen'> = canAddSections
     ? (['forEach', 'includeWhen', 'readyWhen'] as const).filter(s => !displayRows.some(r => r.isSection && r.key === s))
     : [];
@@ -238,7 +286,7 @@ export const NodeCard = memo(function NodeCard({
         const leftDot = inColor
           ? <PortDot key={`in-${i}`} color={inColor} right={false} top={top} dark={dark}
               hasConnection isDrawing={isDrawing} defaultCursor="pointer"
-              onClick={e => { e.stopPropagation(); if (!isDrawing) onPortClick?.(node.id, row.fieldPath!); }}
+              onClick={e => { e.stopPropagation(); if (!readOnly && !isDrawing) onPortClick?.(node.id, row.fieldPath!); }}
             />
           : null;
         // Right (outPort) dot — shown when the row has an exportable field.
@@ -252,7 +300,7 @@ export const NodeCard = memo(function NodeCard({
           <PortDot key={`out-${i}`}
             color={isConf ? accent : virtC} right top={top} dark={dark}
             hasConnection={hasOutConn} isDrawing={isDrawing}
-            onMouseDown={e => { e.stopPropagation(); onPortDown(e, node.id, row.fieldPath!); }}
+            onMouseDown={e => { e.stopPropagation(); if (!readOnly) onPortDown(e, node.id, row.fieldPath!); }}
           />
         ) : null;
         return <Fragment key={i}>{leftDot}{rightDot}</Fragment>;
@@ -293,7 +341,7 @@ export const NodeCard = memo(function NodeCard({
               </span>
             </Tooltip>
           )}
-          {selected && (node.type === 'kro-resource' || node.type === 'kro-ref') && onDelete && (
+          {!readOnly && selected && (node.type === 'kro-resource' || node.type === 'kro-ref') && onDelete && (
             <IconBtn icon="mdi:trash-can-outline" onClick={() => onDelete(node.id)}
               sx={{
                 justifyContent: 'center',
@@ -471,11 +519,11 @@ export const NodeCard = memo(function NodeCard({
           const isHov      = i === hoverRowIdx && !row.isParent;
           const isEdited   = !row.isParent && !!row.fieldPath && editedPaths.has(node.id + '::' + row.fieldPath);
           const amberC     = dark ? '#ffd54f' : '#f57f17';
-          const isEditable = isExpanded && !isDrawing && !row.isParent && !row.isSection && !row.isForEachSubField && !isGhost && !hasIn && !hasSeg && !hasCelExpr && !(activeInPaths?.has(row.fieldPath ?? '')) && !!row.fieldPath && !!onValueEdit;
+          const isEditable = !readOnly && isExpanded && !isDrawing && !row.isParent && !row.isSection && !row.isForEachSubField && !isGhost && !hasIn && !hasSeg && !hasCelExpr && !(activeInPaths?.has(row.fieldPath ?? '')) && !!row.fieldPath && !!onValueEdit;
           const isEditing  = isEditable && editingRowPath === row.fieldPath;
           // True for top-level forEach variable rows (e.g. _forEach.role, not _forEach.role.name)
           const isForEachVarRow = !!(row.fieldPath && sectionOf(row.fieldPath) === 'forEach' && !sectionRelPath(row.fieldPath).includes('.'));
-          const forEachSubAddBtn = isForEachVarRow && isExpanded && !isDrawing && onAddSectionItem
+          const forEachSubAddBtn = !readOnly && isForEachVarRow && isExpanded && !isDrawing && onAddSectionItem
             ? <IconBtn icon="mdi:plus" width={9}
                 onClick={() => { setAddingForEachSubVarPath(row.fieldPath!); setSubFieldInput(''); setAddingSectionKey(null); }}
                 sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.45, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
@@ -485,7 +533,7 @@ export const NodeCard = memo(function NodeCard({
           if (row.isSection) {
             const secKey = row.key as 'forEach' | 'includeWhen' | 'readyWhen';
             const isFE = secKey === 'forEach';
-            const canAdd = isExpanded && !isDrawing && !!onAddSectionItem;
+            const canAdd = !readOnly && isExpanded && !isDrawing && !!onAddSectionItem;
             const inputOpen = addingSectionKey === secKey;
             return (
               <Fragment key={`section-${i}`}>
@@ -617,26 +665,30 @@ export const NodeCard = memo(function NodeCard({
                     <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.5, flex: 1 }}>
                       {/^\d+$/.test(row.key) ? `[${row.key}]` : `${row.key}:`}
                     </Typography>
-                    {isExpanded && arrayParentPaths?.has(row.fieldPath ?? '') && (
+                    {!readOnly && isExpanded && arrayParentPaths?.has(row.fieldPath ?? '') && (
                       <IconBtn icon="mdi:plus" width={9}
                         onClick={() => onAddArrayItem?.(node.id, row.fieldPath!)}
                         sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
                     )}
-                    {isExpanded && !arrayParentPaths?.has(row.fieldPath ?? '') && !mapParentPaths?.has(row.fieldPath ?? '') && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema') && (
+                    {!readOnly && isExpanded && !arrayParentPaths?.has(row.fieldPath ?? '') && !mapParentPaths?.has(row.fieldPath ?? '') && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema') && (
                       <IconBtn icon="mdi:plus" width={9}
                         onClick={() => { setAddingToParentPath(row.fieldPath!); setAddFieldInput(''); setAddSuggIdx(-1); }}
                         sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
                     )}
-                    {isExpanded && mapParentPaths?.has(row.fieldPath ?? '') && (
+                    {!readOnly && isExpanded && mapParentPaths?.has(row.fieldPath ?? '') && (
                       <IconBtn icon="mdi:plus" width={9}
                         onClick={() => { setAddingToMap(row.fieldPath!); setAddMapKey(''); }}
                         sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.5, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
                     )}
                   </>
                 ) : hasSeg ? (
-                  // Composed CEL string — render as inline token pills
+                  // Composed CEL string — observed value as one pill (tooltip = expression),
+                  // else the inline literal/token pills.
                   <>
                     <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{displayKey}</Typography>
+                    {row.actualValue !== undefined ? (
+                      <VarPill color={accent} label={row.actualValue} tooltip={composedExpr(row.segments!)} />
+                    ) : (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, overflow: 'hidden', flexWrap: 'nowrap', minWidth: 0 }}>
                       {row.segments!.map((seg, si) => {
                         if (seg.kind === 'literal') {
@@ -664,6 +716,7 @@ export const NodeCard = memo(function NodeCard({
                         );
                       })}
                     </Box>
+                    )}
                   </>
                 ) : hasCelExpr ? (
                   // Complex CEL expression driven by an op-node — show key label + op-node VarPill
@@ -678,7 +731,7 @@ export const NodeCard = memo(function NodeCard({
                       return (
                         <VarPill
                           color={userC}
-                          label={opInfo.label}
+                          label={row.actualValue !== undefined ? row.actualValue : opInfo.label}
                           tooltip={row.celExpr ? row.celExpr.replace(/^\$\{([\s\S]*)\}$/, '$1') : undefined}
                           typeSuffix={opInfo.type ? abbrevType(opInfo.type) : undefined}
                           onMouseEnter={() => onTokenHover({ srcNodeId: opInfo.srcNodeId, srcPath: 'output', tgtNodeId: node.id })}
@@ -693,11 +746,11 @@ export const NodeCard = memo(function NodeCard({
                     <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.6rem', opacity: 0.75, flexShrink: 0 }}>{displayKey}</Typography>
                     <VarPill
                       color={pa}
-                      label={row.inPort!.srcShort}
+                      label={row.actualValue !== undefined ? row.actualValue : row.inPort!.srcShort}
                       tooltip={row.inPort!.srcPath ? `${row.inPort!.origRef ?? row.inPort!.ref}.${row.inPort!.srcPath}` : (row.inPort!.origRef ?? row.inPort!.srcShort)}
                       optional={row.inPort!.optional}
                       typeSuffix={isForEachVarRow ? '[]' : undefined}
-                      onToggleOptional={e => { e.stopPropagation(); onToggleInPortOptional?.(node.id, row.fieldPath!); }}
+                      onToggleOptional={readOnly ? undefined : (e => { e.stopPropagation(); onToggleInPortOptional?.(node.id, row.fieldPath!); })}
                       onMouseEnter={() => onTokenHover({ srcNodeId: refToNodeId(row.inPort!.ref), srcPath: row.inPort!.srcPath, tgtNodeId: node.id })}
                       onMouseLeave={onTokenLeave}
                     />
@@ -743,8 +796,8 @@ export const NodeCard = memo(function NodeCard({
                           onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
                           onMouseDown={e => e.stopPropagation()}
                         />
-                      : row.value !== undefined
-                        ? <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.75 }}>{row.value}</Typography>
+                      : (row.actualValue !== undefined || row.value !== undefined)
+                        ? <ObservedValue desired={row.value} observed={row.actualValue} />
                         : row.ghostType
                           ? <Box component="span" sx={{
                               fontFamily: 'monospace', fontSize: '0.5rem', lineHeight: 1,
@@ -770,8 +823,8 @@ export const NodeCard = memo(function NodeCard({
                           onBlur={() => commitValueEdit(row.fieldPath!, editingValue)}
                           onMouseDown={e => e.stopPropagation()}
                         />
-                      : row.value !== undefined
-                        ? <Typography variant="caption" noWrap sx={{ fontFamily: 'monospace', fontSize: '0.58rem', opacity: 0.75 }}>{row.value}</Typography>
+                      : (row.actualValue !== undefined || row.value !== undefined)
+                        ? <ObservedValue desired={row.value} observed={row.actualValue} />
                         : null
                     }
                   </>
@@ -787,7 +840,7 @@ export const NodeCard = memo(function NodeCard({
                   </span>
                 </Tooltip>
               )}
-              {isRowHovered && onDeleteRow && (
+              {!readOnly && isRowHovered && onDeleteRow && (
                 <IconBtn icon="mdi:close" width={10}
                   onClick={() => onDeleteRow(node.id, row.fieldPath!)}
                   sx={{

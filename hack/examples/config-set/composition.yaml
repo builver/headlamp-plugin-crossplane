@@ -1,0 +1,43 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: config-set
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1alpha1
+    kind: ConfigSet
+  mode: Pipeline
+  pipeline:
+  - step: kro-run
+    functionRef:
+      name: function-kro
+    input:
+      apiVersion: kro.fn.crossplane.io/v1beta1
+      kind: ResourceGraph
+      status:
+        configMaps: ${configs.map(c, c.metadata.name)}
+      resources:
+      # forEach expands this into one namespaced Object (ConfigMap) per
+      # environment. function-kro names each composed resource "configs-<name>".
+      - id: configs
+        forEach:
+        - env: ${schema.spec.environments}
+        template:
+          apiVersion: kubernetes.m.crossplane.io/v1alpha1
+          kind: Object
+          metadata:
+            name: ${schema.spec.appName + "-" + env}
+          spec:
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: ${schema.spec.appName + "-" + env}
+                  namespace: ${schema.metadata.namespace}
+                data:
+                  APP_NAME: ${schema.spec.appName}
+                  ENVIRONMENT: ${env}
+  - step: auto-ready
+    functionRef:
+      name: function-auto-ready

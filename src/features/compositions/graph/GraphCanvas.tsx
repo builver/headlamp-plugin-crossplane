@@ -26,6 +26,7 @@ import {
 } from './types';
 import { typeCompat } from './typeUtils';
 import { useCompositionSchemas } from './useCompositionSchemas';
+import { overlayActualValues } from './valueOverlay';
 
 /** Imperatively update all SVG path elements inside a `<g>` with a new `d` attribute. */
 function setEdgePaths(g: SVGGElement, d: string): void {
@@ -48,9 +49,13 @@ export interface GraphCanvasProps {
   kindOptions?: KindOption[];
   /** Step-level requirements (requiredResources, requiredSchemas) from the pipeline step. */
   requirements?: any;
+  /** When true, all editing controls are hidden (read-only view for XR detail pages). */
+  readOnly?: boolean;
+  /** Kro resource ID -> fetched composed resource JSON(s) (read-only mode). */
+  composedValues?: Map<string, any[]>;
 }
 
-export function GraphCanvas({ input, height = 480, compositionName, stepIndex, onDirtyChange, xrdSchema, mrdSchemaMap, kindOptions = [], requirements }: GraphCanvasProps) {
+export function GraphCanvas({ input, height = 480, compositionName, stepIndex, onDirtyChange, xrdSchema, mrdSchemaMap, kindOptions = [], requirements, readOnly, composedValues }: GraphCanvasProps) {
   const theme        = useTheme();
   const dark         = theme.palette.mode === 'dark';
   const containerRef = useRef<HTMLDivElement>(null);
@@ -446,8 +451,11 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         return { ...n, rows: newRows, h: nodeH(newRows) };
       });
     }
+    if (composedValues && composedValues.size > 0) {
+      result = overlayActualValues(result, composedValues);
+    }
     return result;
-  }, [nodes, fieldEdits, knownIds, schemaApiVersion, schemaKind]);
+  }, [nodes, fieldEdits, knownIds, schemaApiVersion, schemaKind, composedValues]);
 
   /** Node map keyed on display rows (includes injected info rows) — used for SVG edge Y calculations. */
   const displayNodeMap = useMemo(() => new Map(nodesForDisplay.map(n => [n.id, n])), [nodesForDisplay]);
@@ -969,6 +977,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   const hasDraggedPort = useRef(false);
 
   const onPortDown = useCallback((e: MouseEvent, nodeId: string, fieldPath: string) => {
+    if (readOnly) return;
     e.stopPropagation();
     hasDraggedPort.current = false;
     const cp = screenToCanvas(e.clientX, e.clientY);
@@ -1542,7 +1551,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     <Box ref={containerRef} sx={{
       position: 'relative', width: '100%', height: isFullscreen ? '100vh' : height,
       bgcolor: dark ? '#111' : '#f3f3f7', borderRadius: 1, overflow: 'hidden',
-      cursor: drawing ? 'crosshair' : active ? 'grabbing' : 'grab',
+      cursor: !readOnly && drawing ? 'crosshair' : active ? 'grabbing' : 'grab',
       backgroundImage: `radial-gradient(${dark ? '#2a2a2a' : '#c5c5ce'} 1px, transparent 1px)`,
       backgroundSize: '24px 24px', userSelect: 'none',
     }}
@@ -1563,6 +1572,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             <Icon icon="mdi:fit-to-screen-outline" width={17} height={17} />
           </IconButton>
         </Tooltip>
+        {!readOnly && <>
         <Tooltip title="Add resource">
           <IconButton size="small"
             onClick={() => {
@@ -1646,10 +1656,11 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             </IconButton>
           </Tooltip>
         )}
+        </>}
       </Box>
 
       {/* Delete confirmation */}
-      {confirmDelete && (
+      {!readOnly && confirmDelete && (
         <Paper elevation={4} sx={{
           position: 'absolute', top: 48, right: 8, zIndex: 20,
           p: 1.5, display: 'flex', flexDirection: 'column', gap: 1, width: 260,
@@ -1673,7 +1684,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
           Screen coords are clamped to the container bounds so the input is always visible (prevents the
           browser from scrolling a parent element to reveal an off-screen input, which would shift the
           toolbar and other overlay elements). */}
-      {(() => {
+      {!readOnly && (() => {
         if (!addForm) return null;
         const draftNode = nodeMap.get(DRAFT_NODE_ID);
         if (!draftNode) return null;
@@ -1870,6 +1881,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             opConnectedFields={opConnectedFieldsByNode.get(n.id)}
             onValueEdit={onValueEdit}
             dimmed={relatedNodeIds !== null && !relatedNodeIds.has(n.id)}
+            readOnly={readOnly}
           />
         ))}
 
@@ -1894,7 +1906,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onResizeStart={onOpResizeStart}
             dirty={!savedOpNodeIds.has(opNode.id)}
             onDelete={onDeleteOpNode}
-            onTogglePortOptional={toggleOpPortOptional}
+            onTogglePortOptional={readOnly ? undefined : toggleOpPortOptional}
             onTokenHover={setTokenHover}
             onTokenLeave={onTokenLeave}
             onAddVarField={onAddVarField}

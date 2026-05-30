@@ -1,5 +1,7 @@
-apiVersion: kubernetes.crossplane.io/v1alpha1
-kind: ProviderConfig
+# Namespaced Objects (kubernetes.m.crossplane.io) default to
+# providerConfigRef: { kind: ClusterProviderConfig, name: default }.
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
 metadata:
   name: default
 spec:

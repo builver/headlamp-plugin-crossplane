@@ -21,12 +21,17 @@ interface KroStepGraphProps {
   xrdScope?: string;
   /** Step-level requirements from the pipeline step (requiredResources, requiredSchemas). */
   requirements?: any;
+  /** When true, all editing controls are hidden (read-only view for XR detail pages). */
+  readOnly?: boolean;
+  /** Kro resource ID -> fetched composed resource JSON(s) (read-only mode). */
+  composedValues?: Map<string, any[]>;
 }
 
-export function KroStepGraph({ input, inputYaml, compositionName, stepIndex, xrdSchema, mrdSchemaMap, xrdScope, requirements }: KroStepGraphProps) {
+export function KroStepGraph({ input, inputYaml, compositionName, stepIndex, xrdSchema, mrdSchemaMap, xrdScope, requirements, readOnly, composedValues }: KroStepGraphProps) {
   const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList() as [any[] | null, any];
 
   const kindOptions = useMemo((): KindOption[] => {
+    if (readOnly) return [];
     const seen = new Set<string>();
     const result: KindOption[] = [];
 
@@ -68,23 +73,26 @@ export function KroStepGraph({ input, inputYaml, compositionName, stepIndex, xrd
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.75, gap: 0.5 }}>
-        <Tooltip title="Graph view">
-          <IconButton size="small" onClick={() => setMode('graph')} sx={btnSx(mode === 'graph')}>
-            <Icon icon="mdi:graph-outline" width={16} height={16} />
-          </IconButton>
-        </Tooltip>
-        <Tooltip title="YAML view">
-          <IconButton size="small" onClick={() => setMode('yaml')} sx={btnSx(mode === 'yaml')}>
-            <Icon icon="mdi:code-braces" width={16} height={16} />
-          </IconButton>
-        </Tooltip>
-      </Box>
-      {mode === 'graph'
+      {!readOnly && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.75, gap: 0.5 }}>
+          <Tooltip title="Graph view">
+            <IconButton size="small" onClick={() => setMode('graph')} sx={btnSx(mode === 'graph')}>
+              <Icon icon="mdi:graph-outline" width={16} height={16} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="YAML view">
+            <IconButton size="small" onClick={() => setMode('yaml')} sx={btnSx(mode === 'yaml')}>
+              <Icon icon="mdi:code-braces" width={16} height={16} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )}
+      {readOnly || mode === 'graph'
         ? <GraphCanvas input={input} height={480}
             compositionName={compositionName} stepIndex={stepIndex}
             xrdSchema={xrdSchema} mrdSchemaMap={mrdSchemaMap}
-            kindOptions={kindOptions} requirements={requirements} />
+            kindOptions={readOnly ? [] : kindOptions} requirements={requirements}
+            readOnly={readOnly} composedValues={composedValues} />
         : inputYaml ? <DataField label="input.yaml" disableLabel value={inputYaml} onChange={() => {}} /> : null
       }
     </Box>
