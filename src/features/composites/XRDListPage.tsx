@@ -1,7 +1,14 @@
-import { SectionBox } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { Icon } from '@iconify/react';
+import { Activity } from '@kinvolk/headlamp-plugin/lib';
+import {
+  ActionButton,
+  SectionBox,
+  SectionFilterHeader,
+} from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
 import { Typography } from '@mui/material';
 import { CompositeResourceDefinition, getXRScope, XRScope } from '../../resources';
+import { XRDCreatePanel } from './XRDCreateDialog';
 import { XRTypeSection } from './XRTypeSection';
 
 const SCOPE_LABELS: Record<XRScope, string> = {
@@ -15,6 +22,21 @@ const SCOPE_DESCRIPTIONS: Record<XRScope, string> = {
   Cluster: 'XRs that are cluster-scoped. No claims.',
   LegacyCluster: 'Cluster-scoped XRs from v1 XRDs. Claims may also exist.',
 };
+
+function launchCreatePanel(cluster?: string) {
+  const id = `crossplane-xrd-create-${Date.now()}`;
+  Activity.launch({
+    id,
+    title: 'Create CompositeResourceDefinition',
+    hideTitleInHeader: true,
+    location: 'split-right',
+    cluster,
+    icon: <Icon icon="mdi:cube-outline" width="100%" height="100%" />,
+    content: (
+      <XRDCreatePanel onDone={() => Activity.close(id)} activityId={id} cluster={cluster} />
+    ),
+  });
+}
 
 interface ScopeSectionProps {
   title: string;
@@ -41,16 +63,36 @@ function ScopeSection({ title, description, xrds, scope }: ScopeSectionProps) {
 export function XRDListPage() {
   const [xrds, error] = CompositeResourceDefinition.useList();
 
+  const headerActions = [
+    <ActionButton
+      description="Add CompositeResourceDefinition"
+      icon="mdi:plus-circle"
+      onClick={() => launchCreatePanel(xrds?.[0]?.cluster)}
+    />,
+  ];
+
   if (error?.status === 404) {
     return (
-      <SectionBox title="Composite Resources">
+      <SectionBox
+        title={
+          <SectionFilterHeader title="Composite Resources" titleSideActions={headerActions} />
+        }
+      >
         <p>CompositeResourceDefinitions not found. Is Crossplane installed?</p>
       </SectionBox>
     );
   }
 
   if (!xrds) {
-    return <SectionBox title="Composite Resources"><p>Loading…</p></SectionBox>;
+    return (
+      <SectionBox
+        title={
+          <SectionFilterHeader title="Composite Resources" titleSideActions={headerActions} />
+        }
+      >
+        <p>Loading…</p>
+      </SectionBox>
+    );
   }
 
   const byScope: Record<XRScope, KubeObject[]> = {
@@ -67,11 +109,13 @@ export function XRDListPage() {
 
   return (
     <>
-      {!hasAny && (
-        <SectionBox title="Composite Resources">
-          <p>No CompositeResourceDefinitions found.</p>
-        </SectionBox>
-      )}
+      <SectionBox
+        title={
+          <SectionFilterHeader title="Composite Resources" titleSideActions={headerActions} />
+        }
+      >
+        {!hasAny && <p>No CompositeResourceDefinitions found.</p>}
+      </SectionBox>
       {(['Namespaced', 'Cluster', 'LegacyCluster'] as XRScope[]).map(scope => (
         <ScopeSection
           key={scope}

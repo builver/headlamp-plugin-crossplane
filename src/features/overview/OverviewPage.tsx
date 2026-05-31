@@ -164,9 +164,7 @@ function PodSection({ title, pods, defaultExpanded = false }: PodSectionProps) {
     <Accordion defaultExpanded={defaultExpanded}>
       <AccordionSummary expandIcon={<Icon icon="mdi:chevron-down" />}>
         <Box display="flex" alignItems="center" gap={1}>
-          <Typography variant="subtitle1">
-            {title} ({pods.length})
-          </Typography>
+          <Typography variant="subtitle1">{title}</Typography>
           {pods.length > 0 && (
             <Chip
               size="small"
