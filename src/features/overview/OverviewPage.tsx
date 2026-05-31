@@ -56,12 +56,13 @@ function getStatus(items: KubeObject[] | null, conditionType = 'Healthy'): Resou
 
 interface OverviewTileProps {
   label: string;
-  route: string;
+  routeName: string;
+  params?: Record<string, string>;
   items: KubeObject[] | null;
   conditionType?: string;
 }
 
-function OverviewTile({ label, route, items, conditionType }: OverviewTileProps) {
+function OverviewTile({ label, routeName, params, items, conditionType }: OverviewTileProps) {
   const theme = useTheme();
   const { ready, notReady, total } = getStatus(items, conditionType);
   const pct = total > 0 ? Math.round((ready / total) * 100) : 0;
@@ -76,7 +77,7 @@ function OverviewTile({ label, route, items, conditionType }: OverviewTileProps)
 
   const legend = (
     <Box>
-      <Link routeName={route}>{label}</Link>
+      <Link routeName={routeName} params={params}>{label}</Link>
       <Box mt={1} fontSize="0.85rem">
         <div>{ready}/{total} {statusLabel}</div>
         <div>{notReady}/{total} not {statusLabel}</div>
@@ -127,7 +128,8 @@ function XRKindTile({
   return (
     <OverviewTile
       label={kind}
-      route={`crossplane-xr-kind-${plural}`}
+      routeName="crossplane-xr-list"
+      params={{ plural }}
       items={items}
       conditionType="Ready"
     />
@@ -351,12 +353,12 @@ export function OverviewPage() {
   );
 
   const tiles = [
-    { label: 'Providers', route: 'crossplane-providers', items: providers },
-    { label: 'Functions', route: 'crossplane-functions', items: functions },
-    { label: 'Configurations', route: 'crossplane-configurations', items: configurations },
+    { label: 'Providers', routeName: 'crossplane-providers', items: providers },
+    { label: 'Functions', routeName: 'crossplane-functions', items: functions },
+    { label: 'Configurations', routeName: 'crossplane-configurations', items: configurations },
     {
       label: 'Managed Resource Activations',
-      route: 'crossplane-mraps-list',
+      routeName: 'crossplane-mraps-list',
       items: mrds,
       conditionType: 'Established',
     },
@@ -368,9 +370,9 @@ export function OverviewPage() {
         <Box display="flex" flexWrap="wrap">
           {tiles.map(t => (
             <OverviewTile
-              key={t.route}
+              key={t.routeName}
               label={t.label}
-              route={t.route}
+              routeName={t.routeName}
               items={t.items}
               conditionType={t.conditionType}
             />

@@ -133,10 +133,10 @@ interface ObjectRef {
 
 function ObjectRefName({ objectRef, xrdPlural }: { objectRef: ObjectRef; xrdPlural?: string }) {
   if (objectRef.kind === 'CompositeResourceDefinition' && xrdPlural) {
-    return <Link routeName={`crossplane-xr-kind-${xrdPlural}`}>{objectRef.name}</Link>;
+    return <Link routeName="crossplane-xr-list" params={{ plural: xrdPlural }}>{objectRef.name}</Link>;
   }
   if (objectRef.kind === 'Composition') {
-    return <Link routeName={`crossplane-composition-detail-${objectRef.name}`}>{objectRef.name}</Link>;
+    return <Link routeName="crossplane-composition-detail" params={{ name: objectRef.name }}>{objectRef.name}</Link>;
   }
   return <>{objectRef.name}</>;
 }

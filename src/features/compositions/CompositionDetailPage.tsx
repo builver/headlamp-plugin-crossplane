@@ -103,7 +103,7 @@ export function CompositionDetailPage({ name }: { name: string }) {
   let compositeLink: string | JSX.Element = '-';
   if (compTypeRef) {
     compositeLink = matchingXrd
-      ? <Link routeName={`crossplane-xr-kind-${matchingXrd.jsonData?.spec?.names?.plural}`}>{compTypeRef.kind}</Link>
+      ? <Link routeName="crossplane-xr-list" params={{ plural: matchingXrd.jsonData?.spec?.names?.plural }}>{compTypeRef.kind}</Link>
       : compTypeRef.kind;
   }
 

@@ -87,7 +87,7 @@ export function makeCompositeTypeColumn(xrds: KubeObject[] | null) {
       return (
         <Box display="flex" alignItems="center" gap={1}>
           {plural
-            ? <Link routeName={`crossplane-xr-kind-${plural}`}>{ref.kind}</Link>
+            ? <Link routeName="crossplane-xr-list" params={{ plural }}>{ref.kind}</Link>
             : ref.kind
           }
           <Typography variant="caption" color="text.secondary">{ref.apiVersion}</Typography>
