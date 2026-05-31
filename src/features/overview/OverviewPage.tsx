@@ -1,6 +1,12 @@
 import { Icon } from '@iconify/react';
 import { K8s } from '@kinvolk/headlamp-plugin/lib';
-import { Link, SectionBox, TileChart } from '@kinvolk/headlamp-plugin/lib/components/common';
+import {
+  Link,
+  ResourceTable,
+  SectionBox,
+  StatusLabel,
+  TileChart,
+} from '@kinvolk/headlamp-plugin/lib/components/common';
 import type { KubeObject } from '@kinvolk/headlamp-plugin/lib/lib/k8s/cluster';
 import {
   Accordion,
@@ -12,11 +18,6 @@ import {
   MenuItem,
   Paper,
   Select,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
   Typography,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
@@ -136,6 +137,19 @@ function XRKindTile({
   );
 }
 
+function PodPhaseLabel({ pod }: { pod: KubeObject }) {
+  const phase = (pod.jsonData?.status?.phase as string) ?? 'Unknown';
+  const status: 'success' | 'warning' | 'error' | '' =
+    phase === 'Running' || phase === 'Succeeded'
+      ? 'success'
+      : phase === 'Pending'
+        ? 'warning'
+        : phase === 'Failed'
+          ? 'error'
+          : '';
+  return <StatusLabel status={status}>{phase}</StatusLabel>;
+}
+
 interface PodSectionProps {
   title: string;
   pods: KubeObject[];
@@ -170,43 +184,46 @@ function PodSection({ title, pods, defaultExpanded = false }: PodSectionProps) {
             </Typography>
           </Box>
         ) : (
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Namespace</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Image</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {pods.map(pod => {
-                const containers: { image: string }[] =
-                  pod.jsonData?.spec?.containers ?? [];
-                const images = containers.map(c => c.image).join(', ');
-                return (
-                  <TableRow key={pod.metadata.uid}>
-                    <TableCell>
-                      <Link
-                        routeName="pod"
-                        params={{
-                          name: pod.metadata.name,
-                          namespace: pod.metadata.namespace,
-                        }}
-                      >
-                        {pod.metadata.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{pod.metadata.namespace}</TableCell>
-                    <TableCell>{pod.jsonData?.status?.phase ?? '-'}</TableCell>
-                    <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
+          <ResourceTable.default
+            data={pods}
+            columns={[
+              'name',
+              {
+                label: 'Namespace',
+                getValue: (pod: KubeObject) => pod.metadata.namespace ?? '',
+                render: (pod: KubeObject) =>
+                  pod.metadata.namespace ? (
+                    <Link routeName="namespace" params={{ name: pod.metadata.namespace }}>
+                      {pod.metadata.namespace}
+                    </Link>
+                  ) : (
+                    '-'
+                  ),
+              },
+              {
+                label: 'Status',
+                getValue: (pod: KubeObject) => pod.jsonData?.status?.phase ?? '-',
+                render: (pod: KubeObject) => <PodPhaseLabel pod={pod} />,
+              },
+              {
+                label: 'Image',
+                getValue: (pod: KubeObject) => {
+                  const containers: { image: string }[] = pod.jsonData?.spec?.containers ?? [];
+                  return containers.map(c => c.image).join(', ') || '-';
+                },
+                render: (pod: KubeObject) => {
+                  const containers: { image: string }[] = pod.jsonData?.spec?.containers ?? [];
+                  const images = containers.map(c => c.image).join(', ');
+                  return (
+                    <Box sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
                       {images || '-'}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                    </Box>
+                  );
+                },
+              },
+              'age',
+            ]}
+          />
         )}
       </AccordionDetails>
     </Accordion>
