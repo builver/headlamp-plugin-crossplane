@@ -18,13 +18,13 @@ function parseScalarCelValue(
   const matches = collectCelMatches(val, knownIds);
   const single = parseSingleRefMatch(matches, val);
   if (single) {
-    return { inPort: { ref: single.ref, srcPath: single.srcPath, srcShort: single.srcShort, optional: single.optional } };
+    return { inPort: { ref: single.ref, srcPath: single.srcPath, srcShort: single.srcShort } };
   } else if (matches.length > 0) {
     return { segments: parseSegments(val, knownIds) };
   }
   const bareM = BARE_VAR_RE.exec(val);
   if (bareM && knownIds.has(bareM[1])) {
-    return { inPort: { ref: bareM[1], srcPath: '', srcShort: bareM[1], optional: false } };
+    return { inPort: { ref: bareM[1], srcPath: '', srcShort: bareM[1] } };
   } else if (/^\$\{(true|false|null|-?\d+(?:\.\d+)?|"[^"]*"|'[^']*')\}$/.test(val)) {
     return { value: val };
   } else if (/\$\{/.test(val)) {

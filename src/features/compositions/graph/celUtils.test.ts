@@ -11,13 +11,17 @@ import {
   findCelRefs,
   findTopLevelTernary,
   isSimplePath,
+  overlayRowWithTemplate,
   parseCelAst,
   parseCelTemplate,
   parseSegments,
   reconstructTemplate,
+  setSegmentOptional,
   shortFieldName,
+  splitSrcPath,
   validateCelInner,
 } from './celUtils';
+import { NodeRow } from './types';
 
 // Most CEL the kro graph parses uses these well-known ids; tests share a default set.
 const KNOWN = new Set(['schema', 'env', 'res1', 'res2']);
@@ -580,6 +584,137 @@ describe('shortFieldName', () => {
   it('returns the last segment of a dot-path', () => {
     expect(shortFieldName('spec.forProvider.region')).toBe('region');
     expect(shortFieldName('foo')).toBe('foo');
+  });
+});
+
+describe('splitSrcPath', () => {
+  it('returns empty for empty input', () => {
+    expect(splitSrcPath('')).toEqual([]);
+  });
+
+  it('splits a bare path with no optionals', () => {
+    expect(splitSrcPath('spec.foo.bar')).toEqual([
+      { name: 'spec', optional: false },
+      { name: 'foo',  optional: false },
+      { name: 'bar',  optional: false },
+    ]);
+  });
+
+  it('marks a leading-? segment as optional', () => {
+    expect(splitSrcPath('?spec.foo')).toEqual([
+      { name: 'spec', optional: true  },
+      { name: 'foo',  optional: false },
+    ]);
+  });
+
+  it('marks mid-path and trailing optionals', () => {
+    expect(splitSrcPath('spec.?foo.?bar')).toEqual([
+      { name: 'spec', optional: false },
+      { name: 'foo',  optional: true  },
+      { name: 'bar',  optional: true  },
+    ]);
+  });
+
+  it('round-trips through join', () => {
+    const path = '?spec.?foo.bar';
+    const rebuilt = splitSrcPath(path).map(s => (s.optional ? '?' : '') + s.name).join('.');
+    expect(rebuilt).toBe(path);
+  });
+
+  it('silently drops empty-name segments from malformed paths', () => {
+    expect(splitSrcPath('a..b')).toEqual([
+      { name: 'a', optional: false },
+      { name: 'b', optional: false },
+    ]);
+    expect(splitSrcPath('.foo')).toEqual([{ name: 'foo', optional: false }]);
+    expect(splitSrcPath('a.')).toEqual([{ name: 'a', optional: false }]);
+    expect(splitSrcPath('?')).toEqual([]);
+    expect(splitSrcPath('a.?.b')).toEqual([
+      { name: 'a', optional: false },
+      { name: 'b', optional: false },
+    ]);
+  });
+});
+
+describe('setSegmentOptional', () => {
+  it('adds ? to a segment that was not optional', () => {
+    expect(setSegmentOptional('spec.foo.bar', 0, true)).toBe('?spec.foo.bar');
+    expect(setSegmentOptional('spec.foo.bar', 1, true)).toBe('spec.?foo.bar');
+    expect(setSegmentOptional('spec.foo.bar', 2, true)).toBe('spec.foo.?bar');
+  });
+
+  it('removes ? from a segment that was optional', () => {
+    expect(setSegmentOptional('?spec.?foo.?bar', 0, false)).toBe('spec.?foo.?bar');
+    expect(setSegmentOptional('?spec.?foo.?bar', 1, false)).toBe('?spec.foo.?bar');
+    expect(setSegmentOptional('?spec.?foo.?bar', 2, false)).toBe('?spec.?foo.bar');
+  });
+
+  it('preserves intermediate ? markers when toggling another segment', () => {
+    expect(setSegmentOptional('?spec.bar', 1, true)).toBe('?spec.?bar');
+    expect(setSegmentOptional('?spec.?bar', 1, false)).toBe('?spec.bar');
+  });
+
+  it('is idempotent — setting the same value twice equals once', () => {
+    const path = '?spec.?foo.bar';
+    const once = setSegmentOptional(path, 2, true);
+    const twice = setSegmentOptional(once, 2, true);
+    expect(twice).toBe(once);
+    expect(once).toBe('?spec.?foo.?bar');
+  });
+
+  it('returns input unchanged when idx is out of range', () => {
+    expect(setSegmentOptional('spec.foo', -1, true)).toBe('spec.foo');
+    expect(setSegmentOptional('spec.foo',  2, true)).toBe('spec.foo');
+  });
+
+  it('returns input unchanged when value already matches', () => {
+    const path = '?spec.foo';
+    expect(setSegmentOptional(path, 0, true)).toBe(path);
+    expect(setSegmentOptional(path, 1, false)).toBe(path);
+  });
+
+  it('handles single-segment paths at both polarities', () => {
+    expect(setSegmentOptional('spec',  0, true)).toBe('?spec');
+    expect(setSegmentOptional('?spec', 0, false)).toBe('spec');
+  });
+});
+
+describe('overlayRowWithTemplate — forEach round-trip', () => {
+  // A forEach row is built by parsing the resource template, then postProcessEachRefs
+  // rewrites `inPort.ref` to the resource's node id and stashes the original CEL
+  // identifier (e.g. `user`) in `inPort.origRef`. When the user toggles a segment
+  // via the popover, GraphCanvas writes a template using `origRef ?? ref` — i.e.
+  // the CEL identifier — and that template flows back through overlayRowWithTemplate.
+  // The overlay must preserve the forEach rewrite so the pill keeps wiring back to
+  // the resource node and the tooltip keeps showing the CEL identifier.
+  const KNOWN_WITH_USER = new Set(['schema', 'env', 'res1', 'user']);
+
+  const baseForEachRow: NodeRow = {
+    depth: 1, key: 'name', isParent: false, fieldPath: 'spec.name',
+    inPort: { ref: 'res1', srcPath: 'spec.foo', srcShort: 'foo', origRef: 'user' },
+  };
+
+  it('preserves origRef and the node-id ref when overlay template uses the same CEL identifier', () => {
+    const overlayed = overlayRowWithTemplate(baseForEachRow, '${user.spec.?foo}', KNOWN_WITH_USER);
+    expect(overlayed.inPort).toEqual({
+      ref: 'res1', srcPath: 'spec.?foo', srcShort: 'foo', origRef: 'user',
+    });
+  });
+
+  it('round-trips a toggle without dropping origRef on subsequent overlays', () => {
+    const afterFirstToggle = overlayRowWithTemplate(baseForEachRow, '${user.spec.?foo}', KNOWN_WITH_USER);
+    const afterSecondToggle = overlayRowWithTemplate(afterFirstToggle, '${user.spec.foo}', KNOWN_WITH_USER);
+    expect(afterSecondToggle.inPort).toEqual({
+      ref: 'res1', srcPath: 'spec.foo', srcShort: 'foo', origRef: 'user',
+    });
+  });
+
+  it('drops origRef when the user rewires the row to a different CEL identifier', () => {
+    const overlayed = overlayRowWithTemplate(baseForEachRow, '${schema.spec.foo}', KNOWN_WITH_USER);
+    expect(overlayed.inPort).toEqual({
+      ref: 'schema', srcPath: 'spec.foo', srcShort: 'foo',
+    });
+    expect(overlayed.inPort?.origRef).toBeUndefined();
   });
 });
 

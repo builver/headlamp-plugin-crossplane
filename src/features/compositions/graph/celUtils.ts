@@ -22,8 +22,43 @@ export const OP_DISPLAY: Record<string, string> = {
 
 /** Returns the last dot-segment of a path, with `?` optional-chaining markers stripped. */
 export function shortFieldName(path: string): string {
-  const clean = path.replace(/\?/g, '');
+  const clean = stripOptionalMarkers(path);
   return clean.split('.').pop() ?? clean;
+}
+
+/** Removes all `?` optional-chaining markers from a path. Used wherever path
+ *  identity should ignore the runtime null-tolerance hint — e.g. matching an
+ *  edge's frozen `srcPortPath` against a row's mutable `inPort.srcPath` after
+ *  the user has toggled segment optionality via the popover. */
+export function stripOptionalMarkers(s: string): string {
+  return s.replace(/\?/g, '');
+}
+
+/** Splits an `inPort.srcPath` / `ExtraEdge.srcFieldPath` (e.g. `?spec.?foo.bar`)
+ *  into per-segment records. Order matches the dot-path order. Empty input
+ *  returns []. Degenerate inputs (`'a..b'`, `'.foo'`, `'a.'`, lone `'?'`)
+ *  silently drop empty-name segments so the popover never renders blank rows
+ *  and the setter never re-emits malformed paths. */
+export function splitSrcPath(srcPath: string): { name: string; optional: boolean }[] {
+  if (!srcPath) return [];
+  const out: { name: string; optional: boolean }[] = [];
+  for (const seg of srcPath.split('.')) {
+    const optional = seg.startsWith('?');
+    const name = optional ? seg.slice(1) : seg;
+    if (!name) continue;
+    out.push({ name, optional });
+  }
+  return out;
+}
+
+/** Returns a new srcPath with the `?` marker on segment `idx` set to `value`.
+ *  Idempotent. Out-of-range `idx` returns the input unchanged. */
+export function setSegmentOptional(srcPath: string, idx: number, value: boolean): string {
+  const segs = splitSrcPath(srcPath);
+  if (idx < 0 || idx >= segs.length) return srcPath;
+  if (segs[idx].optional === value) return srcPath;
+  segs[idx] = { ...segs[idx], optional: value };
+  return segs.map(s => (s.optional ? '?' : '') + s.name).join('.');
 }
 
 /** Runs the CEL interpolation regex over `str`, returning only matches whose ref is in `knownIds`. */
@@ -192,10 +227,18 @@ export function reconstructTemplate(segments: RowSegment[]): string {
 export function overlayRowWithTemplate(row: NodeRow, template: string, knownIds: Set<string>): NodeRow {
   const base = { ...row, inPort: undefined, segments: undefined, celExpr: undefined, value: undefined };
   const matches = collectCelMatches(template, knownIds);
-  // Simple single-ref template → keep inPort display so the ? toggle stays available
+  // Simple single-ref template → keep inPort display so the segment popover works.
+  // Preserve the baseline row's forEach-rewrite (ref=nodeId, origRef=CEL identifier
+  // from postProcessEachRefs) when the parsed template still uses the same CEL
+  // identifier — otherwise the overlay would drop the wiring back to the resource
+  // node and the pill would point at a non-existent ref.
   const single = parseSingleRefMatch(matches, template);
   if (single) {
-    return { ...base, inPort: { ref: single.ref, srcPath: single.srcPath, srcShort: single.srcShort, optional: single.optional } };
+    const baseInPort = row.inPort;
+    if (baseInPort?.origRef && single.ref === baseInPort.origRef) {
+      return { ...base, inPort: { ref: baseInPort.ref, srcPath: single.srcPath, srcShort: single.srcShort, origRef: baseInPort.origRef } };
+    }
+    return { ...base, inPort: { ref: single.ref, srcPath: single.srcPath, srcShort: single.srcShort } };
   }
   if (matches.length > 0) return { ...base, segments: parseSegments(template, knownIds) };
   if (/^\$\{(true|false|null|-?\d+(?:\.\d+)?|"[^"]*"|'[^']*')\}$/.test(template)) return { ...base, value: template };

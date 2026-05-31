@@ -140,8 +140,9 @@ export interface RowsNodeCardProps {
   noSchemaWarning?: boolean;
   /** Paths where x-kubernetes-preserve-unknown-fields: true — free-form input at those paths. */
   preserveUnknownParentPaths?: Set<string>;
-  /** Called when the user clicks the `?` toggle on an inPort pill. */
-  onToggleInPortOptional?: (nodeId: string, fieldPath: string) => void;
+  /** Called when the user clicks an inPort pill to open the per-segment optional menu.
+   *  The DOM anchor is the pill itself; the popover positions relative to it. */
+  onOpenInPortSegmentsMenu?: (nodeId: string, fieldPath: string, anchor: HTMLElement) => void;
   /** Called when the user clicks "+" on a forEach / includeWhen / readyWhen section header. */
   onAddSectionItem?: (nodeId: string, section: string, varName?: string) => void;
   /** Called when the user clicks a port dot to delete all edges connected to it. */
@@ -156,6 +157,9 @@ export interface RowsNodeCardProps {
   activeOutPaths?: Set<string>;
   /** fieldPath → op-node label/type for op-node output connections. Used to render VarPills on celExpr rows. */
   opConnectedFields?: Map<string, { label: string; type?: string; srcNodeId: string }>;
+  /** fieldPath → source-field type for rows whose inPort is a single-ref CEL connection.
+   *  Used so the inPort VarPill renders a `typeSuffix` consistent with op-node input pills. */
+  inPortSourceTypes?: Map<string, string>;
   /** Called when the user edits a plain (non-connected) field value inline. */
   onValueEdit?: (nodeId: string, fieldPath: string, value: string) => void;
   /** When true, the node is faded because it is not related to the selected node. */
@@ -185,7 +189,7 @@ export interface RowsNodeCardProps {
 export const RowsNodeCard = memo(function RowsNodeCard({
   node, selected, dark, isDrawing, hoverRowIdx,
   onMouseDown, onClick, onPortDown, potentialFields, allSchemaFields, isExpanded,
-  onPotentialFieldClick, onTokenHover, onTokenLeave, editedPaths, onDelete, onDeleteRow, mapParentPaths, arrayParentPaths, onAddArrayItem, nodeTypeByRef, unknownFieldPaths, noSchemaWarning, preserveUnknownParentPaths, onToggleInPortOptional, onAddSectionItem, onPortClick, activeInPaths, activeOutPaths, opConnectedFields, onValueEdit,
+  onPotentialFieldClick, onTokenHover, onTokenLeave, editedPaths, onDelete, onDeleteRow, mapParentPaths, arrayParentPaths, onAddArrayItem, nodeTypeByRef, unknownFieldPaths, noSchemaWarning, preserveUnknownParentPaths, onOpenInPortSegmentsMenu, onAddSectionItem, onPortClick, activeInPaths, activeOutPaths, opConnectedFields, inPortSourceTypes, onValueEdit,
   dimmed,
   readOnly,
   collectionInstanceCount,
@@ -464,7 +468,12 @@ export const RowsNodeCard = memo(function RowsNodeCard({
         border: `2px solid ${selected ? accent : alpha(accent, 0.55)}`,
         borderRadius: 1.5, overflow: 'hidden',
         display: 'flex', flexDirection: 'column',
-        background: dark
+        // Layer a solid base under the gradient so the card stays opaque — the
+        // collection-stack shadows behind (rendered at zIndex:-1 in edit mode for
+        // forEach resources) would otherwise bleed their borders through the
+        // translucent gradient start in the overlap region.
+        backgroundColor: dark ? '#1c1c1c' : '#fff',
+        backgroundImage: dark
           ? `linear-gradient(140deg, ${alpha(accent, 0.22)} 0%, #1c1c1c 100%)`
           : `linear-gradient(140deg, ${alpha(accent, 0.07)} 0%, #fff 100%)`,
         boxShadow: selected ? `0 0 0 3px ${alpha(accent, 0.35)}` : undefined,
@@ -907,9 +916,20 @@ export const RowsNodeCard = memo(function RowsNodeCard({
                       color={pa}
                       label={row.actualValue !== undefined ? row.actualValue : row.inPort!.srcShort}
                       tooltip={row.inPort!.srcPath ? `${row.inPort!.origRef ?? row.inPort!.ref}.${row.inPort!.srcPath}` : (row.inPort!.origRef ?? row.inPort!.srcShort)}
-                      optional={row.inPort!.optional}
-                      typeSuffix={isForEachVarRow ? '[]' : undefined}
-                      onToggleOptional={readOnly ? undefined : (e => { e.stopPropagation(); onToggleInPortOptional?.(node.id, row.fieldPath!); })}
+                      optional={row.inPort!.srcPath.includes('?')}
+                      typeSuffix={
+                        isForEachVarRow
+                          ? '[]'
+                          : (() => {
+                              const t = row.fieldPath ? inPortSourceTypes?.get(row.fieldPath) : undefined;
+                              return t ? abbrevType(t) : undefined;
+                            })()
+                      }
+                      onOpenSegmentsMenu={
+                        readOnly || !onOpenInPortSegmentsMenu || !row.inPort!.srcPath
+                          ? undefined
+                          : (anchor) => onOpenInPortSegmentsMenu(node.id, row.fieldPath!, anchor)
+                      }
                       onMouseEnter={() => onTokenHover({ srcNodeId: refToNodeId(row.inPort!.ref), srcPath: row.inPort!.srcPath, tgtNodeId: node.id })}
                       onMouseLeave={onTokenLeave}
                     />
@@ -936,7 +956,7 @@ export const RowsNodeCard = memo(function RowsNodeCard({
                         <VarPill
                           color={activeInInfo!.color}
                           label={activeInInfo!.label}
-                          tooltip={activeInInfo!.srcFieldPath.replace(/\?/g, '')}
+                          tooltip={activeInInfo!.srcFieldPath}
                           onMouseEnter={() => onTokenHover({ srcNodeId: activeInInfo!.srcNodeId, srcPath: activeInInfo!.srcFieldPath.replace(/\?/g, ''), tgtNodeId: node.id })}
                           onMouseLeave={onTokenLeave}
                         />

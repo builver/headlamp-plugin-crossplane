@@ -4,17 +4,18 @@ import { Box, Button, IconButton, Paper, Tooltip, Typography } from '@mui/materi
 import { alpha, useTheme } from '@mui/material/styles';
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getGroupVersion } from '../../../components/map/apiPaths';
-import { overlayRowWithTemplate, shortFieldName } from './celUtils';
+import { collectCelMatches, overlayRowWithTemplate, parseSingleRefMatch, setSegmentOptional, shortFieldName, splitSrcPath, stripOptionalMarkers } from './celUtils';
 import {
   buildVarFieldRows, CANVAS_SIZE, DRAFT_NODE_ID,   EXPR_NODE_HDR_H, EXPR_NODE_PORT_H, EXPR_NODE_W, exprNodeH, exprNodeVarFieldExtraRows, K8S_BASE_FIELDS, K8S_MAP_PATHS,
   NODE_CFG, NODE_HDR_H,   NODE_ROW_H, NODE_W,
-nodeH, nodeIdToRef, RAW_TEMPLATE_NODE_H,
+nodeH, nodeIdToRef, RAW_TEMPLATE_NODE_H, refAccent, refToNodeId,
 SCHEMA_NODE_ID, USER_C_DARK, USER_C_LIGHT, VAR_FIELD_PREFIX,
 } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/exprNodeDefs';
 import { ConnectedPortInfo, ExprNodeCard } from './ExprNodeCard';
 import { ExprNodePalette } from './ExprNodePalette';
 import { bezierPath, buildGraph, exprNodeSrcCoords, exprNodeTgtCoords, extraPortY, makeBezier, sectionAddBarOffset, srcPortY, tgtPortY } from './graphUtils';
+import { OptionalSegmentsPopover } from './OptionalSegmentsPopover';
 import { DraftNodeCard, RowsNodeCard } from './RowsNodeCard';
 import { applyExtraEdgesToInput, applyFieldEditsToInput, buildTemplateRows, insertRowAtPath, makeLeafRow, reindexPathAfterDelete, removeRowAtPath } from './rowUtils';
 import { getResApiVersion, getResKind } from './schemaUtils';
@@ -160,6 +161,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       setFieldEdits([]);
       setPendingResources([]);
       setPendingRemovals([]);
+      setSegmentsPopoverAnchor(null);
+      setSegmentsPopoverTarget(null);
       setTimeout(() => setSaveState('idle'), 2500);
     } catch (err) {
       console.error('Failed to patch Composition:', err);
@@ -177,6 +180,8 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     setSavedExprNodeIds(new Set(initExprNodes.map(n => n.id)));
     setSavedEdgeIds(new Set(initExtraEdges.map(e => e.id)));
     exprDragId.current = null; exprResizeId.current = null;
+    setSegmentsPopoverAnchor(null);
+    setSegmentsPopoverTarget(null);
   }, [initNodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const {
@@ -325,10 +330,35 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     [nodes]
   );
 
+  /** Per-resource map of forEach variable name → iterable source.
+   *  `forEach: [{ env: "${schema.spec.environments}" }]` on a resource yields
+   *  `{ env: { srcRef: 'schema', srcPath: 'spec.environments' } }`. Used by
+   *  getFieldType to resolve `${env.name}` as the element subfield type
+   *  (e.g. `spec.environments[].name`). Only single-ref iterables are captured;
+   *  more complex CEL expressions are skipped (type stays unknown). */
+  const forEachVarSources = useMemo(() => {
+    const result = new Map<string, Map<string, { srcRef: string; srcPath: string }>>();
+    for (const res of (input?.resources ?? []) as any[]) {
+      if (!res?.id || !Array.isArray(res.forEach)) continue;
+      const inner = new Map<string, { srcRef: string; srcPath: string }>();
+      for (const entry of res.forEach) {
+        for (const [varName, val] of Object.entries(entry as Record<string, unknown>)) {
+          if (typeof val !== 'string') continue;
+          const matches = collectCelMatches(val, knownIds);
+          const single = parseSingleRefMatch(matches, val);
+          if (single) inner.set(varName, { srcRef: single.ref, srcPath: single.srcPath });
+        }
+      }
+      if (inner.size) result.set(res.id as string, inner);
+    }
+    return result;
+  }, [input, knownIds]);
 
-  /** Type of any field in any node — looks up the cached schema fields, bypassing the used-path filter.
-   *  Array item sub-paths like containers.0.name are translated to containers[].name for lookup. */
-  const getFieldType = useCallback((nodeId: string, fieldPath: string): string | undefined => {
+
+  /** Resolve the field type for any (nodeId, fieldPath) pair via the cached schema fields.
+   *  Does NOT handle the `_forEach.` synthetic prefix — see the wrapping `getFieldType`
+   *  which composes this with `forEachVarSources` for forEach var resolution. */
+  const getFieldTypeBase = useCallback((nodeId: string, fieldPath: string): string | undefined => {
     const secType = SECTION_DEFS[sectionOf(fieldPath)].fieldType(sectionRelPath(fieldPath));
     if (secType !== undefined) return secType;
     if (nodeId === SCHEMA_NODE_ID) {
@@ -361,6 +391,23 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     const schemaPath = fieldPath.replace(/\.(\d+)\./g, '[].').replace(/\.(\d+)$/, '[]');
     return fields.find(s => s.path === schemaPath)?.type;
   }, [input, requirements, pendingResources, xrdAllFields, mrdFieldsCache, nodeMap]);
+
+  /** Wraps `getFieldTypeBase` with `_forEach.<var>[.<sub>]` resolution.
+   *  Strips a `_forEach.` prefix by looking up the var's iterable source
+   *  (which is per-resource) and composing the element subfield path. */
+  const getFieldType = useCallback((nodeId: string, fieldPath: string): string | undefined => {
+    if (fieldPath.startsWith('_forEach.')) {
+      const tail = fieldPath.slice('_forEach.'.length);
+      const dot = tail.indexOf('.');
+      const varName = dot === -1 ? tail : tail.slice(0, dot);
+      const subpath = dot === -1 ? '' : tail.slice(dot + 1);
+      const src = forEachVarSources.get(nodeId)?.get(varName);
+      if (!src) return undefined;
+      const elementPath = `${src.srcPath}[]${subpath ? '.' + subpath : ''}`;
+      return getFieldTypeBase(refToNodeId(src.srcRef), elementPath);
+    }
+    return getFieldTypeBase(nodeId, fieldPath);
+  }, [getFieldTypeBase, forEachVarSources]);
 
   /** Pre-built ConnectedPortInfo maps for every op node — avoids O(N×M) inline work in the render loop. */
   const connectedPortInfoByOpId = useMemo(() => {
@@ -411,6 +458,9 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
   );
 
   const getEdgeTargetFieldPath = useCallback((edge: GraphEdge): string | undefined => {
+    // Prefer the edge's own tgtFieldPath when populated — disambiguates rows that
+    // share the same `inPort` key (multiple fields with the same CEL expression).
+    if (edge.tgtFieldPath) return edge.tgtFieldPath;
     const tgt = nodeMap.get(edge.target);
     if (!tgt) return undefined;
     const row = tgt.rows.find(r => {
@@ -478,6 +528,36 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   /** Node map keyed on display rows (includes injected info rows) — used for SVG edge Y calculations. */
   const displayNodeMap = useMemo(() => new Map(nodesForDisplay.map(n => [n.id, n])), [nodesForDisplay]);
+
+  /** For each regular node: maps `row.fieldPath` → the type of the row's inPort source field.
+   *  Used so the inPort VarPill displays a `typeSuffix` consistent with how op-node input
+   *  pills already render the source's type. Skips rows whose source type is unknown.
+   *  For forEach self-refs (`row.inPort.origRef` is set), synthesizes a `_forEach.<var>[.<sub>]`
+   *  path so getFieldType resolves the iterable's element subfield type. */
+  const inPortSourceTypeByNode = useMemo(() => {
+    const result = new Map<string, Map<string, string>>();
+    for (const n of nodesForDisplay) {
+      const inner = new Map<string, string>();
+      for (const row of n.rows) {
+        if (!row.inPort || !row.fieldPath) continue;
+        let lookupNodeId: string;
+        let lookupPath: string;
+        if (row.inPort.origRef) {
+          // postProcessEachRefs rewrote `ref` to the resource nodeId and stashed the
+          // var name in `origRef`. Synthesize the `_forEach.<var>[.<sub>]` lookup.
+          lookupNodeId = n.id;
+          lookupPath = `_forEach.${row.inPort.origRef}${row.inPort.srcPath ? '.' + row.inPort.srcPath : ''}`;
+        } else {
+          lookupNodeId = refToNodeId(row.inPort.ref);
+          lookupPath = row.inPort.srcPath;
+        }
+        const type = getFieldType(lookupNodeId, lookupPath);
+        if (type) inner.set(row.fieldPath, type);
+      }
+      if (inner.size) result.set(n.id, inner);
+    }
+    return result;
+  }, [nodesForDisplay, getFieldType]);
 
   /** Fanned-out instance cards for every forEach collection node. Cards are
    *  kept mounted regardless of selection so the collapse animation can play in
@@ -1097,7 +1177,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       const srcOff = src.id === sel ? sectionAddBarOffset(src, readOnly) : 0;
       const tgtOff = tgt.id === sel ? sectionAddBarOffset(tgt, readOnly) : 0;
       const sy = srcPortY(src, e.srcPortPath, srcOff);
-      const ty = tgtPortY(tgt, e.tgtPortKey, tgtOff);
+      const ty = tgtPortY(tgt, e, tgtOff);
       const isSelfLoop = e.source === e.target;
       const d = isSelfLoop ? makeBezier(src.x + src.w, sy, src.x, ty) : bezierPath(src, tgt, e, srcOff, tgtOff);
       setEdgePaths(g, d);
@@ -1372,6 +1452,10 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     if (!el) return;
     const onWheel = (e: globalThis.WheelEvent) => {
       e.preventDefault();
+      // Popper anchors to a pill DOM node and only re-positions on scroll/resize —
+      // it doesn't observe imperative transform mutations on canvasDivRef. Close
+      // the popover so it doesn't drift away from its anchor during pan/zoom.
+      closeSegmentsPopover();
       if (e.ctrlKey) {
         // Pinch-to-zoom or ctrl+wheel — zoom centered on cursor
         const r = el.getBoundingClientRect();
@@ -1466,26 +1550,37 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     setConfirmDelete(null);
   }, [confirmDelete, pendingResources]);
 
-  /** Toggle the optional-chaining `?` marker on an inPort field's CEL template. */
-  const toggleInPortOptional = useCallback((nodeId: string, fieldPath: string) => {
+  /** Rewrites an inPort field's CEL template with `?` flipped on segment `segIdx`.
+   *  Uses `origRef` when present (forEach self-refs are rewritten by
+   *  postProcessEachRefs so `inPort.ref` is the resource node id, not the CEL
+   *  identifier the user authored). Reads the latest queued template via the
+   *  functional updater so rapid back-to-back toggles compose correctly. */
+  const setInPortSegmentOptional = useCallback((nodeId: string, fieldPath: string, segIdx: number, value: boolean) => {
     const displayNode = nodesForDisplay.find(n => n.id === nodeId);
     if (!displayNode) return;
     const row = displayNode.rows.find(r => r.fieldPath === fieldPath);
     if (!row?.inPort) return;
-    const { ref, srcPath } = row.inPort;
-    let newSrcPath: string;
-    if (srcPath.includes('?')) {
-      newSrcPath = srcPath.replace(/\?/g, '');
-    } else {
-      const lastDot = srcPath.lastIndexOf('.');
-      newSrcPath = lastDot === -1 ? `?${srcPath}` : `${srcPath.slice(0, lastDot + 1)}?${srcPath.slice(lastDot + 1)}`;
-    }
-    const newTemplate = `\${${ref}.${newSrcPath}}`;
-    setFieldEdits(prev => [
-      ...prev.filter(e => !(e.nodeId === nodeId && e.fieldPath === fieldPath)),
-      { nodeId, fieldPath, template: newTemplate },
-    ]);
-  }, [nodesForDisplay]);
+    const baseRef = row.inPort.origRef ?? row.inPort.ref;
+    const baselineSrcPath = row.inPort.srcPath;
+    setFieldEdits(prev => {
+      // Read the latest queued template for this fieldPath if one exists; the row
+      // overlay reflects it on the next render but the closure may not.
+      const prior = prev.find(e => e.nodeId === nodeId && e.fieldPath === fieldPath);
+      let currentSrcPath = baselineSrcPath;
+      if (prior) {
+        const matches = collectCelMatches(prior.template, knownIds);
+        const single = parseSingleRefMatch(matches, prior.template);
+        if (single) currentSrcPath = single.srcPath;
+      }
+      const newSrcPath = setSegmentOptional(currentSrcPath, segIdx, value);
+      if (newSrcPath === currentSrcPath) return prev;
+      const newTemplate = `\${${baseRef}.${newSrcPath}}`;
+      return [
+        ...prev.filter(e => !(e.nodeId === nodeId && e.fieldPath === fieldPath)),
+        { nodeId, fieldPath, template: newTemplate },
+      ];
+    });
+  }, [nodesForDisplay, knownIds]);
 
   const onValueEdit = useCallback((nodeId: string, fieldPath: string, value: string) => {
     setFieldEdits(prev => [
@@ -1494,21 +1589,96 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     ]);
   }, []);
 
-  const toggleOpPortOptional = useCallback((exprNodeId: string, portName: string) => {
-    const edge = extraEdges.find(e => e.tgtNodeId === exprNodeId && e.tgtFieldPath === portName);
-    if (!edge) return;
-    const srcPath = edge.srcFieldPath;
-    let newSrcPath: string;
-    if (srcPath.includes('?')) {
-      newSrcPath = srcPath.replace(/\?/g, '');
-    } else {
-      const lastDot = srcPath.lastIndexOf('.');
-      newSrcPath = lastDot === -1 ? `?${srcPath}` : `${srcPath.slice(0, lastDot + 1)}?${srcPath.slice(lastDot + 1)}`;
+  /** Rewrites an op-node input port's source path with `?` flipped on segment `segIdx`.
+   *  Reads the edge inside the functional updater so rapid back-to-back toggles
+   *  compose against the latest queued srcFieldPath. */
+  const setOpPortSegmentOptional = useCallback((exprNodeId: string, portName: string, segIdx: number, value: boolean) => {
+    setExtraEdges(prev => {
+      const edge = prev.find(e => e.tgtNodeId === exprNodeId && e.tgtFieldPath === portName);
+      if (!edge) return prev;
+      const newSrcPath = setSegmentOptional(edge.srcFieldPath, segIdx, value);
+      if (newSrcPath === edge.srcFieldPath) return prev;
+      return prev.map(e => e.id === edge.id ? { ...e, srcFieldPath: newSrcPath } : e);
+    });
+  }, []);
+
+  /** Per-segment optional popover state. Anchored to the clicked VarPill. */
+  type SegmentsTarget =
+    | { kind: 'inPort'; nodeId: string; fieldPath: string }
+    | { kind: 'opPort'; exprNodeId: string; portName: string };
+  const [segmentsPopoverAnchor, setSegmentsPopoverAnchor] = useState<HTMLElement | null>(null);
+  const [segmentsPopoverTarget, setSegmentsPopoverTarget] = useState<SegmentsTarget | null>(null);
+
+  const openInPortSegmentsMenu = useCallback((nodeId: string, fieldPath: string, anchor: HTMLElement) => {
+    setSegmentsPopoverTarget({ kind: 'inPort', nodeId, fieldPath });
+    setSegmentsPopoverAnchor(anchor);
+  }, []);
+  const openOpPortSegmentsMenu = useCallback((exprNodeId: string, portName: string, anchor: HTMLElement) => {
+    setSegmentsPopoverTarget({ kind: 'opPort', exprNodeId, portName });
+    setSegmentsPopoverAnchor(anchor);
+  }, []);
+  const closeSegmentsPopover = useCallback(() => {
+    setSegmentsPopoverAnchor(null);
+    setSegmentsPopoverTarget(null);
+  }, []);
+
+  /** Derive the popover's segments + accent from the current target. Returns
+   *  null if the target's source row/edge no longer exists (e.g. after delete).
+   *  `segmentOffset` is added to popover indices when calling the segment setters —
+   *  used to hide synthetic `_forEach` prefix segments from the user. */
+  const segmentsPopoverData = useMemo(() => {
+    if (!segmentsPopoverTarget) return null;
+    const FOREACH_PREFIX = '_forEach.';
+    if (segmentsPopoverTarget.kind === 'inPort') {
+      const { nodeId, fieldPath } = segmentsPopoverTarget;
+      const displayNode = nodesForDisplay.find(n => n.id === nodeId);
+      const row = displayNode?.rows.find(r => r.fieldPath === fieldPath);
+      if (!row?.inPort) return null;
+      return {
+        segments: splitSrcPath(row.inPort.srcPath),
+        color: refAccent(row.inPort.ref, dark, nodeTypeByRef.get(row.inPort.ref)),
+        segmentOffset: 0,
+      };
     }
-    setExtraEdges(prev => prev.map(e =>
-      e.id === edge.id ? { ...e, srcFieldPath: newSrcPath } : e
-    ));
-  }, [extraEdges]);
+    const { exprNodeId, portName } = segmentsPopoverTarget;
+    const edge = extraEdges.find(e => e.tgtNodeId === exprNodeId && e.tgtFieldPath === portName);
+    if (!edge) return null;
+    const srcRef = nodeIdToRef(edge.srcNodeId);
+    // ExtraEdges from forEach var refs are rewritten to `_forEach.<var>[.<field>]`
+    // (rowUtils.ts:1077-1086). The `_forEach` token is a synthetic section prefix,
+    // not a real CEL field — hide it from the popover so the user only sees real
+    // segments. `segmentOffset` keeps the toggle dispatch aligned with the
+    // underlying srcFieldPath indices.
+    const isForEach = edge.srcFieldPath.startsWith(FOREACH_PREFIX);
+    const displayPath = isForEach ? edge.srcFieldPath.slice(FOREACH_PREFIX.length) : edge.srcFieldPath;
+    return {
+      segments: splitSrcPath(displayPath),
+      color: refAccent(srcRef, dark, nodeTypeByRef.get(srcRef)),
+      segmentOffset: isForEach ? 1 : 0,
+    };
+  }, [segmentsPopoverTarget, nodesForDisplay, extraEdges, dark, nodeTypeByRef]);
+
+  const onSegmentToggle = useCallback((idx: number, value: boolean) => {
+    if (!segmentsPopoverTarget) return;
+    const offset = segmentsPopoverData?.segmentOffset ?? 0;
+    if (segmentsPopoverTarget.kind === 'inPort') {
+      setInPortSegmentOptional(segmentsPopoverTarget.nodeId, segmentsPopoverTarget.fieldPath, idx + offset, value);
+    } else {
+      setOpPortSegmentOptional(segmentsPopoverTarget.exprNodeId, segmentsPopoverTarget.portName, idx + offset, value);
+    }
+  }, [segmentsPopoverTarget, segmentsPopoverData, setInPortSegmentOptional, setOpPortSegmentOptional]);
+
+  // Close the popover when its target disappears (resource deleted, edge removed)
+  // OR when the anchored pill is no longer in the document (index-keyed row
+  // re-mount after a reorder, collection fan-out/in). Without this, Popper would
+  // anchor to a detached DOM node and park at the viewport origin.
+  useEffect(() => {
+    if (!segmentsPopoverTarget) return;
+    if (segmentsPopoverData === null) { closeSegmentsPopover(); return; }
+    if (segmentsPopoverAnchor && !document.contains(segmentsPopoverAnchor)) {
+      closeSegmentsPopover();
+    }
+  }, [segmentsPopoverTarget, segmentsPopoverData, segmentsPopoverAnchor, nodesForDisplay, extraEdges, closeSegmentsPopover]);
 
   /** Remove a field row from a node and mark it for deletion at save time. */
   const onDeleteRow = useCallback((nodeId: string, fieldPath: string) => {
@@ -1734,7 +1904,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         )}
         {isDirty && (
           <Tooltip title="Discard all changes">
-            <IconButton size="small" onClick={() => { setExtraEdges(initExtraEdges); setExprNodes(initExprNodes); setDirtyExprs(false); setSavedExprNodeIds(new Set(initExprNodes.map(n => n.id))); setSavedEdgeIds(new Set(initExtraEdges.map(e => e.id))); setFieldEdits([]); setPendingResources([]); setPendingRemovals([]); setAddForm(null); setConfirmDelete(null); setNodes(initNodes); }}
+            <IconButton size="small" onClick={() => { setExtraEdges(initExtraEdges); setExprNodes(initExprNodes); setDirtyExprs(false); setSavedExprNodeIds(new Set(initExprNodes.map(n => n.id))); setSavedEdgeIds(new Set(initExtraEdges.map(e => e.id))); setFieldEdits([]); setPendingResources([]); setPendingRemovals([]); setAddForm(null); setConfirmDelete(null); setNodes(initNodes); setSegmentsPopoverAnchor(null); setSegmentsPopoverTarget(null); }}
               sx={{ bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'action.hover' } }}>
               <Icon icon="mdi:undo" width={17} height={17} />
             </IconButton>
@@ -1822,7 +1992,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             const isHov = hoveredEdgeId === e.id;
             const isLit = !!tokenHover
               && e.source === tokenHover.srcNodeId
-              && e.srcPortPath === tokenHover.srcPath
+              && stripOptionalMarkers(e.srcPortPath) === stripOptionalMarkers(tokenHover.srcPath)
               && e.target === tokenHover.tgtNodeId;
             const edgeTargetFp = getEdgeTargetFieldPath(e);
             const isDeleted = !!edgeTargetFp &&
@@ -1832,7 +2002,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             const srcOff = srcExpanded ? sectionAddBarOffset(src, readOnly) : 0;
             const tgtOff = tgtExpanded ? sectionAddBarOffset(tgt, readOnly) : 0;
             const sy = srcPortY(src, e.srcPortPath, srcOff);
-            const ty = tgtPortY(tgt, e.tgtPortKey, tgtOff);
+            const ty = tgtPortY(tgt, e, tgtOff);
             const isSelfLoop = e.source === e.target;
             const d = isSelfLoop
               ? makeBezier(src.x + src.w, sy, src.x, ty)
@@ -1881,7 +2051,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             const isHov = hoveredEdgeId === e.id;
             const isLit = !!tokenHover
               && e.srcNodeId === tokenHover.srcNodeId
-              && e.srcFieldPath === tokenHover.srcPath
+              && stripOptionalMarkers(e.srcFieldPath) === stripOptionalMarkers(tokenHover.srcPath)
               && e.tgtNodeId === tokenHover.tgtNodeId;
             let sx2: number;
             let sy2: number;
@@ -1958,11 +2128,12 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             nodeTypeByRef={nodeTypeByRef}
             unknownFieldPaths={allUnknownPathsMap.get(n.id)}
             noSchemaWarning={noSchemaNodeIds.has(n.id)}
-            onToggleInPortOptional={toggleInPortOptional}
+            onOpenInPortSegmentsMenu={readOnly ? undefined : openInPortSegmentsMenu}
             onPortClick={onInPortClick}
             activeInPaths={activeInPathsByNode.get(n.id)}
             activeOutPaths={activeOutPathsByNode.get(n.id)}
             opConnectedFields={opConnectedFieldsByNode.get(n.id)}
+            inPortSourceTypes={inPortSourceTypeByNode.get(n.id)}
             onValueEdit={onValueEdit}
             dimmed={relatedNodeIds !== null && !relatedNodeIds.has(n.id)}
             readOnly={readOnly}
@@ -1991,6 +2162,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             readOnly={readOnly}
             nodeTypeByRef={nodeTypeByRef}
             opConnectedFields={opConnectedFieldsByNode.get(baseId)}
+            inPortSourceTypes={inPortSourceTypeByNode.get(baseId)}
             unknownFieldPaths={allUnknownPathsMap.get(baseId)}
             mapParentPaths={allMapPathsMap.get(baseId)}
             arrayParentPaths={allArrayPathsMap.get(baseId)}
@@ -2025,7 +2197,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onResizeStart={onExprResizeStart}
             dirty={!savedExprNodeIds.has(exprNode.id)}
             onDelete={onDeleteExprNode}
-            onTogglePortOptional={readOnly ? undefined : toggleOpPortOptional}
+            onOpenPortSegmentsMenu={readOnly ? undefined : openOpPortSegmentsMenu}
             onTokenHover={setTokenHover}
             onTokenLeave={onTokenLeave}
             onAddVarField={onAddVarField}
@@ -2039,6 +2211,15 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
         ))}
       </div>
 
+      {segmentsPopoverData && (
+        <OptionalSegmentsPopover
+          anchorEl={segmentsPopoverAnchor}
+          segments={segmentsPopoverData.segments}
+          color={segmentsPopoverData.color}
+          onToggle={onSegmentToggle}
+          onClose={closeSegmentsPopover}
+        />
+      )}
     </Box>
   );
 }

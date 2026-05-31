@@ -37,7 +37,10 @@ export interface NodeRow {
   /** Raw CEL expression that didn't match the simple ref.path pattern (multiline or contains operators). */
   celExpr?: string;
   fieldPath?: string;
-  inPort?: { ref: string; srcPath: string; srcShort: string; optional?: boolean; origRef?: string };
+  /** When this row's value is a single CEL ref (e.g. `${schema.spec.foo}`).
+   *  `srcPath` keeps the per-segment `?` markers verbatim (e.g. `?spec.?foo.bar`);
+   *  derive aggregate optionality with `srcPath.includes('?')`. */
+  inPort?: { ref: string; srcPath: string; srcShort: string; origRef?: string };
   outPort?: { path: string; short: string };
   /** Set when the value is a composed string with 2+ refs or mixed literal+CEL. */
   segments?: RowSegment[];
@@ -85,6 +88,10 @@ export interface GraphEdge {
   id: string;
   source: string; target: string;
   srcPortPath: string; tgtPortKey: string;
+  /** Target row's `fieldPath` — required to disambiguate when multiple rows on
+   *  the same target node share the same `inPort` (e.g. two fields with the
+   *  same `${ref.path}` CEL expression). */
+  tgtFieldPath: string;
   type: EdgeType;
 }
 

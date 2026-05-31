@@ -98,7 +98,13 @@ export function flattenJsonSchema(schema: any, prefix = '', maxDepth = 6): Field
     const type = isMapField ? 'map' : (val.type ?? (val.properties ? 'object' : val.items ? 'array' : 'any'));
     result.push({ path, type });
     if (val.properties) result.push(...flattenJsonSchema(val, path, maxDepth - 1));
-    if (val.items?.properties) result.push(...flattenJsonSchema(val.items, `${path}[]`, maxDepth - 1));
+    if (val.items) {
+      // Emit the element type itself (e.g. `spec.environments[]` → 'object' / 'string')
+      // so forEach var references like `${env}` can resolve a concrete type.
+      const itemType = val.items.type ?? (val.items.properties ? 'object' : 'any');
+      result.push({ path: `${path}[]`, type: itemType });
+      if (val.items.properties) result.push(...flattenJsonSchema(val.items, `${path}[]`, maxDepth - 1));
+    }
   }
   return result;
 }

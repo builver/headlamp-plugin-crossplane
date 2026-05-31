@@ -46,7 +46,9 @@ export interface ExprNodeCardProps {
   onLiteralChange: (id: string, portName: string, value: string) => void;
   onResizeStart?: (e: MouseEvent, id: string) => void;
   onDelete: (id: string) => void;
-  onTogglePortOptional?: (exprNodeId: string, portName: string) => void;
+  /** Called when the user clicks a connected input port's pill to open the
+   *  per-segment optional menu. The DOM anchor is the pill itself. */
+  onOpenPortSegmentsMenu?: (exprNodeId: string, portName: string, anchor: HTMLElement) => void;
   onTokenHover: (th: TokenHover) => void;
   onTokenLeave: () => void;
   onAddVarField?: (id: string, fieldPath: string) => void;
@@ -70,7 +72,7 @@ export interface ExprNodeCardProps {
 export const ExprNodeCard = memo(function ExprNodeCard({
   node, dark, userC, isDrawing, connectedPortInfo, dirty = false, hasOutputConnection = false,
   onNodeDown, onOutputPortDown, onInputPortUp, onInputPortClick, onExprChange, onLiteralChange, onResizeStart, onDelete,
-  onTogglePortOptional, onTokenHover, onTokenLeave,
+  onOpenPortSegmentsMenu, onTokenHover, onTokenLeave,
   onAddVarField, onRemoveVarField, onVarFieldPortDown, hasVarFieldConnection, exprNodesById,
   selected, isExpanded: isExpandedProp, dimmed, readOnly,
 }: ExprNodeCardProps) {
@@ -277,10 +279,10 @@ export const ExprNodeCard = memo(function ExprNodeCard({
                   <VarPill
                     color={refAccent(nodeIdToRef(info.srcNodeId), dark, info.srcNodeType)}
                     label={info.label}
-                    tooltip={`${info.displayPath ?? (info.srcFieldPath !== 'output' ? `${nodeIdToRef(info.srcNodeId)}.${info.srcFieldPath.replace(/\?/g, '')}` : info.srcFieldPath)}${info.type ? ` · ${info.type}` : ''}`}
+                    tooltip={`${info.displayPath ?? (info.srcFieldPath !== 'output' ? `${nodeIdToRef(info.srcNodeId)}.${info.srcFieldPath}` : info.srcFieldPath)}${info.type ? ` · ${info.type}` : ''}`}
                     optional={info.optional}
-                    onToggleOptional={onTogglePortOptional
-                      ? e => { e.stopPropagation(); onTogglePortOptional(node.id, port.name); }
+                    onOpenSegmentsMenu={onOpenPortSegmentsMenu && info.optional !== undefined && info.srcFieldPath !== ''
+                      ? (anchor) => onOpenPortSegmentsMenu(node.id, port.name, anchor)
                       : undefined}
                     typeSuffix={info.type ? abbrevType(info.type) : undefined}
                     onMouseEnter={() => onTokenHover({ srcNodeId: info.srcNodeId, srcPath: info.srcFieldPath, tgtNodeId: node.id })}

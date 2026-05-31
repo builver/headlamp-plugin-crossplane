@@ -1,4 +1,4 @@
-import { collectCelMatches, findCelRefs, parseSingleRefMatch, reconstructTemplate, walkTemplate } from './celUtils';
+import { collectCelMatches, findCelRefs, parseSingleRefMatch, reconstructTemplate, stripOptionalMarkers } from './celUtils';
 import { buildVarFieldRows, EDGE_TYPE_FOR, EXPR_NODE_HDR_H, EXPR_NODE_PORT_H, EXPR_NODE_W, exprNodeH, exprNodeInputPortY, exprNodeOutputPortY, exprNodeVarFieldExtraRows, H_GAP, NODE_HDR_H, NODE_MIN_H, NODE_ROW_H, NODE_W, nodeH, nodeIdToRef, RAW_TEMPLATE_NODE_H, refToNodeId, SCHEMA_NODE_ID, V_GAP,VAR_FIELD_PREFIX, varFieldLeafRow } from './constants';
 import { EXPR_NODE_DEFS } from './exprGraph/exprNodeDefs';
 import { getDeepPath } from './pathUtils';
@@ -83,14 +83,27 @@ export function dagLayout(
  * Like findCelRefs but only returns refs where the entire field value is
  * exactly `${ref.simpleHath}` — no surrounding text, no operators, one ref.
  * Used to restrict GraphEdge arrows to direct field-to-field connections.
+ *
+ * Tracks the dot-path to each ref within the template so callers can build
+ * per-target-field edges (two fields with the same CEL expression need
+ * distinct edges, not a single deduped one).
  */
-function collectSimpleRefs(template: unknown, known: Set<string>): CelRef[] {
-  const out: CelRef[] = [];
-  walkTemplate(template, (s: string) => {
-    const matches = collectCelMatches(s, known);
-    const single = parseSingleRefMatch(matches, s);
-    if (single) out.push({ srcRef: single.ref, srcPath: single.srcPath, srcShort: single.srcShort });
-  });
+function collectSimpleRefs(template: unknown, known: Set<string>): Array<CelRef & { tgtFieldPath: string }> {
+  const out: Array<CelRef & { tgtFieldPath: string }> = [];
+  const walk = (obj: unknown, path: string): void => {
+    if (typeof obj === 'string') {
+      const matches = collectCelMatches(obj, known);
+      const single = parseSingleRefMatch(matches, obj);
+      if (single) {
+        out.push({ srcRef: single.ref, srcPath: single.srcPath, srcShort: single.srcShort, tgtFieldPath: path });
+      }
+    } else if (Array.isArray(obj)) {
+      obj.forEach((v, i) => walk(v, path ? `${path}.${i}` : String(i)));
+    } else if (obj !== null && typeof obj === 'object') {
+      Object.entries(obj as Record<string, unknown>).forEach(([k, v]) => walk(v, path ? `${path}.${k}` : k));
+    }
+  };
+  walk(template, '');
   return out;
 }
 
@@ -99,8 +112,9 @@ function collectSimpleRefs(template: unknown, known: Set<string>): CelRef[] {
 // eslint-disable-next-line eqeqeq
 function hasCond(v: unknown): boolean { return Array.isArray(v) ? v.length > 0 : v != null; }
 
-/** AllRef: a CEL ref augmented with its graph context, used only inside buildGraph. */
-type AllRef = CelRef & { targetId: string; srcNodeId: string; isForEachVarRef?: boolean };
+/** AllRef: a CEL ref augmented with its graph context, used only inside buildGraph.
+ *  `tgtFieldPath` is set only for simpleRefs (drives unique GraphEdges per target field). */
+type AllRef = CelRef & { targetId: string; srcNodeId: string; isForEachVarRef?: boolean; tgtFieldPath?: string };
 
 /** Outer-scope variables captured by makeNode — passed explicitly to keep the function testable. */
 interface MakeNodeContext {
@@ -274,9 +288,16 @@ export function buildGraph(input: any, requirements?: any): { nodes: GraphNode[]
     }
     // Collect simple refs from forEach field values for direct edge arrows.
     // Uses `known` (not knownForRes) so self-refs (each, var names) are excluded.
+    // The walker reports a path like `<varName>` within the entry — qualify it with
+    // the forEach section prefix so it matches the resource row's fieldPath.
     for (const entry of (res.forEach ?? [])) {
       for (const ref of collectSimpleRefs(entry, known)) {
-        simpleRefs.push({ ...ref, targetId: res.id as string, srcNodeId: refToNodeId(ref.srcRef) });
+        simpleRefs.push({
+          ...ref,
+          tgtFieldPath: qualifiedPath('forEach', ref.tgtFieldPath),
+          targetId: res.id as string,
+          srcNodeId: refToNodeId(ref.srcRef),
+        });
       }
     }
     // Scan special fields (forEach/includeWhen/readyWhen) for layout deps and output ports
@@ -360,13 +381,17 @@ export function buildGraph(input: any, requirements?: any): { nodes: GraphNode[]
 
   const edgesSeen = new Set<string>(); const edges: GraphEdge[] = [];
   const rawDeps: Array<{ source: string; target: string }> = []; const depsSeen = new Set<string>();
-  // GraphEdge arrows — only for exact single-ref fields (complex expressions render via op-node ExtraEdges)
+  // GraphEdge arrows — only for exact single-ref fields (complex expressions render via op-node ExtraEdges).
+  // Dedup key includes `tgtFieldPath` so two fields with the same `${ref.path}` CEL expression
+  // produce distinct edges (one per target field), each anchored at its own row in tgtPortY.
   for (const r of simpleRefs) {
-    const eid2 = `${r.srcNodeId}::${r.srcPath}→${r.targetId}`;
+    const tgtFieldPath = r.tgtFieldPath ?? '';
+    const eid2 = `${r.srcNodeId}::${r.srcPath}→${r.targetId}::${tgtFieldPath}`;
     if (!edgesSeen.has(eid2)) {
       edgesSeen.add(eid2);
       edges.push({ id: eid2, source: r.srcNodeId, target: r.targetId,
         srcPortPath: r.srcPath, tgtPortKey: `${r.srcRef}::${r.srcPath}`,
+        tgtFieldPath,
         type: (EDGE_TYPE_FOR[r.srcRef] ?? 'kro-dep') as GraphEdge['type'] });
     }
   }
@@ -386,10 +411,13 @@ export function buildGraph(input: any, requirements?: any): { nodes: GraphNode[]
           const topField = row.inPort.srcPath.replace(/\?/g, '').split('.')[0];
           if (topField !== field) continue;
           const tgtPortKey = `${id}::${row.inPort.srcPath}`;
-          const eid2 = `${id}::${srcPortPath}→${tgtPortKey}`;
+          // Include row's fieldPath in the dedup key so distinct target fields
+          // sharing the same forEach var produce distinct edges.
+          const tgtFieldPath = row.fieldPath ?? '';
+          const eid2 = `${id}::${srcPortPath}→${tgtPortKey}::${tgtFieldPath}`;
           if (!edgesSeen.has(eid2)) {
             edgesSeen.add(eid2);
-            edges.push({ id: eid2, source: id, target: id, srcPortPath, tgtPortKey, type: 'kro-dep' });
+            edges.push({ id: eid2, source: id, target: id, srcPortPath, tgtPortKey, tgtFieldPath, type: 'kro-dep' });
           }
         }
       }
@@ -518,21 +546,38 @@ export function sectionAddBarOffset(node: GraphNode, readOnly = false): number {
 }
 
 export function srcPortY(src: GraphNode, portPath: string, topOffset = 0): number {
-  const idx = src.rows.findIndex(r => r.outPort?.path === portPath);
+  // `portPath` was frozen at buildGraph time; the row's `outPort.path` is overlay-
+  // mutable when the user toggles per-segment `?` markers. Compare without the
+  // markers so the edge keeps anchoring to the right row.
+  const want = stripOptionalMarkers(portPath);
+  const idx = src.rows.findIndex(r => r.outPort && stripOptionalMarkers(r.outPort.path) === want);
   return idx >= 0 ? rowPortY(src, idx, topOffset) : src.y + (src.type === 'kro-resource' ? NODE_HDR_H / 2 : src.h / 2);
 }
 
-export function tgtPortY(tgt: GraphNode, portKey: string, topOffset = 0): number {
-  // Only match inPort rows: GraphEdges are created only for exact single-ref fields (same condition
-  // as buildTemplateRows inPort case), so there is always a matching inPort row. Matching
-  // segments rows would cause the GraphEdge to land on a composed/multi-segment field that uses
-  // the same source ref — producing a spurious extra arrow alongside the correct op-node edge.
-  const idx = tgt.rows.findIndex(r => r.inPort && `${r.inPort.ref}::${r.inPort.srcPath}` === portKey);
+export function tgtPortY(tgt: GraphNode, edge: GraphEdge, topOffset = 0): number {
+  // Prefer the exact target row identified by `edge.tgtFieldPath` — that handles
+  // the case where multiple rows on the same node share the same `inPort` key
+  // (two fields with the same `${ref.path}` CEL expression).
+  if (edge.tgtFieldPath) {
+    const exact = tgt.rows.findIndex(r => r.fieldPath === edge.tgtFieldPath);
+    if (exact >= 0) return rowPortY(tgt, exact, topOffset);
+  }
+  // Fallback: legacy inPort-key match. Only match inPort rows: GraphEdges are
+  // created only for exact single-ref fields (same condition as buildTemplateRows
+  // inPort case), so there is always a matching inPort row. Matching segments rows
+  // would land on a composed/multi-segment field that uses the same source ref —
+  // producing a spurious extra arrow alongside the correct op-node edge.
+  // Strip `?` markers from both sides so the edge keeps anchoring after the user
+  // toggles per-segment optionality via the popover.
+  const want = stripOptionalMarkers(edge.tgtPortKey);
+  const idx = tgt.rows.findIndex(r => r.inPort && stripOptionalMarkers(`${r.inPort.ref}::${r.inPort.srcPath}`) === want);
   return idx >= 0 ? rowPortY(tgt, idx, topOffset) : tgt.y + tgt.h / 2;
 }
 
 export function extraPortY(node: GraphNode, fieldPath: string, topOffset = 0): number {
-  const idx = node.rows.findIndex(r => r.fieldPath === fieldPath);
+  // Strip `?` markers for the same reason as srcPortY/tgtPortY.
+  const want = stripOptionalMarkers(fieldPath);
+  const idx = node.rows.findIndex(r => stripOptionalMarkers(r.fieldPath ?? '') === want);
   return idx >= 0 ? rowPortY(node, idx, topOffset) : node.y + node.h / 2;
 }
 
@@ -542,7 +587,7 @@ export function makeBezier(sx: number, sy: number, tx: number, ty: number): stri
 }
 
 export function bezierPath(src: GraphNode, tgt: GraphNode, edge: GraphEdge, srcTopOffset = 0, tgtTopOffset = 0): string {
-  return makeBezier(src.x + src.w, srcPortY(src, edge.srcPortPath, srcTopOffset), tgt.x, tgtPortY(tgt, edge.tgtPortKey, tgtTopOffset));
+  return makeBezier(src.x + src.w, srcPortY(src, edge.srcPortPath, srcTopOffset), tgt.x, tgtPortY(tgt, edge, tgtTopOffset));
 }
 
 /**
