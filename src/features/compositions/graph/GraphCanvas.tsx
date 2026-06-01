@@ -156,8 +156,11 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       );
       setSaveState('saved');
       setDirtyExprs(false);
-      setSavedExprNodeIds(new Set(exprNodes.map(n => n.id)));
-      setSavedEdgeIds(new Set(extraEdges.map(e => e.id)));
+      // Snapshot from refs (not the closure) — if the parent refetch triggered
+      // the init useEffect during the await, state ids were regenerated
+      // (`op-r-N`/`ee-r-N`) and the closure captured the stale pre-save ones.
+      setSavedExprNodeIds(new Set(exprNodesRef.current.map(n => n.id)));
+      setSavedEdgeIds(new Set(extraEdgesRef.current.map(e => e.id)));
       setFieldEdits([]);
       setPendingResources([]);
       setPendingRemovals([]);
@@ -169,7 +172,7 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
       setSaveState('error');
       setTimeout(() => setSaveState('idle'), 3500);
     }
-  }, [extraEdges, fieldEdits, pendingResources, exprNodes, input, compositionName, stepIndex]);
+  }, [extraEdges, fieldEdits, pendingResources, pendingRemovals, exprNodes, input, compositionName, stepIndex]);
 
   useEffect(() => {
     setNodes(initNodes);
@@ -605,19 +608,24 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     return result;
   }, [composedValues, nodes, displayNodeMap]);
 
-  // Always-current refs so stable drag callbacks can read latest React state without deps.
+  // Always-current refs so stable drag callbacks can read latest React state
+  // without deps. Refs are updated post-commit (useEffect) rather than during
+  // render — required so an interrupted/replayed render in React 18 concurrent
+  // mode can't leave ref.current pointing at uncommitted state. All readers
+  // are async/event-driven (drag handlers, post-await save snapshot), so the
+  // one-render lag vs. the inline pattern is invisible.
   const displayNodeMapRef = useRef(displayNodeMap);
-  displayNodeMapRef.current = displayNodeMap;
-  const edgesRef = useRef(edges);
-  edgesRef.current = edges;
-  const extraEdgesRef = useRef(extraEdges);
-  extraEdgesRef.current = extraEdges;
-  const exprNodesRef = useRef(exprNodes);
-  exprNodesRef.current = exprNodes;
-  const exprNodesByIdRef = useRef(exprNodesById);
-  exprNodesByIdRef.current = exprNodesById;
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
+  const edgesRef          = useRef(edges);
+  const extraEdgesRef     = useRef(extraEdges);
+  const exprNodesRef      = useRef(exprNodes);
+  const exprNodesByIdRef  = useRef(exprNodesById);
+  const selectedRef       = useRef(selected);
+  useEffect(() => { displayNodeMapRef.current = displayNodeMap; }, [displayNodeMap]);
+  useEffect(() => { edgesRef.current          = edges;          }, [edges]);
+  useEffect(() => { extraEdgesRef.current     = extraEdges;     }, [extraEdges]);
+  useEffect(() => { exprNodesRef.current      = exprNodes;      }, [exprNodes]);
+  useEffect(() => { exprNodesByIdRef.current  = exprNodesById;  }, [exprNodesById]);
+  useEffect(() => { selectedRef.current       = selected;       }, [selected]);
 
   // SVG <g> element refs — keyed by edge id — for direct path updates during drag.
   const edgeGroupRefs      = useRef(new Map<string, SVGGElement>());
@@ -831,6 +839,110 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
     return related;
   }, [selected, edges, extraEdges]);
+
+  /** Stable Set of op-node ids — re-used by the restricted-draw BFS below. */
+  const opIds = useMemo(() => new Set(exprNodes.map(n => n.id)), [exprNodes]);
+
+  // `drawing` updates canvasX/canvasY on every mousemove; we only need the
+  // identity bits for the restriction memos. Pull them out so the memos stay
+  // stable across cursor movement.
+  const drawingSrcNodeId    = drawing?.srcNodeId    ?? null;
+  const drawingSrcFieldPath = drawing?.srcFieldPath ?? null;
+
+  /**
+   * Resources allowed as drop targets during a forEach / tainted-op draw.
+   *   • forEach row     → just the source resource itself.
+   *   • tainted op node → BFS upstream through `extraEdges`, hopping op→op (and
+   *     pass-through kro-ref nodes, which can never be drop targets), until
+   *     reaching non-op, non-kro-ref ancestors — the resources the chain
+   *     originates from.
+   * Returns `null` when no restriction applies (no draw, unrestricted source,
+   * or the BFS produced an empty set — predicate-only chains with no resource
+   * ancestor fall back to unrestricted behavior so the user can still wire the
+   * op somewhere).
+   */
+  const drawAllowedResourceIds = useMemo((): Set<string> | null => {
+    if (drawingSrcNodeId === null) return null;
+    const srcIsForEach = drawingSrcFieldPath !== null && sectionOf(drawingSrcFieldPath) === 'forEach';
+    const srcExprNode  = exprNodes.find(n => n.id === drawingSrcNodeId);
+    const srcIsTaintedOp = !!srcExprNode?.taints?.length;
+    if (!srcIsForEach && !srcIsTaintedOp) return null;
+
+    const nodeTypeById = new Map(nodes.map(n => [n.id, n.type]));
+    const allowed = new Set<string>();
+    if (srcIsForEach) {
+      allowed.add(drawingSrcNodeId);
+    } else {
+      const visited = new Set<string>([drawingSrcNodeId]);
+      const queue = [drawingSrcNodeId];
+      while (queue.length > 0) {
+        const id = queue.shift()!;
+        for (const e of extraEdges) {
+          if (e.tgtNodeId !== id || visited.has(e.srcNodeId)) continue;
+          visited.add(e.srcNodeId);
+          if (opIds.has(e.srcNodeId)) {
+            queue.push(e.srcNodeId);
+          } else if (nodeTypeById.get(e.srcNodeId) === 'kro-ref') {
+            // kro-ref is never a drop target (computeHoverTarget rejects it),
+            // so don't add it to allowed — but keep walking upstream through it.
+            queue.push(e.srcNodeId);
+          } else {
+            allowed.add(e.srcNodeId);
+          }
+        }
+      }
+    }
+    // No resource ancestor → fall back to unrestricted rather than dimming
+    // everything with no possible drop target.
+    if (allowed.size === 0) return null;
+    return allowed;
+  }, [drawingSrcNodeId, drawingSrcFieldPath, exprNodes, extraEdges, nodes, opIds]);
+
+  /** Complement of `drawAllowedResourceIds` over the resource nodes that are
+   *  actually drop-target eligible — excludes draft, schema, env, and kro-ref
+   *  (rejected unconditionally by computeHoverTarget). */
+  const drawDimResourceIds = useMemo((): Set<string> | null => {
+    if (!drawAllowedResourceIds) return null;
+    const dim = new Set<string>();
+    for (const n of nodes) {
+      if (n.type === 'kro-ref' || n.type === 'draft' || n.type === 'schema' || n.type === 'env') continue;
+      if (drawAllowedResourceIds.has(n.id)) continue;
+      dim.add(n.id);
+    }
+    return dim;
+  }, [drawAllowedResourceIds, nodes]);
+
+  /** Op nodes that should dim during a restricted draw: any op whose downstream
+   *  chain (through extraEdges) reaches a resource NOT in `drawAllowedResourceIds`.
+   *  Computed via reverse-BFS from dis-allowed resource sinks, propagating
+   *  upstream through op→op edges to a fixpoint. */
+  const drawDimOpNodeIds = useMemo((): Set<string> | null => {
+    if (!drawAllowedResourceIds) return null;
+    const allowed = drawAllowedResourceIds;
+    const dim = new Set<string>();
+    // Seed: ops whose output edge lands on a non-allowed, non-op target.
+    for (const e of extraEdges) {
+      if (!opIds.has(e.srcNodeId)) continue;
+      if (opIds.has(e.tgtNodeId)) continue;
+      if (allowed.has(e.tgtNodeId)) continue;
+      dim.add(e.srcNodeId);
+    }
+    // Fixpoint: any op whose output feeds an already-dim op also dims.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const e of extraEdges) {
+        if (!opIds.has(e.srcNodeId) || !opIds.has(e.tgtNodeId)) continue;
+        if (dim.has(e.tgtNodeId) && !dim.has(e.srcNodeId)) {
+          dim.add(e.srcNodeId);
+          changed = true;
+        }
+      }
+    }
+    // The source op is the one we're drawing from — never dim it.
+    if (drawingSrcNodeId) dim.delete(drawingSrcNodeId);
+    return dim;
+  }, [drawAllowedResourceIds, extraEdges, opIds, drawingSrcNodeId]);
 
   const bgWasClean      = useRef(false); // true if bg mousedown had no subsequent mouse movement
   const dragId          = useRef<string | null>(null);
@@ -1066,26 +1178,32 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
 
   const computeHoverTarget = useCallback((cp: { x: number; y: number }, srcNodeId: string, srcType?: string, srcFieldPath?: string): HoverTarget | null => {
     const srcIsForEach = !!srcFieldPath && sectionOf(srcFieldPath) === 'forEach';
+    const allowed = drawAllowedResourceIds;
     for (const n of nodes) {
       const isSelf = n.id === srcNodeId;
       // Allow self-loop only when source is a forEach row — the forEach variable feeds template fields on the same node
       if (isSelf && !srcIsForEach) continue;
       if (n.type === 'kro-ref') continue; // external refs are read-only, cannot be drop targets
+      // forEach / tainted-op sources may only target the resources the taint chain originates from
+      if (allowed && !allowed.has(n.id)) continue;
       if (cp.x < n.x || cp.x > n.x + n.w) continue;
       const displayBottom = n.y + NODE_HDR_H + n.rows.length * NODE_ROW_H + 8;
       if (cp.y < n.y || cp.y >= displayBottom) continue;
       const rowIdx = Math.floor((cp.y - n.y - NODE_HDR_H) / NODE_ROW_H);
       if (rowIdx >= 0 && rowIdx < n.rows.length && !n.rows[rowIdx].isParent && !n.rows[rowIdx].isSection && n.rows[rowIdx].canImport !== false) {
         const row = n.rows[rowIdx];
-        // Self-loops from forEach are only valid targets in the template section
-        if (isSelf && sectionOf(row.fieldPath ?? '') !== 'template') continue;
+        // forEach self-loops can only land on template-section rows (otherwise
+        // a forEach var would feed itself via _forEach/_includeWhen/_readyWhen).
+        // Tainted-op drops onto allowed source resources are NOT confined to
+        // template — they may legitimately feed _includeWhen / _readyWhen.
+        if (isSelf && srcIsForEach && sectionOf(row.fieldPath ?? '') !== 'template') continue;
         const tgtType = row.ghostType ?? getFieldType(n.id, row.fieldPath ?? '');
         if (typeCompat(srcType, tgtType) === 'incompatible') return null;
         return { nodeId: n.id, rowIdx, fieldPath: row.fieldPath };
       }
     }
     return null;
-  }, [nodes, getFieldType]);
+  }, [nodes, getFieldType, drawAllowedResourceIds]);
 
   // ── Mouse handlers ────────────────────────────────────────────────────────────
 
@@ -1382,12 +1500,9 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
     opHasDragged.current = false;
     if (drawing) {
       if (hoverTarget?.fieldPath) {
-        // Block connecting tainted op nodes directly to resource fields
-        const srcExprNode = exprNodes.find(n => n.id === drawing.srcNodeId);
-        if (srcExprNode?.taints?.length) {
-          setDrawing(null); setHoverTarget(null); setDrawingHoverNodeId(null); setDrawingHoverExprNodeId(null);
-          return;
-        }
+        // computeHoverTarget enforces forEach / tainted-op restrictions, so any
+        // hoverTarget that survived to here is already on an allowed (source)
+        // resource and template-section row.
         const tgtNode = nodeMap.get(hoverTarget.nodeId);
         if (tgtNode && !tgtNode.rows.some(r => r.fieldPath === hoverTarget.fieldPath)) {
           // Dropped on a ghost (potential) field row — materialise it first
@@ -2014,7 +2129,14 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               <g key={e.id} ref={el => { if (el) edgeGroupRefs.current.set(e.id, el); else edgeGroupRefs.current.delete(e.id); }}>
                 <path d={d} fill="none" stroke={col}
                   strokeWidth={isLit ? 3 : 1.75}
-                  strokeOpacity={isDeleted ? 0.2 : isLit ? 1 : tokenHover ? 0.25 : relatedNodeIds && (!relatedNodeIds.has(e.source) || !relatedNodeIds.has(e.target)) ? 0.08 : isHov ? 0.9 : 0.75}
+                  strokeOpacity={
+                    isDeleted ? 0.2
+                    : isLit ? 1
+                    : tokenHover ? 0.25
+                    : drawDimResourceIds && (drawDimResourceIds.has(e.source) || drawDimResourceIds.has(e.target)) ? 0.08
+                    : (!drawDimResourceIds && relatedNodeIds && (!relatedNodeIds.has(e.source) || !relatedNodeIds.has(e.target))) ? 0.08
+                    : isHov ? 0.9 : 0.75
+                  }
                   strokeDasharray={isDeleted ? '4 4' : undefined}
                   markerEnd={isDeleted ? undefined : `url(#${eid}-${src.type})`}
                   style={{ transition: 'stroke-opacity 0.15s, stroke-width 0.15s' }} />
@@ -2078,7 +2200,18 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
               <g key={e.id} ref={el => { if (el) extraEdgeGroupRefs.current.set(e.id, el); else extraEdgeGroupRefs.current.delete(e.id); }}>
                 <path d={d} fill="none" stroke={col2}
                   strokeWidth={isLit ? 3 : 1.75}
-                  strokeOpacity={isLit ? 1 : tokenHover ? 0.25 : relatedNodeIds && (!relatedNodeIds.has(e.srcNodeId) || !relatedNodeIds.has(e.tgtNodeId)) ? 0.08 : isHov ? 0.9 : 0.75}
+                  strokeOpacity={
+                    isLit ? 1
+                    : tokenHover ? 0.25
+                    : (drawDimResourceIds || drawDimOpNodeIds) && (
+                        (drawDimResourceIds?.has(e.srcNodeId) ?? false)
+                        || (drawDimResourceIds?.has(e.tgtNodeId) ?? false)
+                        || (drawDimOpNodeIds?.has(e.srcNodeId) ?? false)
+                        || (drawDimOpNodeIds?.has(e.tgtNodeId) ?? false)
+                      ) ? 0.08
+                    : (!drawDimResourceIds && !drawDimOpNodeIds && relatedNodeIds && (!relatedNodeIds.has(e.srcNodeId) || !relatedNodeIds.has(e.tgtNodeId))) ? 0.08
+                    : isHov ? 0.9 : 0.75
+                  }
                   strokeDasharray={savedEdgeIds.has(e.id) ? undefined : '6 3'} markerEnd={`url(#${eid}-${markerKey})`}
                   style={{ transition: 'stroke-opacity 0.15s, stroke-width 0.15s' }} />
                 {/* Wide transparent hit path */}
@@ -2135,7 +2268,13 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             opConnectedFields={opConnectedFieldsByNode.get(n.id)}
             inPortSourceTypes={inPortSourceTypeByNode.get(n.id)}
             onValueEdit={onValueEdit}
-            dimmed={relatedNodeIds !== null && !relatedNodeIds.has(n.id)}
+            dimmed={
+              // During a restricted draw, draw-dim wins over selection-dim so
+              // valid draw targets outside the selection's BFS still highlight.
+              drawDimResourceIds
+                ? drawDimResourceIds.has(n.id)
+                : (relatedNodeIds !== null && !relatedNodeIds.has(n.id))
+            }
             readOnly={readOnly}
             collectionInstanceCount={
               n.isCollection && composedValues && composedValues.size > 0
@@ -2160,6 +2299,13 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onPotentialFieldClick={NOOP_FP} onTokenHover={NOOP_HOVER} onTokenLeave={NOOP_VOID}
             editedPaths={EMPTY_SET}
             readOnly={readOnly}
+            // Mirror base card dim so fanned instances aren't bright while the
+            // base dims out during a restricted draw / unrelated selection.
+            dimmed={
+              drawDimResourceIds
+                ? drawDimResourceIds.has(baseId)
+                : (relatedNodeIds !== null && !relatedNodeIds.has(baseId))
+            }
             nodeTypeByRef={nodeTypeByRef}
             opConnectedFields={opConnectedFieldsByNode.get(baseId)}
             inPortSourceTypes={inPortSourceTypeByNode.get(baseId)}
@@ -2205,7 +2351,14 @@ export function GraphCanvas({ input, height = 480, compositionName, stepIndex, o
             onVarFieldPortDown={onVarFieldPortDown}
             hasVarFieldConnection={(vf) => extraEdges.some(e => e.srcNodeId === exprNode.id && e.srcFieldPath === `${VAR_FIELD_PREFIX}${vf}`)}
             exprNodesById={exprNodesById}
-            dimmed={relatedNodeIds !== null && !relatedNodeIds.has(exprNode.id)}
+            dimmed={
+              // During a restricted draw, op-nodes whose downstream chain lands
+              // on a non-allowed resource are dimmed. Otherwise fall back to the
+              // selection-related rule.
+              drawDimOpNodeIds
+                ? drawDimOpNodeIds.has(exprNode.id)
+                : (relatedNodeIds !== null && !relatedNodeIds.has(exprNode.id))
+            }
             readOnly={readOnly}
           />
         ))}
