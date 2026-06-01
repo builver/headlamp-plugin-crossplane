@@ -239,6 +239,9 @@ export const RowsNodeCard = memo(function RowsNodeCard({
   // env: free-form add always; no-schema nodes: free-form add always; resource/ref: schema-autocomplete add when expanded (not during edge draw)
   const freeFormAdd = node.type === 'env' || !!noSchemaWarning;
   const showAddButton = !readOnly && (freeFormAdd || (isExpanded && !isDrawing && (node.type === 'kro-resource' || node.type === 'kro-ref' || node.type === 'schema')));
+  // The add-field button moves to the "template" section header when one is present (kro-resource / kro-ref).
+  const hasTemplateSection = displayRows.some(r => r.isSection && r.key === 'template');
+  const showAddButtonInHeader = showAddButton && !hasTemplateSection;
   // Sections that could be added but don't yet exist on this node
   const canAddSections = !readOnly && isExpanded && !isDrawing && !!onAddSectionItem && node.type === 'kro-resource';
   const missingSections: Array<'forEach' | 'includeWhen' | 'readyWhen'> = canAddSections
@@ -505,20 +508,13 @@ export const RowsNodeCard = memo(function RowsNodeCard({
               bgcolor: alpha(accent, dark ? 0.18 : 0.08),
             }}>{collectionBadge}</Box>
           )}
-          {noSchemaWarning && (
-            <Tooltip title="Schema unavailable — field validation disabled" placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
-              <span style={{ display: 'inline-flex', flexShrink: 0 }}>
-                <Icon icon="mdi:alert-circle-outline" width={11} style={{ color: '#f59e0b' }} />
-              </span>
-            </Tooltip>
-          )}
           {(node.type === 'kro-resource' || node.type === 'kro-ref') && onDelete && (
             <NodeCardDeleteButton
               accent={accent} selected={selected} readOnly={readOnly}
               onDelete={() => onDelete(node.id)}
             />
           )}
-          {showAddButton && (
+          {showAddButtonInHeader && (
             <IconBtn icon="mdi:plus"
               onClick={() => { setAddingToParentPath(prev => prev === '' ? null : ''); setAddFieldInput(''); setAddSuggIdx(-1); }}
               sx={{
@@ -697,16 +693,17 @@ export const RowsNodeCard = memo(function RowsNodeCard({
                 sx={{ px: 0.3, borderRadius: 0.3, cursor: 'pointer', color: userC, opacity: 0.45, flexShrink: 0, '&:hover': { opacity: 1, bgcolor: alpha(userC, 0.12) } }} />
             : null;
 
-          // Section-header rows (forEach / includeWhen / readyWhen labels)
+          // Section-header rows (template / forEach / includeWhen / readyWhen labels)
           if (row.isSection) {
-            const secKey = row.key as 'forEach' | 'includeWhen' | 'readyWhen';
+            const secKey = row.key as 'template' | 'forEach' | 'includeWhen' | 'readyWhen';
+            const isTemplate = secKey === 'template';
             const isFE = secKey === 'forEach';
-            const canAdd = !readOnly && isExpanded && !isDrawing && !!onAddSectionItem;
+            const canAdd = !isTemplate && !readOnly && isExpanded && !isDrawing && !!onAddSectionItem;
             const inputOpen = addingSectionKey === secKey;
             return (
               <Fragment key={`section-${i}`}>
                 <Box sx={{
-                  height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center',
+                  height: NODE_ROW_H, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 0.5,
                   borderTop: `2px solid ${alpha(accent, 0.25)}`, px: 1,
                   bgcolor: dark ? alpha(accent, 0.08) : alpha(accent, 0.04),
                 }}>
@@ -714,6 +711,23 @@ export const RowsNodeCard = memo(function RowsNodeCard({
                     sx={{ fontFamily: 'monospace', fontSize: '0.58rem', color: accent, flex: 1 }}>
                     {row.key}
                   </Typography>
+                  {isTemplate && noSchemaWarning && (
+                    <Tooltip title="Schema unavailable — field validation disabled" placement="top" PopperProps={{ modifiers: [{ name: 'preventOverflow', enabled: false }] }}>
+                      <span style={{ display: 'inline-flex', flexShrink: 0 }}>
+                        <Icon icon="mdi:alert-circle-outline" width={11} style={{ color: '#f59e0b' }} />
+                      </span>
+                    </Tooltip>
+                  )}
+                  {isTemplate && showAddButton && (
+                    <IconBtn icon="mdi:plus" width={11}
+                      onClick={() => { setAddingToParentPath(prev => prev === '' ? null : ''); setAddFieldInput(''); setAddSuggIdx(-1); }}
+                      sx={{
+                        px: 0.3, borderRadius: 0.3, cursor: 'pointer', flexShrink: 0,
+                        color: addingToParentPath === '' ? userC : alpha(accent, 0.6),
+                        bgcolor: addingToParentPath === '' ? alpha(userC, 0.12) : 'transparent',
+                        '&:hover': { color: userC, bgcolor: alpha(userC, 0.12) },
+                      }} />
+                  )}
                   {canAdd && (
                     <IconBtn icon="mdi:plus" width={9}
                       onClick={() => {

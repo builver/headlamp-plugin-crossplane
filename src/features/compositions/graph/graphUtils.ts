@@ -173,6 +173,7 @@ function makeNode(
   // Append forEach / includeWhen / readyWhen section rows for resource nodes that have them.
   const resHasIncludeWhen = res && hasCond(res.includeWhen);
   const resHasReadyWhen = res && hasCond(res.readyWhen);
+  let processedSpecial: NodeRow[] = [];
   if (res && (res.forEach?.length || resHasIncludeWhen || resHasReadyWhen)) {
     const knownForSpec = buildKnownForRes(res, known);
     const selfRefs = new Set<string>(['each', ...varNames]);
@@ -192,11 +193,16 @@ function makeNode(
         ? { ...row, outPort: forEachOutPorts.get(row.fieldPath) }
         : row
     );
-    const processedSpecial = postProcessEachRefs(specialRows, id, selfRefs);
-    const templateHeader: NodeRow[] = (processedSpecial.length > 0 && rows.length > 0)
-      ? [{ depth: 0, key: 'template', isParent: false, isSection: true, canImport: false, canExport: false }]
-      : [];
-    rows = [...processedSpecial, ...templateHeader, ...rows];
+    processedSpecial = postProcessEachRefs(specialRows, id, selfRefs);
+  }
+  // Always prepend a "template" section header for resource nodes so the schema-unavailable
+  // warning and add-field affordance have a consistent place to render — even when the template
+  // is empty.
+  if (res) {
+    const templateHeader: NodeRow = { depth: 0, key: 'template', isParent: false, isSection: true, canImport: false, canExport: false };
+    rows = [...processedSpecial, templateHeader, ...rows];
+  } else if (processedSpecial.length > 0) {
+    rows = [...processedSpecial, ...rows];
   }
   // For fields driven by an op node (concat, replace, etc.), replace the segments display with
   // celExpr so RowsNodeCard shows the raw template rather than misleading direct-ref source pills.
