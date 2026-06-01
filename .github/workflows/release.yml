@@ -61,9 +61,9 @@ jobs:
           IS_RC: ${{ steps.version.outputs.is_rc }}
         run: |
           if [[ "$IS_RC" == "true" ]]; then
-            gh release create "$TAG" --title "Release $TAG" --notes "Release $TAG" --prerelease "$TARBALL"
+            gh release create "$TAG" --title "Release $TAG" --generate-notes --prerelease "$TARBALL"
           else
-            gh release create "$TAG" --title "Release $TAG" --notes "Release $TAG" "$TARBALL"
+            gh release create "$TAG" --title "Release $TAG" --generate-notes "$TARBALL"
           fi
 
       - name: Create versioned artifacthub-pkg.yml
