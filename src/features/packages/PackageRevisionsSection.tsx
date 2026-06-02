@@ -26,7 +26,7 @@ function RevisionDetailInner({ RevisionClass, name }: { RevisionClass: typeof Ku
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={revision} extraInfo={extraInfo} noDefaultActions />
+      <MainInfoSection resource={revision} extraInfo={extraInfo} noDefaultActions backLink={null} />
       {revision && <ConditionsTable resource={revision.jsonData} />}
     </Box>
   );

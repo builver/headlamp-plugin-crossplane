@@ -187,7 +187,7 @@ function ClaimDetailInner({ xrd, namespace, name }: ClaimDetailInnerProps) {
 
   return (
     <>
-      <MainInfoSection resource={item} extraInfo={extraInfo} />
+      <MainInfoSection resource={item} extraInfo={extraInfo} backLink={null} />
       {item && <ConditionsTable resource={item.jsonData} />}
     </>
   );

@@ -160,6 +160,7 @@ export function XRDetailInner({ xrd, name, namespace }: XRDetailInnerProps) {
         resource={item}
         extraInfo={extraInfo}
         actions={item ? [<PauseAction item={item} crd={xrd} />] : []}
+        backLink={null}
       />
       {item && (
         <>

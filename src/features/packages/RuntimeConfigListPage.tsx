@@ -271,6 +271,7 @@ export function RuntimeConfigDetailInner({ name }: { name: string }) {
         extraInfo={extraInfo}
         actions={actions}
         noDefaultActions
+        backLink={null}
       />
     </Box>
   );

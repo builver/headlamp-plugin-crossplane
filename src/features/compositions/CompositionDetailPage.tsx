@@ -134,7 +134,7 @@ export function CompositionDetailPage({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={comp} extraInfo={extraInfo} />
+      <MainInfoSection resource={comp} extraInfo={extraInfo} backLink={null} />
       {comp && <ConditionsTable resource={comp.jsonData} />}
       {pipeline.length > 0 && (
         <SectionBox title="Pipeline">

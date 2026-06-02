@@ -73,7 +73,7 @@ function UsageDetailInner({ item }: { item: any }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={item} extraInfo={extraInfo} />
+      <MainInfoSection resource={item} extraInfo={extraInfo} backLink={null} />
     </Box>
   );
 }
@@ -186,6 +186,7 @@ export function UsageDetailPage() {
               ]
             : []
         }
+        backLink={null}
       />
     </Box>
   );
@@ -225,6 +226,7 @@ export function ClusterUsageDetailPage() {
               ]
             : []
         }
+        backLink={null}
       />
     </Box>
   );

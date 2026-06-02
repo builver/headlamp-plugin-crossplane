@@ -36,7 +36,7 @@ export function XRDDetailPage() {
 
   return (
     <>
-      <MainInfoSection resource={xrd} extraInfo={extraInfo} />
+      <MainInfoSection resource={xrd} extraInfo={extraInfo} backLink={null} />
       {xrd && <ConditionsTable resource={xrd.jsonData} />}
     </>
   );

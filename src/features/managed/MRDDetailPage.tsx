@@ -29,7 +29,7 @@ export function MRDDetailPage() {
 
   return (
     <>
-      <MainInfoSection resource={mrd} extraInfo={extraInfo} />
+      <MainInfoSection resource={mrd} extraInfo={extraInfo} backLink={null} />
       {mrd && <ConditionsTable resource={mrd.jsonData} />}
     </>
   );

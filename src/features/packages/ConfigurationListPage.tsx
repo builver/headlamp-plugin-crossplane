@@ -206,7 +206,13 @@ export function ConfigurationDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={config} extraInfo={extraInfo} actions={actions} noDefaultActions />
+      <MainInfoSection
+        resource={config}
+        extraInfo={extraInfo}
+        actions={actions}
+        noDefaultActions
+        backLink={null}
+      />
       {config && <ConditionsTable resource={config.jsonData} />}
       {config && (
         <PackageRevisionsSection

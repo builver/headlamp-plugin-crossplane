@@ -65,7 +65,13 @@ export function ProviderDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={provider} extraInfo={extraInfo} actions={actions} noDefaultActions />
+      <MainInfoSection
+        resource={provider}
+        extraInfo={extraInfo}
+        actions={actions}
+        noDefaultActions
+        backLink={null}
+      />
       {provider && <ConditionsTable resource={provider.jsonData} />}
       {provider && (
         <PackageRevisionsSection

@@ -207,6 +207,7 @@ export function ImageConfigDetailInner({ name }: { name: string }) {
         extraInfo={extraInfo}
         actions={actions}
         noDefaultActions
+        backLink={null}
       />
     </Box>
   );

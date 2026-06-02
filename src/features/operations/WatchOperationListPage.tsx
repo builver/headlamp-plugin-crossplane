@@ -81,7 +81,7 @@ export function WatchOperationDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={item} extraInfo={extraInfo} />
+      <MainInfoSection resource={item} extraInfo={extraInfo} backLink={null} />
       {item && <ConditionsTable resource={item} />}
     </Box>
   );

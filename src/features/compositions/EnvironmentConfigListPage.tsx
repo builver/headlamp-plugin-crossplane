@@ -78,7 +78,7 @@ export function EnvironmentConfigDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={item} extraInfo={extraInfo} />
+      <MainInfoSection resource={item} extraInfo={extraInfo} backLink={null} />
       {dataYaml && (
         <Box mt={2}>
           <DataField label="data.yaml" disableLabel value={dataYaml} onChange={() => {}} />

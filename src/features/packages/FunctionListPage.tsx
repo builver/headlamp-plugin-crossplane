@@ -196,7 +196,13 @@ export function FunctionDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={fn} extraInfo={extraInfo} actions={actions} noDefaultActions />
+      <MainInfoSection
+        resource={fn}
+        extraInfo={extraInfo}
+        actions={actions}
+        noDefaultActions
+        backLink={null}
+      />
       {fn && <ConditionsTable resource={fn.jsonData} />}
       {fn && (
         <PackageRevisionsSection

@@ -150,6 +150,7 @@ export function MRDetailInner({ mrdName, name, namespace }: MRDetailInnerProps) 
         resource={item}
         extraInfo={extraInfo}
         actions={item && mrd ? [<PauseAction item={item} crd={mrd} />] : []}
+        backLink={null}
       />
       {item && <ConditionsTable resource={item.jsonData} />}
     </>

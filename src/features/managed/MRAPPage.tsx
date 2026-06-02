@@ -201,7 +201,13 @@ export function MRAPDetailInner({ name }: { name: string }) {
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={mrap} extraInfo={extraInfo} actions={actions} noDefaultActions />
+      <MainInfoSection
+        resource={mrap}
+        extraInfo={extraInfo}
+        actions={actions}
+        noDefaultActions
+        backLink={null}
+      />
       {mrap && <ConditionsTable resource={mrap.jsonData} />}
       <SectionBox title="Activated Managed Resources">
         <Table

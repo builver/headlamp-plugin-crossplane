@@ -134,7 +134,7 @@ export function ProviderConfigDetailInner({
 
   return (
     <Box pb={9}>
-      <MainInfoSection resource={realItem} extraInfo={extraInfo} noDefaultActions />
+      <MainInfoSection resource={realItem} extraInfo={extraInfo} noDefaultActions backLink={null} />
       {realItem && <ConditionsTable resource={realItem.jsonData} />}
       {specYaml && (
         <SectionBox title={<Typography variant="subtitle1">Spec</Typography>}>
