@@ -5,7 +5,6 @@ import {
   EditorDialog,
 } from '@kinvolk/headlamp-plugin/lib/components/common';
 import {
-  Alert,
   Box,
   Button,
   Dialog,
@@ -13,18 +12,56 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material';
-import { ReactNode, useCallback, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useState } from 'react';
 
-function EditorPanel({ item, title, onDone }: { item: any; title: string; onDone: () => void }) {
+function EditorPanel({
+  initialItem,
+  title,
+  activityId,
+  onApplySuccess,
+}: {
+  initialItem: any;
+  title: string;
+  activityId: string;
+  onApplySuccess?: () => void;
+}) {
+  // Mount EditorDialog with `null` first so its internal originalCodeRef
+  // settles on the placeholder baseline; then push the real item via
+  // treatItemChangesAsEdits so Save & Apply enables immediately. Without
+  // this, original === code on first mount and the button stays disabled
+  // until the user makes a no-op edit.
+  const [item, setItem] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    setItem(initialItem);
+  }, [initialItem]);
+
+  const handleSave = useCallback(
+    async (objects: any) => {
+      const arr = Array.isArray(objects) ? objects : [objects];
+      try {
+        await Promise.all(arr.map(o => apply(o)));
+        onApplySuccess?.();
+        Activity.close(activityId);
+      } catch (e: any) {
+        setErrorMessage(e?.message ?? 'Failed to apply resource');
+      }
+    },
+    [activityId, onApplySuccess]
+  );
+
   return (
     <EditorDialog
       noDialog
-      item={item}
       open
       setOpen={() => {}}
-      onClose={onDone}
+      item={item}
+      onClose={() => Activity.close(activityId)}
+      onSave={handleSave}
       saveLabel="Apply"
+      treatItemChangesAsEdits
+      allowToHideManagedFields
       errorMessage={errorMessage}
       onEditorChanged={() => setErrorMessage('')}
       title={title}
@@ -34,26 +71,38 @@ function EditorPanel({ item, title, onDone }: { item: any; title: string; onDone
 }
 
 function launchYamlEditor(
-  item: any,
+  initialItem: any,
   title: string,
-  options?: { activityId?: string; cluster?: string; location?: 'split-left' | 'split-right' },
+  options?: {
+    activityId?: string;
+    cluster?: string;
+    location?: 'split-left' | 'split-right';
+    onSuccess?: () => void;
+  }
 ) {
-  const existingId = options?.activityId;
-  if (existingId) {
-    Activity.update(existingId, {
+  const id = options?.activityId ?? `yaml-editor-${Date.now()}`;
+  const content = (
+    <EditorPanel
+      initialItem={initialItem}
+      title={title}
+      activityId={id}
+      onApplySuccess={options?.onSuccess}
+    />
+  );
+  if (options?.activityId) {
+    Activity.update(options.activityId, {
       title,
       cluster: options?.cluster,
-      content: <EditorPanel item={item} title={title} onDone={() => Activity.close(existingId)} />,
+      content,
     });
   } else {
-    const id = `yaml-editor-${Date.now()}`;
     Activity.launch({
       id,
       title,
       hideTitleInHeader: true,
       location: options?.location ?? 'split-right',
       icon: <Icon icon="mdi:code-braces" width="100%" height="100%" />,
-      content: <EditorPanel item={item} title={title} onDone={() => Activity.close(id)} />,
+      content,
     });
   }
 }
@@ -71,11 +120,9 @@ interface ResourceHelperBaseProps {
   canSubmit: boolean;
   /** Called after the dialog closes (both submit and cancel). Use to reset form state. */
   onReset?: () => void;
-  /** Called after a successful apply. */
+  /** Called after a successful apply from inside the YAML editor. */
   onSuccess?: () => void;
   children: ReactNode;
-  /** Override the submit button label. Defaults to "Create" / "Save" based on mode. */
-  submitLabel?: string;
 }
 
 interface ResourceHelperDialogProps extends ResourceHelperBaseProps {
@@ -95,77 +142,41 @@ export function ResourceHelperDialog({
   onReset,
   onSuccess,
   children,
-  submitLabel: submitLabelOverride,
   maxWidth = 'md',
 }: ResourceHelperDialogProps) {
   const isEdit = !!existing;
   const title = titleOverride ?? (isEdit ? `Edit ${resourceName}` : `Create ${resourceName}`);
-  const submitLabel = submitLabelOverride ?? (isEdit ? 'Save' : 'Create');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const resetAll = useCallback(() => {
-    setError(null);
-    onReset?.();
-  }, [onReset]);
 
   const handleClose = useCallback(() => {
-    resetAll();
+    onReset?.();
     onClose();
-  }, [resetAll, onClose]);
+  }, [onReset, onClose]);
 
-  const handleOpenNativeEditor = useCallback(() => {
-    launchYamlEditor(buildItem(), title);
-  }, [buildItem, title]);
-
-  const handleSubmit = useCallback(async () => {
-    setSubmitting(true);
-    setError(null);
-    try {
-      await apply(buildItem() as any);
-      onSuccess?.();
-      handleClose();
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to apply resource');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [buildItem, handleClose, onSuccess]);
+  const handleVerify = useCallback(() => {
+    launchYamlEditor(buildItem(), title, { onSuccess });
+    handleClose();
+  }, [buildItem, title, onSuccess, handleClose]);
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth={maxWidth} fullWidth>
-        <DialogTitle>
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <span>{title}</span>
-            <Button size="small" onClick={handleOpenNativeEditor}>
-              YAML ↗
-            </Button>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Box display="flex" flexDirection="column" gap={3} mt={1}>
-            {children}
-            {error && <Alert severity="error">{error}</Alert>}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            variant="contained"
-            disabled={!canSubmit || submitting}
-          >
-            {submitting ? 'Applying…' : submitLabel}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DialogTitle>{title}</DialogTitle>
+      <DialogContent>
+        <Box display="flex" flexDirection="column" gap={3} mt={1}>
+          {children}
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleClose}>Cancel</Button>
+        <Button onClick={handleVerify} variant="contained" disabled={!canSubmit}>
+          Verify
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
 interface ResourceHelperPanelProps extends ResourceHelperBaseProps {
-  /** Called after successful submit or cancel. Used to close the Activity tab. */
+  /** Called after the wizard's Cancel button is clicked. Used to close the Activity tab. */
   onDone?: () => void;
   /** Activity ID — when provided, the YAML editor replaces the wizard panel in the same tab. */
   activityId?: string;
@@ -184,39 +195,24 @@ export function ResourceHelperPanel({
   buildItem,
   canSubmit,
   onReset,
+  onSuccess,
   children,
-  submitLabel: submitLabelOverride,
   onDone,
   activityId,
   cluster,
 }: ResourceHelperPanelProps) {
   const isEdit = !!existing;
   const title = titleOverride ?? (isEdit ? `Edit ${resourceName}` : `Create ${resourceName}`);
-  const submitLabel = submitLabelOverride ?? (isEdit ? 'Save' : 'Create');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleOpenNativeEditor = useCallback(() => {
+  const handleVerify = useCallback(() => {
     launchYamlEditor(buildItem(), title, {
       activityId,
       cluster,
       location: activityId ? undefined : 'split-left',
+      onSuccess,
     });
-  }, [buildItem, title, activityId, cluster]);
-
-  const handleSubmit = useCallback(async () => {
-    setSubmitting(true);
-    setError(null);
-    try {
-      await apply(buildItem() as any);
-      onReset?.();
-      onDone?.();
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to apply resource');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [buildItem, onReset, onDone]);
+    onReset?.();
+  }, [buildItem, title, activityId, cluster, onSuccess, onReset]);
 
   const handleCancel = useCallback(() => {
     onReset?.();
@@ -230,13 +226,9 @@ export function ResourceHelperPanel({
           <Box component="h2" m={0} fontSize="1.25rem" fontWeight="medium">
             {title}
           </Box>
-          <Button size="small" onClick={handleOpenNativeEditor}>
-            YAML ↗
-          </Button>
         </Box>
         <Box display="flex" flexDirection="column" gap={3}>
           {children}
-          {error && <Alert severity="error">{error}</Alert>}
         </Box>
       </Box>
       <Box
@@ -247,15 +239,9 @@ export function ResourceHelperPanel({
         borderTop={1}
         borderColor="divider"
       >
-        <Button onClick={handleCancel} disabled={submitting}>
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={!canSubmit || submitting}
-        >
-          {submitting ? 'Applying…' : submitLabel}
+        <Button onClick={handleCancel}>Cancel</Button>
+        <Button onClick={handleVerify} variant="contained" disabled={!canSubmit}>
+          Verify
         </Button>
       </Box>
     </Box>
