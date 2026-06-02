@@ -11,7 +11,6 @@ import { Accordion, AccordionDetails, AccordionSummary, Box, Chip, Link as MuiLi
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { linkSx } from '../../components/ActivityNameLink';
 import { ReadyStatus } from '../../components/ConditionStatus';
-import { Provider } from '../../resources';
 import { ConfigCRDInfo, getOrCreateClass } from '../../resources/crdClassCache';
 import { ProviderConfigDetailInner } from './ProviderConfigDetailPage';
 
@@ -36,6 +35,11 @@ function useProviderConfigCRDs(): {
         .filter((v: any) => v.served !== false)
         .map((v: any) => ({ group, version: v.name }));
 
+      const ownerProvider = (crd.metadata.ownerReferences ?? []).find(
+        (o: any) => o.kind === 'Provider'
+      )?.name;
+      if (!ownerProvider) continue;
+
       configs.push({
         crdName: crd.metadata.name,
         group,
@@ -43,6 +47,7 @@ function useProviderConfigCRDs(): {
         plural,
         versions,
         isNamespaced: spec.scope === 'Namespaced',
+        ownerProvider,
       });
     }
 
@@ -170,27 +175,17 @@ function ProviderAccordion({ provider, cfgs }: { provider: string; cfgs: ConfigC
 
 export function ProviderConfigListPage() {
   const { configs, loading } = useProviderConfigCRDs();
-  const [providers] = Provider.useList();
 
   const byProvider = useMemo(() => {
     const map = new Map<string, ConfigCRDInfo[]>();
     for (const cfg of configs) {
-      let providerName: string | null = null;
-      if (providers) {
-        const groupFirst = cfg.group.split('.')[0];
-        if (groupFirst) {
-          providerName = providers.find(
-            (p) => (p.metadata.name as string).includes(groupFirst)
-          )?.metadata.name as string | undefined ?? null;
-        }
-      }
-      const key = providerName ?? cfg.group;
+      const key = cfg.ownerProvider!;
       const list = map.get(key) ?? [];
       list.push(cfg);
       map.set(key, list);
     }
     return map;
-  }, [providers, configs]);
+  }, [configs]);
 
   if (loading) {
     return (

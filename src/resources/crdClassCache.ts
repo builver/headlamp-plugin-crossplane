@@ -7,6 +7,8 @@ export interface ConfigCRDInfo {
   plural: string;
   versions: Array<{ group: string; version: string }>;
   isNamespaced: boolean;
+  /** Name of the owning Crossplane Provider, taken from the CRD's ownerReferences. */
+  ownerProvider?: string | null;
 }
 
 /** Stub class so useList/useGet can be called unconditionally before the real CRD resolves. */
