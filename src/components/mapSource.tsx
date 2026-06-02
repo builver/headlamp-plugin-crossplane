@@ -2,12 +2,10 @@ import './map/glances';
 import { Icon } from '@iconify/react';
 import { K8s, registerMapSource } from '@kinvolk/headlamp-plugin/lib';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
-import { useEffect, useState } from 'react';
 import { CrossplaneFunction, FunctionRevision, getXRScope, makeXRClass, Provider, ProviderRevision, XRScope } from '../resources';
-import { expandGraphAsync } from './map/bfsExpansion';
 import { FunctionMapDetail, FunctionRevisionMapDetail, ProviderMapDetail, ProviderRevisionMapDetail } from './map/detailComponents';
 import { makePackageSource } from './map/packageGraph';
-import { GraphState } from './map/types';
+import { useXrTreeGraph } from './map/useXrTreeGraph';
 
 export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
   // Build lookup structures from XRDs
@@ -40,31 +38,16 @@ export function registerCrossplaneMapSource(xrds: KubeObject[]): void {
       label: kind,
       icon: <Icon icon="mdi:layers-outline" width="100%" height="100%" />,
       useData() {
-        const [graph, setGraph] = useState<GraphState | null>(null);
         const [items] = DynClass.useList();
         const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList();
-
-        useEffect(() => {
-          if (!items) return;
-          const abort = new AbortController();
-          setGraph(null);
-
-          expandGraphAsync(
-            items,
-            scope,
-            xrdGroupSet,
-            claimKindSet,
-            xrdScopeMap,
-            crds ?? null,
-            abort.signal,
-            setGraph,
-          );
-
-          return () => abort.abort();
-          // eslint-disable-next-line react-hooks/exhaustive-deps
-        }, [items, crds]);
-
-        return graph;
+        return useXrTreeGraph(
+          items,
+          scope,
+          xrdGroupSet,
+          claimKindSet,
+          xrdScopeMap,
+          crds ?? null,
+        );
       },
     };
   });
