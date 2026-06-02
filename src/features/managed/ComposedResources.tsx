@@ -1,19 +1,61 @@
-import { ApiProxy, K8s } from '@kinvolk/headlamp-plugin/lib';
-import { DateLabel, Link, Table } from '@kinvolk/headlamp-plugin/lib/components/common';
+import { K8s } from '@kinvolk/headlamp-plugin/lib';
+import { DateLabel, Link } from '@kinvolk/headlamp-plugin/lib/components/common';
 import { KubeObject } from '@kinvolk/headlamp-plugin/lib/k8s/cluster';
-import { useEffect, useRef, useState } from 'react';
+import { Box, Table, TableBody, TableCell, TableHead, TableRow } from '@mui/material';
+import { useMemo } from 'react';
 import { ReadyStatus, SyncedStatus } from '../../components/ConditionStatus';
-import { getGroupVersion, lookupPlural } from '../../components/map/apiPaths';
+import { getGroupVersion } from '../../components/map/apiPaths';
 import { ResourceRef } from '../../components/map/types';
 import { XRScope } from '../../resources';
+import { ConfigCRDInfo, getOrCreateClass } from '../../resources/crdClassCache';
 
-function skeletonRow(ref: ResourceRef, resolvedNs: string | undefined, plural: string | undefined) {
-  return {
-    apiVersion: ref.apiVersion,
+interface RefMeta {
+  ref: ResourceRef;
+  resolvedNs?: string;
+  builtinCls: any | null;
+  crdInfo: ConfigCRDInfo | null;
+}
+
+function refKey(ref: ResourceRef): string {
+  return `${ref.apiVersion}/${ref.kind}/${ref.namespace ?? ''}/${ref.name}`;
+}
+
+function buildRefMeta(
+  ref: ResourceRef,
+  scope: XRScope,
+  xrNamespace: string | undefined,
+  crds: KubeObject[],
+): RefMeta {
+  const resolvedNs =
+    scope === 'Namespaced' ? (ref.namespace ?? xrNamespace) : ref.namespace;
+
+  const builtinCls =
+    Object.values(K8s.ResourceClasses).find(
+      cls => (cls as any).kind === ref.kind && (cls as any).apiVersion === ref.apiVersion,
+    ) ?? null;
+  if (builtinCls) return { ref, resolvedNs, builtinCls, crdInfo: null };
+
+  const [group, version] = getGroupVersion(ref.apiVersion);
+  const crd = crds.find(
+    c =>
+      c.jsonData?.spec?.group === group &&
+      c.jsonData?.spec?.names?.kind === ref.kind,
+  );
+  if (!crd) return { ref, resolvedNs, builtinCls: null, crdInfo: null };
+
+  const spec = crd.jsonData?.spec ?? {};
+  const versions = (spec.versions ?? [])
+    .filter((v: any) => v.served !== false)
+    .map((v: any) => ({ group, version: v.name }));
+  const crdInfo: ConfigCRDInfo = {
+    crdName: crd.metadata.name,
+    group,
     kind: ref.kind,
-    metadata: { name: ref.name, namespace: resolvedNs },
-    _plural: plural,
+    plural: spec.names?.plural ?? '',
+    versions: versions.length ? versions : [{ group, version }],
+    isNamespaced: spec.scope === 'Namespaced',
   };
+  return { ref, resolvedNs, builtinCls: null, crdInfo };
 }
 
 interface ComposedResourcesProps {
@@ -21,158 +63,140 @@ interface ComposedResourcesProps {
   scope: XRScope;
 }
 
-/**
- * Displays a table of composed resources for a given XR.
- *
- * Reads resourceRefs from the XR spec (v1: spec.resourceRefs,
- * v2: spec.crossplane.resourceRefs), looks up their plural names via CRD
- * list, fetches each resource, and renders name, kind, Ready, Synced, and age.
- */
 export function ComposedResources({ item, scope }: ComposedResourcesProps) {
-  const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList() as [KubeObject[] | null, any];
-  const [resources, setResources] = useState<any[]>([]);
+  const [crds] = K8s.ResourceClasses.CustomResourceDefinition.useList() as [
+    KubeObject[] | null,
+    any,
+  ];
 
-  // Stable key so the effect only fires when the actual ref list changes,
-  // not on every watch-triggered re-render of crds.
-  const refs: ResourceRef[] =
-    scope === 'LegacyCluster'
-      ? (item.jsonData?.spec?.resourceRefs ?? [])
-      : (item.jsonData?.spec?.crossplane?.resourceRefs ?? []);
-  const refsKey = refs.map(r => `${r.apiVersion}/${r.kind}/${r.name}`).join('|');
-
-  // Track which (refsKey, crdNames) combination we've already fetched so that
-  // rapid crds watch updates don't re-fire the fetch unnecessarily.
-  // Uses CRD names (not just length) to detect when the installed CRD set changes.
-  const fetchedFor = useRef('');
-
-  useEffect(() => {
-    if (!crds || refs.length === 0) return;
-
-    const crdNames = crds.map(c => c.metadata.name).join(',');
-    const fetchKey = `${refsKey}::${crdNames}`;
-    if (fetchedFor.current === fetchKey) return;
-    fetchedFor.current = fetchKey;
-
-    let mounted = true;
-    const xrNamespace = item.metadata.namespace;
-
-    Promise.allSettled(
-      refs.map(async ref => {
-        // For Namespaced-scope XRs the ref.namespace field is often unset;
-        // composed resources inherit the XR's own namespace in that case.
-        const resolvedNs =
-          scope === 'Namespaced' ? (ref.namespace ?? xrNamespace) : ref.namespace;
-
-        const plural = lookupPlural(ref.apiVersion, ref.kind, crds);
-        const [group, version] = getGroupVersion(ref.apiVersion);
-        const base = group ? `/apis/${group}/${version}` : `/api/${version}`;
-
-        if (!plural) {
-          return skeletonRow(ref, resolvedNs, undefined);
-        }
-
-        const path = resolvedNs
-          ? `${base}/namespaces/${resolvedNs}/${plural}/${ref.name}`
-          : `${base}/${plural}/${ref.name}`;
-
-        try {
-          const raw = await ApiProxy.request(path);
-          return { ...raw, _plural: plural };
-        } catch {
-          return skeletonRow(ref, resolvedNs, plural);
-        }
-      })
-    ).then(results => {
-      if (!mounted) return;
-      setResources(results.flatMap(r => (r.status === 'fulfilled' ? [r.value] : [])));
-    });
-
-    return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refsKey, crds]);
+  const refMetas = useMemo(() => {
+    const refs: ResourceRef[] =
+      scope === 'LegacyCluster'
+        ? (item.jsonData?.spec?.resourceRefs ?? [])
+        : (item.jsonData?.spec?.crossplane?.resourceRefs ?? []);
+    return refs.map(ref =>
+      buildRefMeta(ref, scope, item.metadata.namespace, crds ?? []),
+    );
+  }, [item.jsonData, scope, crds]);
 
   return (
-    <Table
-      data={resources}
-      columns={[
-        {
-          header: 'Name',
-          accessorKey: 'metadata.name',
-          Cell: ({ row: { original: r } }: any) => {
-            if (!r._plural) return r.metadata.name;
-
-            // Native K8s resources (Deployment, Service, etc.) use their own detail route
-            const builtin = Object.values(K8s.ResourceClasses).find(
-              cls => cls.kind === r.kind && cls.apiVersion === (r.apiVersion ?? '')
-            );
-            if (builtin) {
-              return (
-                <Link
-                  routeName={builtin.kind}
-                  params={{
-                    name: r.metadata.name,
-                    namespace: r.metadata.namespace || '-',
-                  }}
-                >
-                  {r.metadata.name}
-                </Link>
-              );
-            }
-
-            // Custom resources use the CRD detail route
-            const [group] = getGroupVersion(r.apiVersion ?? '');
-            const crdFullName = group ? `${r._plural}.${group}` : r._plural;
-            return (
-              <Link
-                routeName="customresource"
-                params={{
-                  crName: r.metadata.name,
-                  crd: crdFullName,
-                  namespace: r.metadata.namespace || '-',
-                }}
-              >
-                {r.metadata.name}
-              </Link>
-            );
-          },
-        },
-        {
-          header: 'Namespace',
-          accessorFn: (r: any) => r.metadata?.namespace ?? '',
-          Cell: ({ cell }: any) =>
-            cell.getValue() ? (
-              <Link routeName="namespace" params={{ name: cell.getValue() }}>
-                {cell.getValue()}
-              </Link>
-            ) : null,
-        },
-        {
-          header: 'Kind',
-          accessorFn: (r: any) => r.kind ?? '',
-        },
-        {
-          header: 'Ready',
-          accessorFn: (r: any) => r,
-          Cell: ({ row: { original: r } }: any) => (
-            <ReadyStatus item={{ jsonData: r } as unknown as KubeObject} />
-          ),
-        },
-        {
-          header: 'Synced',
-          accessorFn: (r: any) => r,
-          Cell: ({ row: { original: r } }: any) => (
-            <SyncedStatus item={{ jsonData: r } as unknown as KubeObject} />
-          ),
-        },
-        {
-          header: 'Age',
-          accessorFn: (r: any) => -new Date(r.metadata?.creationTimestamp).getTime(),
-          Cell: ({ row: { original: r } }: any) =>
-            r.metadata?.creationTimestamp ? (
-              <DateLabel date={r.metadata.creationTimestamp} format="mini" />
-            ) : null,
-        },
-      ]}
-    />
+    <Box sx={{ overflowX: 'auto' }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Name</TableCell>
+            <TableCell>Namespace</TableCell>
+            <TableCell>Kind</TableCell>
+            <TableCell>Ready</TableCell>
+            <TableCell>Synced</TableCell>
+            <TableCell>Age</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {refMetas.map(meta => {
+            const key = refKey(meta.ref);
+            if (meta.builtinCls) return <BuiltinRow key={key} meta={meta} />;
+            if (meta.crdInfo) return <CustomRow key={key} meta={meta} />;
+            return <UnresolvedRow key={key} meta={meta} />;
+          })}
+        </TableBody>
+      </Table>
+    </Box>
   );
+}
+
+function BuiltinRow({ meta }: { meta: RefMeta }) {
+  const [item] = meta.builtinCls!.useGet(meta.ref.name, meta.resolvedNs) as [
+    KubeObject | null,
+    any,
+  ];
+  return <RowCells meta={meta} item={item} kind="builtin" />;
+}
+
+function CustomRow({ meta }: { meta: RefMeta }) {
+  const cls = getOrCreateClass(meta.crdInfo!);
+  const [item] = cls.useGet(meta.ref.name, meta.resolvedNs) as [
+    KubeObject | null,
+    any,
+  ];
+  return <RowCells meta={meta} item={item} kind="custom" />;
+}
+
+function UnresolvedRow({ meta }: { meta: RefMeta }) {
+  return <RowCells meta={meta} item={null} kind="unresolved" />;
+}
+
+function RowCells({
+  meta,
+  item,
+  kind,
+}: {
+  meta: RefMeta;
+  item: KubeObject | null;
+  kind: 'builtin' | 'custom' | 'unresolved';
+}) {
+  const jsonData = item?.jsonData;
+  return (
+    <TableRow hover>
+      <TableCell>
+        <NameLink meta={meta} kind={kind} />
+      </TableCell>
+      <TableCell>
+        {meta.resolvedNs ? (
+          <Link routeName="namespace" params={{ name: meta.resolvedNs }}>
+            {meta.resolvedNs}
+          </Link>
+        ) : null}
+      </TableCell>
+      <TableCell>{meta.ref.kind}</TableCell>
+      <TableCell>
+        <ReadyStatus item={{ jsonData: jsonData ?? {} } as unknown as KubeObject} />
+      </TableCell>
+      <TableCell>
+        <SyncedStatus item={{ jsonData: jsonData ?? {} } as unknown as KubeObject} />
+      </TableCell>
+      <TableCell>
+        {jsonData?.metadata?.creationTimestamp ? (
+          <DateLabel date={jsonData.metadata.creationTimestamp} format="mini" />
+        ) : null}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function NameLink({
+  meta,
+  kind,
+}: {
+  meta: RefMeta;
+  kind: 'builtin' | 'custom' | 'unresolved';
+}) {
+  if (kind === 'builtin') {
+    return (
+      <Link
+        routeName={meta.ref.kind}
+        params={{ name: meta.ref.name, namespace: meta.resolvedNs || '-' }}
+      >
+        {meta.ref.name}
+      </Link>
+    );
+  }
+  if (kind === 'custom' && meta.crdInfo) {
+    const crdFullName = meta.crdInfo.group
+      ? `${meta.crdInfo.plural}.${meta.crdInfo.group}`
+      : meta.crdInfo.plural;
+    return (
+      <Link
+        routeName="customresource"
+        params={{
+          crName: meta.ref.name,
+          crd: crdFullName,
+          namespace: meta.resolvedNs || '-',
+        }}
+      >
+        {meta.ref.name}
+      </Link>
+    );
+  }
+  return <>{meta.ref.name}</>;
 }
